@@ -2,6 +2,8 @@
 import { ref, computed, h } from "vue";
 
 import TimelineRuler from "@/components/editor/TimelineRuler.vue";
+import { useAntdApp } from "@/composables/useAntdApp";
+const { message, notification, modal } = useAntdApp();
 import {
   AudioLines,
   Captions,

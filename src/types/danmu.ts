@@ -4,8 +4,8 @@ export type DanmuType = 'text' | 'button' | 'path'
 export interface DanmuBase {
   id: string
   type: DanmuType
-  x: number | string // 支持 50 或 '50%'
-  y: number | string // 支持 50 或 '50%'
+  x: number | string
+  y: number | string
   zIndex?: number
   durationMs?: number
   scale?: number
@@ -15,7 +15,7 @@ export interface DanmuBase {
   opacity?: number
   anchorX?: number // 0~1
   anchorY?: number // 0~1
-  parentId?: string
+  parentId?: string | null
 }
 
 export interface TextDanmu extends DanmuBase {
@@ -25,7 +25,7 @@ export interface TextDanmu extends DanmuBase {
   fontFamily?: string
   bold?: number | boolean
   textShadow?: number
-  color?: number // 0xRRGGBB
+  color?: string // 0xRRGGBB
   strokeWidth?: number
   strokeColor?: number // 0xRRGGBB
   textColor?: number // 0xRRGGBB（可选，备用）
@@ -39,8 +39,8 @@ export interface ButtonDanmu extends DanmuBase {
   fillColor?: number
   fillAlpha?: number // 0~1
   target?:
-    | { av: { av: number; page?: number; timeMs?: number } }
-    | { bangumi: { seasonId: number; episodeId?: number; timeMs?: number } }
+  | { av: { av: number; page?: number; timeMs?: number } }
+  | { bangumi: { seasonId: number; episodeId?: number; timeMs?: number } }
 }
 
 export interface PathDanmu extends DanmuBase {

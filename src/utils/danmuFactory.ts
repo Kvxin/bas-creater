@@ -43,7 +43,7 @@ export function createTextDanmu(ov: Partial<TextDanmu> = {}): TextDanmu {
     fontFamily: ov.fontFamily ?? '黑体',
     bold: ov.bold ?? 0,
     textShadow: ov.textShadow ?? 0,
-    color: ov.color ?? 0x00a1d6,
+    color: ov.color ?? "0xffffff",
     strokeWidth: ov.strokeWidth ?? 1,
     strokeColor: ov.strokeColor ?? 0xffffff,
     textColor: ov.textColor,
