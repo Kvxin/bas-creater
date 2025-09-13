@@ -1,0 +1,21 @@
+{
+  "files": [],
+  "vueCompilerOptions": {
+      "globalTypesPath": "./types/shadcn-vue.d.ts"
+  },
+  "exclude": ["node_modules"],
+  "references": [
+    {
+      "path": "./tsconfig.node.json"
+    },
+    {
+      "path": "./tsconfig.app.json"
+    }
+  ],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  }
+}

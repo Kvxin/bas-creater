@@ -1,0 +1,198 @@
+普通的bas弹幕
+代码：
+def text c {
+    content = "bilibili"
+    fontSize = 10%
+    x = 50%
+    y = 50%
+    anchorX = 0.5
+    anchorY = 0.5
+}
+解析结果
+{"defs":[{"type":"DefText","obj_type":"text","name":"c","attrs":{"content":"bilibili","alpha":{"numType":"number","value":1},"color":16777215,"anchorX":{"numType":"number","value":0.5},"anchorY":{"numType":"number","value":0.5},"fontSize":{"numType":"percent","value":10},"fontFamily":"SimHei","bold":{"numType":"number","value":1},"textShadow":{"numType":"number","value":1},"strokeWidth":{"numType":"number","value":0},"strokeColor":16777215,"rotateX":{"numType":"number","value":0},"rotateY":{"numType":"number","value":0},"rotateZ":{"numType":"number","value":0},"x":{"numType":"percent","value":50},"y":{"numType":"percent","value":50},"zIndex":{"numType":"number","value":0},"scale":{"numType":"number","value":1}},"_reg_order":0}],"sets":[]}
+
+
+定位：
+def text tl {
+    content = "左上"
+    fontSize = 5%
+    x = 0
+    y = 0
+    anchorX = 0
+    anchorY = 0
+}
+def text tr {
+    content = "右上"
+    fontSize = 5%
+    x = 100%
+    y = 0
+    anchorX = 1
+    anchorY = 0
+}
+def text bl {
+    content = "左下"
+    fontSize = 5%
+    x = 0
+    y = 100%
+    anchorX = 0
+    anchorY = 1
+}
+def text br {
+    content = "右下"
+    fontSize = 5%
+    x = 100%
+    y = 100%
+    anchorX = 1
+    anchorY = 1
+}
+def text c {
+    content = "BAS弹幕"
+    fontSize = 10%
+    x = 50%
+    y = 50%
+    anchorX = 0.5
+    anchorY = 0.5
+}
+set c {
+    y = 20%
+} 5s
+
+解析结果
+{"defs":[{"type":"DefText","obj_type":"text","name":"tl","attrs":{"content":"左上","alpha":{"numType":"number","value":1},"color":16777215,"anchorX":{"numType":"number","value":0},"anchorY":{"numType":"number","value":0},"fontSize":{"numType":"percent","value":5},"fontFamily":"SimHei","bold":{"numType":"number","value":1},"textShadow":{"numType":"number","value":1},"strokeWidth":{"numType":"number","value":0},"strokeColor":16777215,"rotateX":{"numType":"number","value":0},"rotateY":{"numType":"number","value":0},"rotateZ":{"numType":"number","value":0},"x":{"numType":"number","value":0},"y":{"numType":"number","value":0},"zIndex":{"numType":"number","value":0},"scale":{"numType":"number","value":1}},"_reg_order":0},{"type":"DefText","obj_type":"text","name":"tr","attrs":{"content":"右上","alpha":{"numType":"number","value":1},"color":16777215,"anchorX":{"numType":"number","value":1},"anchorY":{"numType":"number","value":0},"fontSize":{"numType":"percent","value":5},"fontFamily":"SimHei","bold":{"numType":"number","value":1},"textShadow":{"numType":"number","value":1},"strokeWidth":{"numType":"number","value":0},"strokeColor":16777215,"rotateX":{"numType":"number","value":0},"rotateY":{"numType":"number","value":0},"rotateZ":{"numType":"number","value":0},"x":{"numType":"percent","value":100},"y":{"numType":"number","value":0},"zIndex":{"numType":"number","value":0},"scale":{"numType":"number","value":1}},"_reg_order":1},{"type":"DefText","obj_type":"text","name":"bl","attrs":{"content":"左下","alpha":{"numType":"number","value":1},"color":16777215,"anchorX":{"numType":"number","value":0},"anchorY":{"numType":"number","value":1},"fontSize":{"numType":"percent","value":5},"fontFamily":"SimHei","bold":{"numType":"number","value":1},"textShadow":{"numType":"number","value":1},"strokeWidth":{"numType":"number","value":0},"strokeColor":16777215,"rotateX":{"numType":"number","value":0},"rotateY":{"numType":"number","value":0},"rotateZ":{"numType":"number","value":0},"x":{"numType":"number","value":0},"y":{"numType":"percent","value":100},"zIndex":{"numType":"number","value":0},"scale":{"numType":"number","value":1}},"_reg_order":2},{"type":"DefText","obj_type":"text","name":"br","attrs":{"content":"右下","alpha":{"numType":"number","value":1},"color":16777215,"anchorX":{"numType":"number","value":1},"anchorY":{"numType":"number","value":1},"fontSize":{"numType":"percent","value":5},"fontFamily":"SimHei","bold":{"numType":"number","value":1},"textShadow":{"numType":"number","value":1},"strokeWidth":{"numType":"number","value":0},"strokeColor":16777215,"rotateX":{"numType":"number","value":0},"rotateY":{"numType":"number","value":0},"rotateZ":{"numType":"number","value":0},"x":{"numType":"percent","value":100},"y":{"numType":"percent","value":100},"zIndex":{"numType":"number","value":0},"scale":{"numType":"number","value":1}},"_reg_order":3},{"type":"DefText","obj_type":"text","name":"c","attrs":{"content":"BAS弹幕","alpha":{"numType":"number","value":1},"color":16777215,"anchorX":{"numType":"number","value":0.5},"anchorY":{"numType":"number","value":0.5},"fontSize":{"numType":"percent","value":10},"fontFamily":"SimHei","bold":{"numType":"number","value":1},"textShadow":{"numType":"number","value":1},"strokeWidth":{"numType":"number","value":0},"strokeColor":16777215,"rotateX":{"numType":"number","value":0},"rotateY":{"numType":"number","value":0},"rotateZ":{"numType":"number","value":0},"x":{"numType":"percent","value":50},"y":{"numType":"percent","value":50},"zIndex":{"numType":"number","value":0},"scale":{"numType":"number","value":1}},"_reg_order":4}],"sets":[{"type":"Unit","duration":5000,"target_name":"c","attrs":{"y":{"numType":"percent","value":20}},"targetName":"c"}]}
+
+
+一个带有全部属性(带有父级)的文本对象：
+def text t {
+    content = "bilibili"
+    fontSize = 5%
+    fontFamily = "黑体"
+    x = 50%
+    y = 50%
+    alpha = 1
+    color = 0x00a1d6
+    textShadow = 0
+    bold = 1
+    rotateX = 0
+    rotateY = 0
+    rotateZ = 0
+    strokeWidth = 1
+    strokeColor = 0xffffff
+    anchorX = 0.5
+    anchorY = 0.5
+    zIndex = 3
+    duration = 5s
+}
+
+def text y {
+    content = "干杯"
+    parent = "t" //父级
+    fontSize = 2%
+    x = 100%
+    y = 100%
+}
+
+
+
+解析结果
+{"defs":[{"type":"DefText","obj_type":"text","name":"t","attrs":{"content":"bilibili","alpha":{"numType":"number","value":1},"color":41430,"anchorX":{"numType":"number","value":0.5},"anchorY":{"numType":"number","value":0.5},"fontSize":{"numType":"percent","value":5},"fontFamily":"黑体","bold":{"numType":"number","value":1},"textShadow":{"numType":"number","value":0},"strokeWidth":{"numType":"number","value":1},"strokeColor":16777215,"rotateX":{"numType":"number","value":0},"rotateY":{"numType":"number","value":0},"rotateZ":{"numType":"number","value":0},"x":{"numType":"percent","value":50},"y":{"numType":"percent","value":50},"zIndex":{"numType":"number","value":3},"scale":{"numType":"number","value":1},"duration":5000},"_reg_order":0},{"type":"DefText","obj_type":"text","name":"y","attrs":{"content":"干杯","alpha":{"numType":"number","value":1},"color":16777215,"anchorX":{"numType":"number","value":0},"anchorY":{"numType":"number","value":0},"fontSize":{"numType":"percent","value":2},"fontFamily":"SimHei","bold":{"numType":"number","value":1},"textShadow":{"numType":"number","value":1},"strokeWidth":{"numType":"number","value":0},"strokeColor":16777215,"rotateX":{"numType":"number","value":0},"rotateY":{"numType":"number","value":0},"rotateZ":{"numType":"number","value":0},"parent":"t","x":{"numType":"percent","value":100},"y":{"numType":"percent","value":100},"zIndex":{"numType":"number","value":0},"scale":{"numType":"number","value":1}},"_reg_order":1}],"sets":[]}
+
+
+简单的动画：
+def text t {
+  content = "bilibili"
+}
+set t {
+    x = 50%
+    y = 50%
+} 1s, "linear"
+
+解析结果
+{"defs":[{"type":"DefText","obj_type":"text","name":"t","attrs":{"content":"bilibili","alpha":{"numType":"number","value":1},"color":16777215,"anchorX":{"numType":"number","value":0},"anchorY":{"numType":"number","value":0},"fontSize":{"numType":"number","value":25},"fontFamily":"SimHei","bold":{"numType":"number","value":1},"textShadow":{"numType":"number","value":1},"strokeWidth":{"numType":"number","value":0},"strokeColor":16777215,"rotateX":{"numType":"number","value":0},"rotateY":{"numType":"number","value":0},"rotateZ":{"numType":"number","value":0},"x":{"numType":"number","value":0},"y":{"numType":"number","value":0},"zIndex":{"numType":"number","value":0},"scale":{"numType":"number","value":1}},"_reg_order":0}],"sets":[{"type":"Unit","duration":1000,"default_easing":{"type":"String","value":"linear"},"target_name":"t","attrs":{"x":{"numType":"percent","value":50},"y":{"numType":"percent","value":50}},"defaultEasing":"linear","targetName":"t"}]}
+
+
+
+串联动画：
+def text a {
+  content = "bilibili"
+}
+set a {
+    x = 50%
+    y = 50%
+} 1s
+then set a {
+    alpha = 0
+} 1s
+
+解析结果：
+{"defs":[{"type":"DefText","obj_type":"text","name":"a","attrs":{"content":"bilibili","alpha":{"numType":"number","value":1},"color":16777215,"anchorX":{"numType":"number","value":0},"anchorY":{"numType":"number","value":0},"fontSize":{"numType":"number","value":25},"fontFamily":"SimHei","bold":{"numType":"number","value":1},"textShadow":{"numType":"number","value":1},"strokeWidth":{"numType":"number","value":0},"strokeColor":16777215,"rotateX":{"numType":"number","value":0},"rotateY":{"numType":"number","value":0},"rotateZ":{"numType":"number","value":0},"x":{"numType":"number","value":0},"y":{"numType":"number","value":0},"zIndex":{"numType":"number","value":0},"scale":{"numType":"number","value":1}},"_reg_order":0}],"sets":[{"type":"Serial","items":[{"type":"Unit","duration":1000,"target_name":"a","attrs":{"x":{"numType":"percent","value":50},"y":{"numType":"percent","value":50}},"targetName":"a"},{"type":"Unit","duration":1000,"target_name":"a","attrs":{"alpha":{"numType":"number","value":0}},"targetName":"a"}]}]}
+
+并联动画：
+def text a {
+  content = "bilibili"
+}
+set a {
+    x = 50%
+    y = 50%
+} 1s
+set a {
+    alpha = 0
+} 1s
+
+解析结果
+{"defs":[{"type":"DefText","obj_type":"text","name":"a","attrs":{"content":"bilibili","alpha":{"numType":"number","value":1},"color":16777215,"anchorX":{"numType":"number","value":0},"anchorY":{"numType":"number","value":0},"fontSize":{"numType":"number","value":25},"fontFamily":"SimHei","bold":{"numType":"number","value":1},"textShadow":{"numType":"number","value":1},"strokeWidth":{"numType":"number","value":0},"strokeColor":16777215,"rotateX":{"numType":"number","value":0},"rotateY":{"numType":"number","value":0},"rotateZ":{"numType":"number","value":0},"x":{"numType":"number","value":0},"y":{"numType":"number","value":0},"zIndex":{"numType":"number","value":0},"scale":{"numType":"number","value":1}},"_reg_order":0}],"sets":[{"type":"Unit","duration":1000,"target_name":"a","attrs":{"x":{"numType":"percent","value":50},"y":{"numType":"percent","value":50}},"targetName":"a"},{"type":"Unit","duration":1000,"target_name":"a","attrs":{"alpha":{"numType":"number","value":0}},"targetName":"a"}]}
+
+
+path对象弹幕：
+def path p {
+  d = "M30.828,30.422 C30.564,30.423 30.297,30.446 30.036,30.418 C29.078,30.314 28.380,31.402 28.048,32.549 C27.749,33.582 26.614,34.110 25.592,34.004 C24.412,33.883 23.631,33.208 23.330,32.141 C23.149,31.496 22.602,30.996 22.000,31.000 C17.847Z"
+  viewBox="0 0 32 34"
+  x = 40%
+  y = 15%
+  borderWidth = 1
+  borderColor = 0xffffff
+  borderAlpha = 0.8
+  fillColor = 0x00a1d6
+  fillAlpha = 0.8
+  width = 20%
+  duration = 2s
+  zIndex = 1
+  scale = 0.8
+}
+
+解析结果：
+{"defs":[{"type":"DefPath","obj_type":"path","name":"p","attrs":{"d":"M30.828,30.422 C30.564,30.423 30.297,30.446 30.036,30.418 C29.078,30.314 28.380,31.402 28.048,32.549 C27.749,33.582 26.614,34.110 25.592,34.004 C24.412,33.883 23.631,33.208 23.330,32.141 C23.149,31.496 22.602,30.996 22.000,31.000 C17.847Z","viewBox":"0 0 32 34","borderColor":16777215,"borderAlpha":{"numType":"number","value":0.8},"borderWidth":{"numType":"number","value":1},"fillColor":41430,"fillAlpha":{"numType":"number","value":0.8},"x":{"numType":"percent","value":40},"y":{"numType":"percent","value":15},"zIndex":{"numType":"number","value":1},"scale":{"numType":"number","value":0.8},"duration":2000,"width":{"numType":"percent","value":20}},"_reg_order":0}],"sets":[]}
+
+交互按钮：
+def button b {
+  text = "av1714157"
+  x = 30%
+  y = 37%
+  ontSize = 5%
+  textColor = 0xffffff
+  fillColor = 0xFF9100
+  fillAlpha = 0.8
+  duration = 2s
+  zIndex = 1
+  scale = 0.8
+  target = av {
+    av = 1714157
+    page = 1
+    time = 20.5s500ms
+  }
+}
+def button c {
+  text = "第22话 春风"
+  x = 40%
+  y = 40%
+  fontSize = 3%
+  textColor = 0xffffff
+  fillColor = 0x80D8FF
+  target = bangumi {
+    seasonId = 1699
+    episodeId = 80041
+    time = 1m30s
+  }
+}
+解析结果：
+{"defs":[{"type":"DefButton","obj_type":"button","name":"b","attrs":{"text":"av1714157","fontSize":{"numType":"number","value":25},"textColor":16777215,"textAlpha":{"numType":"number","value":1},"fillColor":16748800,"fillAlpha":{"numType":"number","value":0.8},"target":{"objType":"av","av":1714157,"page":1,"time":21000},"x":{"numType":"percent","value":30},"y":{"numType":"percent","value":37},"zIndex":{"numType":"number","value":1},"scale":{"numType":"number","value":0.8},"duration":2000,"ontSize":{"numType":"percent","value":5}},"_reg_order":0},{"type":"DefButton","obj_type":"button","name":"c","attrs":{"text":"第22话&nbsp;春风","fontSize":{"numType":"percent","value":3},"textColor":16777215,"textAlpha":{"numType":"number","value":1},"fillColor":8444159,"fillAlpha":{"numType":"number","value":1},"target":{"objType":"bangumi","seasonId":1699,"episodeId":80041,"time":90000},"x":{"numType":"percent","value":40},"y":{"numType":"percent","value":40},"zIndex":{"numType":"number","value":0},"scale":{"numType":"number","value":1}},"_reg_order":1}],"sets":[]}
+

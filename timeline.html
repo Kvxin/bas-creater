@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>可缩放可拖拽的毫秒时间刻度尺（Canvas）</title>
+  <style>
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+    }
+
+    .wrap {
+      width: 100%;
+      max-width: 1100px;
+      margin: 24px auto;
+      padding: 12px;
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, "Segoe UI", "Helvetica Neue", Arial;
+    }
+
+    .ruler-box {
+      position: relative;
+      background: #f7f7f8;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      overflow: hidden;
+      height: 96px;
+      display: flex;
+      align-items: center;
+      user-select: none;
+      touch-action: pan-y pinch-zoom;
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .hud {
+      position: absolute;
+      left: 12px;
+      top: 8px;
+      background: rgba(0, 0, 0, 0.6);
+      color: #fff;
+      padding: 6px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      pointer-events: none;
+    }
+
+    .center-line {
+      position: absolute;
+      top: 0;
+      bottom: 0;
+      left: 50%;
+      width: 0;
+      border-left: 2px dashed rgba(0, 0, 0, 0.5);
+      transform: translateX(-0.5px);
+      pointer-events: none;
+    }
+
+    .time-tooltip {
+      position: absolute;
+      transform: translate(-50%, -140%);
+      background: #111;
+      color: #fff;
+      padding: 4px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+
+    .controls {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .controls label {
+      font-size: 13px;
+      color: #333;
+    }
+
+    .btn {
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      background: #fff;
+      cursor: pointer
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <h3>可缩放可拖拽毫秒时间刻度尺（Canvas）</h3>
+    <div class="ruler-box" id="rulerBox">
+      <canvas id="ruler"></canvas>
+      <div class="center-line"></div>
+      <div class="hud" id="hud">center: 0 ms</div>
+      <div class="time-tooltip" id="tooltip" style="display:none">0 ms</div>
+    </div>
+
+    <div class="controls">
+      <label>缩放: <span id="scaleLabel">1.00 px/ms</span></label>
+      <button class="btn" id="resetBtn">重置</button>
+      <label style="margin-left:12px">说明：滚轮缩放（鼠标所在位置为缩放中心），拖拽左右平移，单击设置播放指针。</label>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const canvas = document.getElementById('ruler');
+      const box = document.getElementById('rulerBox');
+      const hud = document.getElementById('hud');
+      const tooltip = document.getElementById('tooltip');
+      const scaleLabel = document.getElementById('scaleLabel');
+      const resetBtn = document.getElementById('resetBtn');
+
+      // 状态
+      let dpr = Math.max(1, window.devicePixelRatio || 1);
+      let width = 0;
+      let height = 0;
+
+      // 时间坐标系： x = (timeMs - offsetMs) * scalePxPerMs
+      let scale = 1; // px per ms
+      const minScale = 0.01;
+      const maxScale = 10;
+      let offset = 0; // 左边对应的时间 ms
+
+      // 播放指针，记录为时间（ms）
+      let playheadTime = 0;
+
+      // 交互
+      let isPointerDown = false;
+      let pointerStartX = 0;
+      let pointerStartOffset = 0;
+      let moved = false;
+      const clickThreshold = 6; // px
+
+      // 优化重绘
+      let needsDraw = true;
+
+      // 初始化画布大小
+      function resizeCanvas() {
+        const rect = box.getBoundingClientRect();
+        width = Math.floor(rect.width);
+        height = Math.floor(rect.height);
+        canvas.style.width = width + 'px';
+        canvas.style.height = height + 'px';
+        canvas.width = Math.floor(width * dpr);
+        canvas.height = Math.floor(height * dpr);
+        draw(); // 立即重绘
+      }
+
+      // 选择一个"nice"的刻度步长（毫秒）
+      const niceSteps = [
+        1, 2, 5, 10, 20, 50, 100, 200, 500,
+        1000, 2000, 5000, 10000, 20000, 30000, 60000, 120000
+      ];
+      function chooseStep(scalePxPerMs) {
+        // 希望每个主要格子至少占minPx
+        const minPx = 56;
+        for (let s of niceSteps) {
+          if (s * scalePxPerMs >= minPx) return s;
+        }
+        return niceSteps[niceSteps.length - 1];
+      }
+
+      // 时间格式化
+      function formatTime(ms, forceSeconds) {
+        if (!forceSeconds && scale >= 1) {
+          return Math.round(ms) + ' ms';
+        } else {
+          const sec = ms / 1000;
+          if (Math.abs(sec) >= 60) {
+            const m = Math.floor(sec / 60);
+            const s = (sec - m * 60).toFixed(2);
+            return m + 'm ' + s + 's';
+          }
+          return sec.toFixed(3) + ' s';
+        }
+      }
+
+      // 主绘制
+      function draw() {
+        needsDraw = false;
+        const ctx = canvas.getContext('2d', { alpha: false });
+        ctx.save();
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, width, height);
+
+        // 背景
+        ctx.fillStyle = '#f7f7f8';
+        ctx.fillRect(0, 0, width, height);
+
+        // 计算可见时间范围
+        const startMs = offset;
+        const endMs = offset + width / scale;
+
+        // 决定主刻度步长
+        const majorStep = chooseStep(scale);
+
+        // 次级刻度：通常为 majorStep/5 或 /10（但保证>=1）
+        let minorStep = majorStep / 5;
+        if (minorStep < 1) minorStep = 1;
+
+        // 绘制网格和刻度
+        ctx.strokeStyle = '#cfcfcf';
+        ctx.lineWidth = 1;
+        ctx.fillStyle = '#333';
+        ctx.font = '12px system-ui, Arial';
+
+        // 先绘制细线
+        ctx.beginPath();
+        for (let t = Math.floor(startMs / minorStep) * minorStep; t <= endMs; t += minorStep) {
+          const x = Math.round((t - offset) * scale) + 0.5;
+          const isMajor = (Math.round(t / majorStep) * majorStep) === t;
+          const y0 = isMajor ? 12 : 20;
+          const y1 = height * 0.55;
+          ctx.moveTo(x, y0);
+          ctx.lineTo(x, y1);
+        }
+        ctx.stroke();
+
+        // 绘制主刻度标签与更深的线
+        ctx.fillStyle = '#111';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.beginPath();
+        for (let t = Math.floor(startMs / majorStep) * majorStep; t <= endMs; t += majorStep) {
+          const x = Math.round((t - offset) * scale) + 0.5;
+          const y0 = 8;
+          const y1 = height * 0.65;
+          ctx.moveTo(x, y0);
+          ctx.lineTo(x, y1);
+          // 标签
+          const label = formatTime(t, majorStep >= 1000 || scale < 0.1);
+          ctx.fillText(label, x, height * 0.68);
+        }
+        ctx.stroke();
+
+        // 底部时间轴阴影
+        ctx.fillStyle = 'rgba(0,0,0,0.02)';
+        ctx.fillRect(0, height * 0.82, width, height * 0.18);
+
+        // 播放指针（以时间表示）
+        const playX = (playheadTime - offset) * scale;
+        if (playX >= -10 && playX <= width + 10) {
+          ctx.strokeStyle = '#ff3b30';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(playX + 0.5, 6);
+          ctx.lineTo(playX + 0.5, height - 6);
+          ctx.stroke();
+          // 小三角
+          ctx.beginPath();
+          ctx.fillStyle = '#ff3b30';
+          ctx.moveTo(playX - 6, 6);
+          ctx.lineTo(playX + 6, 6);
+          ctx.lineTo(playX, 16);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        ctx.restore();
+
+        // HUD更新
+        const centerTime = offset + (width / 2) / scale;
+        hud.textContent = 'center: ' + formatTime(centerTime);
+        scaleLabel.textContent = scale.toFixed(2) + ' px/ms';
+      }
+
+      // 请求动画帧重绘（节流）
+      function scheduleDraw() {
+        if (!needsDraw) {
+          needsDraw = true;
+          window.requestAnimationFrame(draw);
+        }
+      }
+
+      // 事件处理
+      function toTime(clientX) {
+        const rect = canvas.getBoundingClientRect();
+        const localX = clientX - rect.left;
+        return offset + localX / scale;
+      }
+
+      function onPointerDown(e) {
+        isPointerDown = true;
+        moved = false;
+        pointerStartX = e.clientX;
+        pointerStartOffset = offset;
+        canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+      }
+
+      function onPointerMove(e) {
+        const rect = canvas.getBoundingClientRect();
+        const localX = e.clientX - rect.left;
+        // tooltip show
+        const t = offset + localX / scale;
+        tooltip.style.left = (localX) + 'px';
+        tooltip.style.top = (rect.top + window.scrollY) + 'px'; // not used; we'll position relative to box
+        tooltip.style.display = 'block';
+        tooltip.textContent = formatTime(t);
+        // position tooltip above cursor within box
+        const boxRect = box.getBoundingClientRect();
+        tooltip.style.left = (localX + boxRect.left) + 'px';
+        tooltip.style.top = (boxRect.top + window.scrollY + 8) + 'px';
+        tooltip.style.transform = 'translate(-50%,-160%)';
+
+        if (isPointerDown) {
+          const dx = e.clientX - pointerStartX;
+          if (Math.abs(dx) > clickThreshold) moved = true;
+          offset = pointerStartOffset - dx / scale;
+          scheduleDraw();
+        }
+      }
+
+      function onPointerUp(e) {
+        isPointerDown = false;
+        canvas.releasePointerCapture && canvas.releasePointerCapture(e.pointerId);
+        // 点击 vs 拖拽判断
+        const dx = e.clientX - pointerStartX;
+        if (!moved && Math.abs(dx) <= clickThreshold) {
+          // 视为点击：设置播放指针到点击时间
+          const t = toTime(e.clientX);
+          playheadTime = t;
+          scheduleDraw();
+        }
+      }
+
+      // 鼠标离开时隐藏tooltip
+      function onPointerLeave() {
+        tooltip.style.display = 'none';
+      }
+
+      // 滚轮缩放
+      function onWheel(e) {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const localX = e.clientX - rect.left;
+        const mouseTime = offset + localX / scale;
+        const delta = e.deltaY;
+        const zoomFactor = delta < 0 ? 1.12 : 0.88;
+        scale = Math.min(maxScale, Math.max(minScale, scale * zoomFactor));
+        // 让缩放中心在鼠标位置
+        offset = mouseTime - localX / scale;
+        scheduleDraw();
+      }
+
+      // 按键：左右微调playhead
+      function onKeyDown(e) {
+        if (e.key === 'ArrowLeft') {
+          playheadTime -= 10; scheduleDraw();
+        } else if (e.key === 'ArrowRight') {
+          playheadTime += 10; scheduleDraw();
+        }
+      }
+
+      // 重置按钮
+      resetBtn.addEventListener('click', () => {
+        scale = 1;
+        offset = 0;
+        playheadTime = 0;
+        scheduleDraw();
+      });
+
+      // 触摸友好：pointer events
+      canvas.addEventListener('pointerdown', onPointerDown);
+      canvas.addEventListener('pointermove', onPointerMove);
+      canvas.addEventListener('pointerup', onPointerUp);
+      canvas.addEventListener('pointercancel', onPointerUp);
+      canvas.addEventListener('pointerleave', onPointerLeave);
+
+      // wheel
+      canvas.addEventListener('wheel', onWheel, { passive: false });
+
+      // 键盘
+      window.addEventListener('keydown', onKeyDown);
+
+      // resize observer for container
+      const ro = new ResizeObserver(resizeCanvas);
+      ro.observe(box);
+
+      // 初始化
+      function init() {
+        // 初始参数
+        scale = 1;
+        offset = 0;
+        playheadTime = 0;
+        resizeCanvas();
+        // 兼容dpr变动
+        window.addEventListener('resize', () => {
+          dpr = Math.max(1, window.devicePixelRatio || 1);
+          resizeCanvas();
+        });
+        // 首次绘制
+        scheduleDraw();
+      }
+
+      init();
+    })();
+  </script>
+</body>
+
+</html>
