@@ -63,6 +63,7 @@ export interface TreeNodeItem {
   disabled?: boolean;
   selectable?: boolean;
   icon?: any;
+  style?:string|object;
 }
 
 const props = defineProps({

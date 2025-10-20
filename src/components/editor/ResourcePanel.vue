@@ -104,6 +104,12 @@ onMounted(() => {
             <span>{{ item.size }}</span>
             <span v-if="item.duration">{{ item.duration }}</span>
           </div>
+          <div
+            v-if="item.startLabel"
+            class="text-xs text-muted-foreground mt-1"
+          >
+            {{ item.startLabel }}
+          </div>
         </div>
       </div>
     </div>

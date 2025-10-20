@@ -1,15 +1,11 @@
 <template>
   <div class="theme-settings p-4 space-y-4">
     <h3 class="text-lg font-semibold">主题设置</h3>
-    
+
     <!-- 暗色模式切换 -->
     <div class="flex items-center justify-between">
       <span>暗色模式</span>
-      <a-switch 
-        v-model:checked="themeStore.isDark" 
-        :checked-children="'🌙'" 
-        :un-checked-children="'☀️'" 
-      />
+      <Switch v-model:checked="themeStore.isDark" />
     </div>
 
     <!-- 主题色选择 -->
@@ -22,8 +18,8 @@
           @click="themeStore.setPrimaryColor(color.value)"
           :class="[
             'w-12 h-12 rounded-lg border-2 transition-all',
-            themeStore.themeConfig.colorPrimary === color.value 
-              ? 'border-gray-800 scale-110' 
+            themeStore.themeConfig.colorPrimary === color.value
+              ? 'border-gray-800 scale-110'
               : 'border-gray-300 hover:scale-105'
           ]"
           :style="{ backgroundColor: color.value }"
@@ -46,19 +42,14 @@
     <!-- 圆角设置 -->
     <div class="space-y-2">
       <span class="text-sm font-medium">圆角大小: {{ themeStore.themeConfig.radius }}px</span>
-      <a-slider
-        v-model:value="themeStore.themeConfig.radius"
-        :min="0"
-        :max="20"
-        :step="1"
-      />
+      <input type="range" v-model="themeStore.themeConfig.radius" min="0" max="20" step="1" class="w-full" />
     </div>
 
     <!-- 重置按钮 -->
     <div class="pt-4">
-      <a-button @click="themeStore.resetTheme()" block>
+      <Button class="w-full" @click="themeStore.resetTheme()">
         重置为默认主题
-      </a-button>
+      </Button>
     </div>
 
     <!-- 当前主题信息 -->
@@ -73,6 +64,8 @@
 <script setup lang="ts">
 import { useThemeStore } from '@/stores/modules/theme'
 
+import { Button } from '@/components/ui/button'
+import Switch from '@/components/ui/switch/Switch.vue'
 const themeStore = useThemeStore()
 </script>
 

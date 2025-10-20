@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
+import { storeToRefs } from "pinia";
 import TopBar from "@/components/editor/TopBar.vue";
 import ResourcePanel, {
   type ResourceTabs,
@@ -7,13 +8,23 @@ import ResourcePanel, {
 import PlayerPanel from "@/components/editor/PlayerPanel.vue";
 import ToolsPanel from "@/components/editor/ToolsPanel.vue";
 import TimelinePanel from "@/components/editor/TimelinePanel.vue";
-import { mockResources, mockTimelineData } from "@/utils/mock";
+import { useDanmakuStore } from "@/stores/modules";
 
 const isPlaying = ref(false);
 const currentTime = ref(0);
 const zoom = ref(100);
 const activeResourceTab = ref<ResourceTabs>("Danmakus");
 const isDark = ref(false);
+
+const danmakuStore = useDanmakuStore();
+const { timelineData, danmakuResources } = storeToRefs(danmakuStore);
+
+const resourceMap = computed(() => ({
+  Danmakus: danmakuResources.value,
+  audio: [],
+  images: [],
+  documents: [],
+}));
 </script>
 
 <template>
@@ -25,7 +36,7 @@ const isDark = ref(false);
     <div class="flex-1 flex">
       <ResourcePanel
         v-model:active="activeResourceTab"
-        :resources="mockResources"
+        :resources="resourceMap"
       />
       <PlayerPanel
         :is-playing="isPlaying"
@@ -38,6 +49,6 @@ const isDark = ref(false);
     </div>
 
     <!-- Bottom Panel - Timeline -->
-    <TimelinePanel :timeline="mockTimelineData" :current-time="currentTime" />
+    <TimelinePanel :timeline="timelineData" :current-time="currentTime" />
   </div>
 </template>

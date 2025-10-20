@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { ref, computed, h } from "vue";
+import { computed, ref, watch } from "vue";
 
 import TimelineRuler from "@/components/editor/TimelineRuler.vue";
-import { useAntdApp } from "@/composables/useAntdApp";
-const { message, notification, modal } = useAntdApp();
 import {
   AudioLines,
   Captions,
@@ -12,126 +10,36 @@ import {
   Eye,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogTrigger,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-  DialogClose,
-} from "@/components/ui/dialog";
+import DanmuSelectorDialog from "@/components/editor/DanmuSelectorDialog.vue";
 import type { TreeNodeItem } from "@/components/ui/tree";
+import { FileText, GitBranch, Boxes } from "lucide-vue-next";
 import {
-  FileTextOutlined,
-  BranchesOutlined,
-  AppstoreAddOutlined,
-  FolderOpenOutlined,
-} from "@ant-design/icons-vue";
+  useDanmakuStore,
+  DANMAKU_TYPE_LABELS,
+  type DanmakuType,
+} from "@/stores/modules";
+
+const danmakuStore = useDanmakuStore();
 
 const currentTime = ref(0);
 const viewportScale = ref(1);
 const danmakuName = ref("");
 const viewportOffset = ref(0);
+const dialogOpen = ref(false);
 const selectedKeys = ref<Array<string | number>>([]);
-const expandedKeys = ref<Array<string | number>>([]);
-const treeNodes = ref<TreeNodeItem[]>([
-  {
-    id: "danmu-root",
-    label: "弹幕",
-    selectable: false,
-    children: [
-      { id: "text", label: "文本弹幕" },
-      { id: "path", label: "path弹幕" },
-      { id: "button", label: "按钮弹幕" },
-    ],
-  },
-]);
-const loadChildren = async (node: TreeNodeItem) => {
-  return [
-    { id: `${node.id}-1`, label: "子项 1" },
-    { id: `${node.id}-2`, label: "子项 2" },
-  ];
+
+const typeOrder = Object.keys(DANMAKU_TYPE_LABELS) as DanmakuType[];
+const typeIconMap: Record<DanmakuType, any> = {
+  text: FileText,
+  path: GitBranch,
+  button: Boxes,
 };
-
-const treeQuery = ref("");
-
-function toAntNode(n: TreeNodeItem): any {
-  const hasKids = !!n.children?.length || !!(n as any).hasChildren;
-  const iconRender = () => {
-    if (n.id === "text" || String(n.label).includes("文本"))
-      return h(FileTextOutlined);
-    if (n.id === "path" || String(n.label).toLowerCase().includes("path"))
-      return h(BranchesOutlined);
-    if (n.id === "button" || String(n.label).includes("按钮"))
-      return h(AppstoreAddOutlined);
-    return null;
-  };
-  return {
-    key: n.id,
-    title: n.label,
-    disabled: (n as any).disabled,
-    isLeaf: !hasKids,
-    icon: iconRender,
-    children: n.children?.map(toAntNode),
-  };
-}
-
-function filterAntNodes(nodes: any[], q: string): any[] {
-  const res: any[] = [];
-  for (const n of nodes) {
-    const kids = n.children ? filterAntNodes(n.children, q) : [];
-    const hit = String(n.title).toLowerCase().includes(q);
-    if (hit || kids.length) res.push({ ...n, children: kids });
-  }
-  return res;
-}
-
-const antdTreeData = computed(() => treeNodes.value.map(toAntNode));
-const filteredAntTreeData = computed(() => {
-  const q = treeQuery.value.trim().toLowerCase();
-  if (!q) return antdTreeData.value;
-  return filterAntNodes(antdTreeData.value, q);
-});
-
-function findNodeById(
-  nodes: TreeNodeItem[],
-  id: string | number
-): TreeNodeItem | null {
-  for (const n of nodes) {
-    if (n.id === id) return n;
-    if (n.children) {
-      const found = findNodeById(n.children, id);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-async function onAntLoadData(treeNode: any) {
-  const id = treeNode.key as string | number;
-  const node = findNodeById(treeNodes.value, id);
-  if (!node) return;
-  if (node.children && node.children.length) return;
-  const children = await loadChildren(node);
-  node.children = children;
-}
-
-import type { AnyDanmu } from "@/types/danmu";
-import { createDanmuByKey } from "@/utils/danmuFactory";
-
-const emit = defineEmits<{
-  (e: "confirm-danmu", value: AnyDanmu[]): void;
-}>();
-
-function onConfirmDanmu() {
-  const items: AnyDanmu[] = selectedKeys.value.map((k) =>
-    createDanmuByKey(String(k))
-  );
-  console.log(items);
-
-  emit("confirm-danmu", items);
-}
+const treeNodes = ref<TreeNodeItem[]>(
+  typeOrder.map((type) => ({
+    id: type,
+    label: DANMAKU_TYPE_LABELS[type],
+  }))
+);
 
 const timelinePaddingX = 8;
 const props = defineProps<{
@@ -139,7 +47,14 @@ const props = defineProps<{
     tracks: {
       id: string;
       type: string;
-      clips: { id: string; name: string; start: number; duration: number }[];
+      label?: string;
+      clips: {
+        id: string;
+        name: string;
+        start: number;
+        duration: number;
+        type?: string;
+      }[];
     }[];
   };
   currentTime: number;
@@ -147,8 +62,8 @@ const props = defineProps<{
 
 const totalMs = computed(() => {
   let maxEnd = 0;
-  for (const track of props.timeline.tracks) {
-    for (const clip of track.clips) {
+  for (const track of props.timeline.tracks ?? []) {
+    for (const clip of track.clips ?? []) {
       const end = (clip.start + clip.duration) * 1000;
       if (end > maxEnd) maxEnd = end;
     }
@@ -165,6 +80,12 @@ function getTrackColor(type: string) {
       return "bg-green-600";
     case "subtitle":
       return "bg-purple-600";
+    case "text":
+      return "bg-purple-600";
+    case "path":
+      return "bg-amber-500";
+    case "button":
+      return "bg-emerald-500";
     default:
       return "bg-gray-600";
   }
@@ -178,10 +99,84 @@ function getTrackTypeClass(type: string) {
       return "bg-green-600";
     case "subtitle":
       return "bg-purple-600";
+    case "text":
+      return "bg-purple-500";
+    case "path":
+      return "bg-amber-500";
+    case "button":
+      return "bg-emerald-500";
     default:
       return "bg-muted-foreground";
   }
 }
+
+function isDanmakuType(value: string): value is DanmakuType {
+  return typeOrder.includes(value as DanmakuType);
+}
+
+function getNodeIcon(node: TreeNodeItem) {
+  const key = String(node.id);
+  if (isDanmakuType(key)) {
+    return typeIconMap[key];
+  }
+  return null as any;
+}
+
+function getTrackLabel(type: string, fallback?: string) {
+  if (isDanmakuType(type)) {
+    return DANMAKU_TYPE_LABELS[type];
+  }
+  return fallback ?? type;
+}
+
+function resetDialog() {
+  danmakuName.value = "";
+  selectedKeys.value = [];
+}
+
+function handleDialogCancel() {
+  dialogOpen.value = false;
+  resetDialog();
+}
+
+function handleDialogConfirm() {
+  const trimmedName = danmakuName.value.trim();
+  if (!trimmedName) {
+    alert("弹幕名字不能为空");
+    return;
+  }
+
+  const selectedTypeKey = selectedKeys.value[0];
+  if (!selectedTypeKey) {
+    alert("请选择弹幕类型");
+    return;
+  }
+
+  const typeKey = String(selectedTypeKey);
+  if (!isDanmakuType(typeKey)) {
+    alert("请选择有效的弹幕类型");
+    return;
+  }
+
+  const created = danmakuStore.addDanmaku({
+    name: trimmedName,
+    type: typeKey,
+  });
+
+  if (!created) {
+    alert("弹幕名字已存在，请使用其他名称");
+    return;
+  }
+
+  dialogOpen.value = false;
+  resetDialog();
+}
+
+watch(dialogOpen, (isOpen) => {
+  if (!isOpen) {
+    resetDialog();
+  }
+});
 </script>
 
 <template>
@@ -196,47 +191,24 @@ function getTrackTypeClass(type: string) {
               <div
                 class="flex items-center gap-[2px] p-[2px] rounded-md border border-border bg-accent/10"
               >
-                <Dialog>
-                  <DialogTrigger as-child>
-                    <Button
-                      class="flex items-center justify-center w-7 h-7 rounded-[4px] text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-all active:bg-accent/30 hover:-translate-y-[1px]"
-                      title="添加弹幕"
-                      variant="ghost"
-                    >
-                      <Captions :size="16" />
-                    </Button>
-                  </DialogTrigger>
-                  <DialogContent class="sm:max-w-[520px]">
-                    <DialogHeader>
-                      <DialogTitle>选择弹幕</DialogTitle>
-                    </DialogHeader>
-                    <div class="space-y-2">
-                      <a-input
-                        v-model:value="danmakuName"
-                        allow-clear
-                        placeholder="弹幕名字"
-                      />
-                      <div class="max-h-[100vh] overflow-auto">
-                        <a-tree
-                          :tree-data="filteredAntTreeData"
-                          show-icon
-                          block-node
-                          v-model:selectedKeys="selectedKeys"
-                          v-model:expandedKeys="expandedKeys"
-                          :load-data="onAntLoadData"
-                        />
-                      </div>
-                    </div>
-                    <DialogFooter class="mt-2">
-                      <DialogClose as-child>
-                        <Button variant="ghost">取消</Button>
-                      </DialogClose>
-                      <DialogClose as-child>
-                        <Button @click="onConfirmDanmu">确认</Button>
-                      </DialogClose>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
+                <Button
+                  class="flex items-center justify-center w-7 h-7 rounded-[4px] text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-all active:bg-accent/30 hover:-translate-y-[1px]"
+                  title="添加弹幕"
+                  variant="ghost"
+                  @click="dialogOpen = true"
+                >
+                  <Captions :size="16" />
+                </Button>
+                <DanmuSelectorDialog
+                  v-if="dialogOpen"
+                  v-model:open="dialogOpen"
+                  v-model:danmakuName="danmakuName"
+                  v-model:selectedKeys="selectedKeys"
+                  :tree-nodes="treeNodes"
+                  :get-node-icon="getNodeIcon"
+                  @confirm="handleDialogConfirm"
+                  @cancel="handleDialogCancel"
+                />
                 <Button
                   class="flex items-center justify-center w-7 h-7 rounded-[4px] text-muted-foreground hover:bg-accent/20 hover:text-foreground transition-all active:bg-accent/30 hover:-translate-y-[1px]"
                   title="添加音频轨道"
@@ -298,14 +270,14 @@ function getTrackTypeClass(type: string) {
                   :class="getTrackTypeClass(track.type)"
                 ></div>
                 <div class="flex flex-col gap-px">
-                  <span
-                    class="text-xs font-semibold text-foreground capitalize leading-[1.2]"
-                    >{{ track.type }}</span
-                  >
+                  <span class="text-xs font-semibold text-foreground leading-[1.2]">
+                    {{ getTrackLabel(track.type, track.label) }}
+                  </span>
                   <span
                     class="text-[10px] text-muted-foreground font-mono leading-[1.2]"
-                    >{{ track.id }}</span
                   >
+                    {{ track.id }}
+                  </span>
                 </div>
               </div>
             </div>
@@ -338,7 +310,7 @@ function getTrackTypeClass(type: string) {
                   v-for="clip in track.clips"
                   :key="clip.id"
                   class="absolute h-full rounded border border-border text-white text-[11px] font-medium cursor-pointer transition-all hover:opacity-90 hover:-translate-y-px flex items-center px-2 select-none"
-                  :class="getTrackColor(track.type)"
+                  :class="getTrackColor(clip.type ?? track.type)"
                   :style="{
                     left: `${((clip.start * 1000) / totalMs) * 100}%`,
                     width: `${((clip.duration * 1000) / totalMs) * 100}%`,
