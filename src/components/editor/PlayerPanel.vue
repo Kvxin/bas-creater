@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   Play,
   Pause,
@@ -9,6 +9,9 @@ import {
   ZoomOut,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
+import { storeToRefs } from "pinia";
+import basService, { type BasDanmakuObj } from "@/utils/bas";
+import { useDanmakuStore, type DanmakuItem } from "@/stores/modules";
 
 const props = withDefaults(
   defineProps<{
@@ -44,7 +47,11 @@ function clamp(value: number) {
 watch(
   () => props.currentTime,
   (value) => {
-    localTime.value = clamp(value);
+    const clamped = clamp(value);
+    localTime.value = clamped;
+    if (basService.isReady() && !props.isPlaying) {
+      basService.seek(clamped, false);
+    }
   }
 );
 
@@ -52,6 +59,9 @@ watch(
   () => props.duration,
   () => {
     localTime.value = clamp(localTime.value);
+    if (basService.isReady() && !props.isPlaying) {
+      basService.seek(localTime.value, false);
+    }
   }
 );
 
@@ -69,6 +79,8 @@ watch(
 
 onBeforeUnmount(() => {
   stopPlayback();
+  basService.pause();
+  basService.clear();
 });
 
 function startPlayback() {
@@ -78,6 +90,9 @@ function startPlayback() {
   }
   lastTimestamp = null;
   rafId = requestAnimationFrame(step);
+  if (basService.isReady()) {
+    basService.play();
+  }
 }
 
 function stopPlayback() {
@@ -86,6 +101,9 @@ function stopPlayback() {
     rafId = null;
   }
   lastTimestamp = null;
+  if (basService.isReady()) {
+    basService.pause();
+  }
 }
 
 function step(timestamp: number) {
@@ -120,6 +138,9 @@ function applySeek(
   const clamped = clamp(time);
   localTime.value = clamped;
   emit("update:current-time", clamped);
+  if (basService.isReady()) {
+    basService.seek(clamped, false);
+  }
 
   if (!options.suppressProgressUpdate && clamped >= (props.duration ?? 0)) {
     if (options.emitEnded !== false) {
@@ -153,11 +174,154 @@ function formatTime(value: number) {
 
 const currentLabel = computed(() => formatTime(localTime.value));
 const durationLabel = computed(() => formatTime(props.duration ?? 0));
+
+const stageRef = ref<HTMLDivElement | null>(null);
+const danmakuStore = useDanmakuStore();
+const { danmakus } = storeToRefs(danmakuStore);
+
+const pendingDanmakus = ref<DanmakuItem[]>(danmakus.value.slice());
+
+watch(
+  () => props.currentTime,
+  (value) => {
+    const clamped = clamp(value);
+    localTime.value = clamped;
+    if (basService.isReady() && !props.isPlaying) {
+      basService.seek(clamped, false);
+    }
+  }
+);
+
+watch(
+  danmakus,
+  (items) => {
+    pendingDanmakus.value = items.slice();
+    syncDanmakus();
+  },
+  { deep: true }
+);
+
+function buildDanmakuPayload(
+  item: DanmakuItem,
+  index: number
+): BasDanmakuObj {
+  const row = index % 6;
+  const column = Math.floor(index / 6);
+  const baseY = 60 + row * 70;
+  const baseX = 120 + column * 200;
+
+  const targetName = `dm_${item.id}`;
+  const isButton = item.type === "button";
+  const isPath = item.type === "path";
+
+  const textColor = isButton ? 0xffffff : isPath ? 0x4ade80 : 0xfef08a;
+  const fillColor = isButton ? 0x2563eb : 0x000000;
+
+  const def = isButton
+    ? {
+        type: "DefButton",
+        obj_type: "button",
+        name: targetName,
+        attrs: {
+          text: item.name,
+          x: baseX,
+          y: baseY,
+          fontSize: 24,
+          textColor,
+          fillColor,
+          fillAlpha: 0.85,
+          alpha: 1,
+          width: 160,
+          height: 48,
+          borderRadius: 12,
+        },
+      }
+    : {
+        type: "DefText",
+        obj_type: "text",
+        name: targetName,
+        attrs: {
+          content: item.name,
+          alpha: 1,
+          color: textColor,
+          fontSize: 28,
+          fontFamily: "SimHei",
+          textShadow: 1,
+          bold: 1,
+          x: baseX,
+          y: baseY,
+        },
+      };
+
+  return {
+    dmid: item.id,
+    stime: item.start,
+    duration: item.duration,
+    defs: [def],
+    sets: [
+      {
+        type: "Serial",
+        items: [
+          {
+            type: "Unit",
+            targetName,
+            duration: Math.max(200, (item.duration ?? 3) * 1000),
+            defaultEasing: "linear",
+            attrs: {},
+          },
+          {
+            type: "Unit",
+            targetName,
+            duration: 200,
+            defaultEasing: "linear",
+            attrs: { alpha: 0 },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function syncDanmakus() {
+  if (!basService.isReady()) return;
+  basService.clear();
+  pendingDanmakus.value.forEach((item, index) => {
+    basService.addParsed(buildDanmakuPayload(item, index));
+  });
+  basService.seek(localTime.value, false);
+  if (props.isPlaying) {
+    basService.play();
+  } else {
+    basService.pause();
+  }
+}
+
+onMounted(async () => {
+  await nextTick();
+  if (!stageRef.value) return;
+  try {
+    basService.init({
+      container: stageRef.value,
+      easing: "linear",
+      visible: true,
+    });
+  } catch (err) {
+    console.error(err);
+    return;
+  }
+  syncDanmakus();
+  basService.seek(localTime.value, false);
+  if (props.isPlaying) {
+    basService.play();
+  } else {
+    basService.pause();
+  }
+});
 </script>
 
 <template>
   <div class="flex-1 bg-black/90 flex items-center justify-center relative">
-    <div class="danmaku-stage"></div>
+    <div ref="stageRef" class="danmaku-stage"></div>
     <div
       class="absolute bottom-4 left-1/2 transform -translate-x-1/2 bg-card/90 backdrop-blur-sm rounded-lg p-4 flex flex-col gap-2 border border-border shadow-md"
     >
