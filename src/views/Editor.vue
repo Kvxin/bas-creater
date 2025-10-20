@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { storeToRefs } from "pinia";
 import TopBar from "@/components/editor/TopBar.vue";
 import ResourcePanel, {
@@ -19,12 +19,53 @@ const isDark = ref(false);
 const danmakuStore = useDanmakuStore();
 const { timelineData, danmakuResources } = storeToRefs(danmakuStore);
 
+const timelineDuration = computed(() => {
+  const tracks = timelineData.value?.tracks ?? [];
+  let maxEnd = 0;
+  for (const track of tracks) {
+    for (const clip of track.clips ?? []) {
+      const end = clip.start + clip.duration;
+      if (end > maxEnd) maxEnd = end;
+    }
+  }
+  return tracks.length > 0 ? maxEnd : 30;
+});
+
 const resourceMap = computed(() => ({
   Danmakus: danmakuResources.value,
   audio: [],
   images: [],
   documents: [],
 }));
+
+watch(timelineDuration, (duration) => {
+  if (currentTime.value > duration) {
+    currentTime.value = duration;
+  }
+});
+
+watch(
+  currentTime,
+  (value) => {
+    if (value >= timelineDuration.value) {
+      currentTime.value = timelineDuration.value;
+      isPlaying.value = false;
+    }
+  },
+  { flush: "post" }
+);
+function handleTogglePlay() {
+  if (isPlaying.value) {
+    isPlaying.value = false;
+    return;
+  }
+
+  if (currentTime.value >= timelineDuration.value) {
+    currentTime.value = 0;
+  }
+
+  isPlaying.value = true;
+}
 </script>
 
 <template>
@@ -41,9 +82,13 @@ const resourceMap = computed(() => ({
       <PlayerPanel
         :is-playing="isPlaying"
         :zoom="zoom"
-        @toggle="isPlaying = !isPlaying"
+        :current-time="currentTime"
+        :duration="timelineDuration"
+        @toggle="handleTogglePlay"
         @zoom-in="zoom = Math.min(400, zoom + 25)"
         @zoom-out="zoom = Math.max(25, zoom - 25)"
+        @update:current-time="(val) => (currentTime = val)"
+        @ended="isPlaying = false"
       />
       <ToolsPanel />
     </div>

@@ -60,6 +60,14 @@ const props = defineProps<{
   currentTime: number;
 }>();
 
+watch(
+  () => props.currentTime,
+  (value) => {
+    currentTime.value = (value ?? 0) * 1000;
+  },
+  { immediate: true }
+);
+
 const totalMs = computed(() => {
   let maxEnd = 0;
   for (const track of props.timeline.tracks ?? []) {
