@@ -9,162 +9,96 @@ import {
   MessageSquareText,
   Waypoints,
   SquareMousePointer,
-  PlusCircle,
+  Trash2,
 } from "lucide-vue-next";
-import basService from "@/utils/bas";
-import {
-  createTextDanmu,
-  createButtonDanmu,
-  createPathDanmu,
-  danmuToDSL,
-} from "@/utils/danmuFactory";
+import { useDanmuStore } from "@/stores/danmu";
+import type { DanmuType, AnyDanmu } from "@/types/danmu";
+
+const danmuStore = useDanmuStore();
 
 const tabs = [
-  { id: "all", icon: Folder, label: "All" },
-  { id: "audio", icon: Music, label: "Audio" },
-  { id: "image", icon: Image, label: "Images" },
-  { id: "text", icon: Type, label: "Text" },
-  { id: "danmu", icon: MessageSquareText, label: "Bullet Comments" },
-  { id: "path", icon: Waypoints, label: "Path" },
-  { id: "button", icon: SquareMousePointer, label: "Button" },
+  { id: "all", icon: Folder, label: "全部" },
+  { id: "text", icon: MessageSquareText, label: "文本弹幕" },
+  { id: "button", icon: SquareMousePointer, label: "按钮弹幕" },
+  { id: "path", icon: Waypoints, label: "路径弹幕" },
 ];
 
 const activeTab = ref("all");
 
-const assets = [
-  {
-    id: 1,
-    name: "voiceover_01.mp3",
-    type: "audio",
-    size: "2.5MB",
-    duration: "01:20",
-  },
-];
-
-const filteredAssets = computed(() => {
-  if (activeTab.value === "all") return assets;
-  return assets.filter((a) => a.type === activeTab.value);
+// 根据当前 tab 过滤弹幕列表
+const filteredDanmus = computed(() => {
+  if (activeTab.value === "all") return danmuStore.danmus;
+  return danmuStore.danmus.filter((d) => d.type === activeTab.value);
 });
 
-const getIcon = (type: string) => {
+// 获取弹幕类型对应的图标
+const getIcon = (type: DanmuType) => {
   switch (type) {
-    case "audio":
-      return Music;
-    case "image":
-      return Image;
     case "text":
-      return Type;
-    case "danmu":
       return MessageSquareText;
-    case "path":
-      return Waypoints;
     case "button":
       return SquareMousePointer;
+    case "path":
+      return Waypoints;
     default:
       return Folder;
   }
 };
 
-// 判断是否是可添加到预览的弹幕类型
-const isDanmuType = (type: string) =>
-  ["danmu", "path", "button"].includes(type);
-
-// 点击资源项时的处理
-const handleAssetClick = (asset: (typeof assets)[0]) => {
-  if (!isDanmuType(asset.type)) {
-    console.log(`[ResourcesPanel] 点击了非弹幕资源: ${asset.name}`);
-    return;
-  }
-
-  if (!basService.isReady()) {
-    console.warn("[ResourcesPanel] BAS 服务未初始化");
-    return;
-  }
-
-  // 根据类型创建弹幕对象
-  let danmu;
-  if (asset.type === "danmu") {
-    danmu = createTextDanmu({
-      content: asset.name,
-      x: 50,
-      y: 50,
-      fontSize: 5,
-      durationMs: 5000,
-    });
-  } else if (asset.type === "button") {
-    danmu = createButtonDanmu({
-      text: asset.name,
-      x: 50,
-      y: 50,
-      durationMs: 5000,
-    });
-  } else if (asset.type === "path") {
-    // 简单的心形路径示例
-    danmu = createPathDanmu({
-      d: "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z",
-      viewBox: "0 0 24 24",
-      x: 50,
-      y: 50,
-      scale: 2,
-      durationMs: 5000,
-    });
-  }
-
-  if (danmu) {
-    const dsl = danmuToDSL(danmu);
-    console.log("[ResourcesPanel] 添加弹幕 DSL:", dsl);
-    basService.addRaw(dsl, {
-      test: true, // 使用 test 模式，弹幕结束后自动移除
-      success: (dm) => {
-        console.log("[ResourcesPanel] 弹幕添加成功:", dm);
-      },
-      error: (msg) => {
-        console.error("[ResourcesPanel] 弹幕添加失败:", msg);
-      },
-    });
+// 获取弹幕显示名称
+const getDanmuName = (danmu: AnyDanmu): string => {
+  switch (danmu.type) {
+    case "text":
+      return danmu.content || "文本弹幕";
+    case "button":
+      return danmu.text || "按钮弹幕";
+    case "path":
+      return "路径弹幕";
+    default:
+      return "未知弹幕";
   }
 };
 
+// 获取弹幕类型标签
+const getDanmuTypeLabel = (type: DanmuType): string => {
+  switch (type) {
+    case "text":
+      return "文本";
+    case "button":
+      return "按钮";
+    case "path":
+      return "路径";
+    default:
+      return "未知";
+  }
+};
+
+// 格式化时长显示
+const formatDuration = (ms?: number): string => {
+  if (!ms) return "--";
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+};
+
+// 点击弹幕项 - 选中
+const handleDanmuClick = (danmu: AnyDanmu) => {
+  danmuStore.select(danmu.id);
+  console.log(`[ResourcesPanel] 选中弹幕: ${danmu.id}`);
+};
+
+// 删除弹幕
+const handleDeleteDanmu = (danmu: AnyDanmu, event: Event) => {
+  event.stopPropagation();
+  danmuStore.remove(danmu.id);
+  console.log(`[ResourcesPanel] 删除弹幕: ${danmu.id}`);
+};
+
 // 添加新弹幕（快捷按钮）
-const addNewDanmu = (type: "danmu" | "button" | "path") => {
-  if (!basService.isReady()) {
-    console.warn("[ResourcesPanel] BAS 服务未初始化");
-    return;
-  }
-
-  let danmu;
-  if (type === "danmu") {
-    danmu = createTextDanmu({
-      content: "新弹幕 " + Date.now(),
-      x: Math.random() * 80 + 10,
-      y: Math.random() * 80 + 10,
-      fontSize: 5,
-      durationMs: 5000,
-    });
-  } else if (type === "button") {
-    danmu = createButtonDanmu({
-      text: "按钮",
-      x: Math.random() * 80 + 10,
-      y: Math.random() * 80 + 10,
-      durationMs: 5000,
-    });
-  } else {
-    danmu = createPathDanmu({
-      d: "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z",
-      viewBox: "0 0 24 24",
-      x: Math.random() * 80 + 10,
-      y: Math.random() * 80 + 10,
-      scale: 2,
-      durationMs: 5000,
-    });
-  }
-
-  const dsl = danmuToDSL(danmu);
-  basService.addRaw(dsl, {
-    test: true,
-    success: () => console.log("[ResourcesPanel] 新弹幕添加成功"),
-    error: (msg) => console.error("[ResourcesPanel] 新弹幕添加失败:", msg),
-  });
+const addNewDanmu = (type: DanmuType) => {
+  const newDanmu = danmuStore.add(type);
+  console.log(`[ResourcesPanel] 添加新弹幕:`, newDanmu);
 };
 </script>
 
@@ -202,12 +136,12 @@ const addNewDanmu = (type: "danmu" | "button" | "path") => {
       <div
         class="h-12 border-b border-sidebar-border flex items-center justify-between px-4 font-medium text-sidebar-foreground bg-sidebar/50 backdrop-blur-sm"
       >
-        <span>Resources</span>
+        <span>弹幕资源</span>
         <div class="flex items-center gap-2">
           <!-- 快捷添加按钮 -->
           <div class="flex gap-1">
             <button
-              @click="addNewDanmu('danmu')"
+              @click="addNewDanmu('text')"
               class="p-1 rounded hover:bg-sidebar-accent text-muted-foreground hover:text-primary transition-colors"
               title="添加文本弹幕"
             >
@@ -234,7 +168,7 @@ const addNewDanmu = (type: "danmu" | "button" | "path") => {
             />
             <input
               type="text"
-              placeholder="Search..."
+              placeholder="搜索..."
               class="h-7 w-32 bg-sidebar-accent/50 border border-sidebar-border rounded-md pl-7 pr-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring transition-all focus:w-40"
             />
           </div>
@@ -245,53 +179,76 @@ const addNewDanmu = (type: "danmu" | "button" | "path") => {
       <div
         class="flex items-center px-4 py-2 text-xs font-medium text-muted-foreground border-b border-sidebar-border/50"
       >
-        <div class="flex-1">Name</div>
-        <div class="w-16 text-right">Size</div>
-        <div class="w-16 text-right">Duration</div>
+        <div class="flex-1">名称</div>
+        <div class="w-16 text-center">类型</div>
+        <div class="w-16 text-right">时长</div>
+        <div class="w-8"></div>
       </div>
 
       <!-- List Body -->
       <div class="flex-1 overflow-y-auto p-1 space-y-0.5">
         <div
-          v-for="asset in filteredAssets"
-          :key="asset.id"
-          @click="handleAssetClick(asset)"
+          v-for="danmu in filteredDanmus"
+          :key="danmu.id"
+          @click="handleDanmuClick(danmu)"
           class="group flex items-center px-3 py-2 rounded-md hover:bg-sidebar-accent cursor-pointer transition-colors text-xs"
-          :class="{ 'border-l-2 border-primary': isDanmuType(asset.type) }"
+          :class="{
+            'bg-sidebar-accent/70 ring-1 ring-primary/50': danmuStore.selectedId === danmu.id,
+          }"
         >
           <component
-            :is="getIcon(asset.type)"
+            :is="getIcon(danmu.type)"
             class="size-4 text-muted-foreground mr-3 group-hover:text-primary transition-colors"
+            :class="{ 'text-primary': danmuStore.selectedId === danmu.id }"
           />
           <div
             class="flex-1 truncate font-medium text-sidebar-foreground group-hover:text-sidebar-accent-foreground"
           >
-            {{ asset.name }}
+            {{ getDanmuName(danmu) }}
+          </div>
+          <div class="w-16 text-center text-muted-foreground/70">
+            <span
+              class="px-1.5 py-0.5 rounded text-[10px] bg-sidebar-accent"
+              :class="{
+                'bg-blue-500/20 text-blue-400': danmu.type === 'text',
+                'bg-orange-500/20 text-orange-400': danmu.type === 'button',
+                'bg-green-500/20 text-green-400': danmu.type === 'path',
+              }"
+            >
+              {{ getDanmuTypeLabel(danmu.type) }}
+            </span>
           </div>
           <div class="w-16 text-right text-muted-foreground/70 font-mono">
-            {{ asset.size }}
+            {{ formatDuration(danmu.durationMs) }}
           </div>
-          <div class="w-16 text-right text-muted-foreground/70 font-mono">
-            {{ asset.duration }}
-          </div>
-          <!-- 添加按钮（仅弹幕类型显示） -->
+          <!-- 删除按钮 -->
           <button
-            v-if="isDanmuType(asset.type)"
-            @click.stop="handleAssetClick(asset)"
-            class="ml-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-primary/20 text-primary transition-all"
-            title="添加到预览"
+            @click="handleDeleteDanmu(danmu, $event)"
+            class="ml-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/20 text-destructive transition-all"
+            title="删除弹幕"
           >
-            <PlusCircle class="size-3.5" />
+            <Trash2 class="size-3.5" />
           </button>
         </div>
 
         <div
-          v-if="filteredAssets.length === 0"
+          v-if="filteredDanmus.length === 0"
           class="flex flex-col items-center justify-center h-32 text-muted-foreground"
         >
           <Folder class="size-8 mb-2 opacity-20" />
-          <span>No items found</span>
+          <span>暂无弹幕</span>
+          <span class="text-xs mt-1">点击上方按钮添加</span>
         </div>
+      </div>
+
+      <!-- Footer: 弹幕数量统计 -->
+      <div
+        class="h-8 border-t border-sidebar-border flex items-center justify-between px-4 text-xs text-muted-foreground bg-sidebar/30"
+      >
+        <span>共 {{ danmuStore.danmus.length }} 个弹幕</span>
+        <span v-if="danmuStore.selectedId" class="text-primary">
+          已选中: {{ getDanmuName(danmuStore.selected!) }}
+        </span>
       </div>
     </div>
   </div>
