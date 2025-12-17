@@ -1,17 +1,16 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, nextTick } from "vue";
 import {
   Folder,
-  Music,
-  Image,
-  Type,
   Search,
   MessageSquareText,
   Waypoints,
   SquareMousePointer,
   Trash2,
+  Pencil,
 } from "lucide-vue-next";
 import { useDanmuStore } from "@/stores/danmu";
+import { Input } from "@/components/ui/input";
 import type { DanmuType, AnyDanmu } from "@/types/danmu";
 
 const danmuStore = useDanmuStore();
@@ -24,6 +23,22 @@ const tabs = [
 ];
 
 const activeTab = ref("all");
+
+// 编辑状态
+const editingId = ref<string | null>(null);
+const editingName = ref("");
+const hasInitialFocus = ref(false);
+
+// 设置 input ref 的回调函数（只在首次挂载时聚焦）
+const setEditInputRef = (el: any) => {
+  if (el && !hasInitialFocus.value) {
+    hasInitialFocus.value = true;
+    nextTick(() => {
+      el.focus?.();
+      el.select?.();
+    });
+  }
+};
 
 // 根据当前 tab 过滤弹幕列表
 const filteredDanmus = computed(() => {
@@ -45,8 +60,8 @@ const getIcon = (type: DanmuType) => {
   }
 };
 
-// 获取弹幕显示名称
-const getDanmuName = (danmu: AnyDanmu): string => {
+// 获取弹幕默认名称（当没有自定义名称时使用）
+const getDefaultName = (danmu: AnyDanmu): string => {
   switch (danmu.type) {
     case "text":
       return danmu.content || "文本弹幕";
@@ -57,6 +72,11 @@ const getDanmuName = (danmu: AnyDanmu): string => {
     default:
       return "未知弹幕";
   }
+};
+
+// 获取弹幕显示名称（优先使用自定义名称）
+const getDanmuName = (danmu: AnyDanmu): string => {
+  return danmu.name || getDefaultName(danmu);
 };
 
 // 获取弹幕类型标签
@@ -79,13 +99,54 @@ const formatDuration = (ms?: number): string => {
   const seconds = Math.floor(ms / 1000);
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = seconds % 60;
-  return `${String(minutes).padStart(2, "0")}:${String(remainingSeconds).padStart(2, "0")}`;
+  return `${String(minutes).padStart(2, "0")}:${String(
+    remainingSeconds
+  ).padStart(2, "0")}`;
 };
 
 // 点击弹幕项 - 选中
 const handleDanmuClick = (danmu: AnyDanmu) => {
+  // 如果正在编辑其他项，先取消
+  if (editingId.value && editingId.value !== danmu.id) {
+    cancelEdit();
+  }
   danmuStore.select(danmu.id);
-  console.log(`[ResourcesPanel] 选中弹幕: ${danmu.id}`);
+};
+
+// 双击开始编辑名称
+const startEdit = (danmu: AnyDanmu, event: Event) => {
+  event.stopPropagation();
+  hasInitialFocus.value = false; // 重置聚焦标记
+  editingId.value = danmu.id;
+  editingName.value = danmu.name || "";
+};
+
+// 保存编辑
+const saveEdit = (danmu: AnyDanmu) => {
+  if (editingId.value === danmu.id) {
+    const newName = editingName.value.trim();
+    // 更新弹幕名称
+    danmuStore.updateDanmu(danmu.id, { name: newName || undefined });
+    console.log(
+      `[ResourcesPanel] 更新弹幕名称: ${danmu.id} -> ${newName || "(默认)"}`
+    );
+  }
+  cancelEdit();
+};
+
+// 取消编辑
+const cancelEdit = () => {
+  editingId.value = null;
+  editingName.value = "";
+};
+
+// 处理编辑输入框按键
+const handleEditKeydown = (event: KeyboardEvent, danmu: AnyDanmu) => {
+  if (event.key === "Enter") {
+    saveEdit(danmu);
+  } else if (event.key === "Escape") {
+    cancelEdit();
+  }
 };
 
 // 删除弹幕
@@ -193,20 +254,41 @@ const addNewDanmu = (type: DanmuType) => {
           @click="handleDanmuClick(danmu)"
           class="group flex items-center px-3 py-2 rounded-md hover:bg-sidebar-accent cursor-pointer transition-colors text-xs"
           :class="{
-            'bg-sidebar-accent/70 ring-1 ring-primary/50': danmuStore.selectedId === danmu.id,
+            'bg-sidebar-accent/70 ring-1 ring-primary/50':
+              danmuStore.selectedId === danmu.id,
           }"
         >
           <component
             :is="getIcon(danmu.type)"
-            class="size-4 text-muted-foreground mr-3 group-hover:text-primary transition-colors"
+            class="size-4 text-muted-foreground mr-3 group-hover:text-primary transition-colors flex-shrink-0"
             :class="{ 'text-primary': danmuStore.selectedId === danmu.id }"
           />
-          <div
-            class="flex-1 truncate font-medium text-sidebar-foreground group-hover:text-sidebar-accent-foreground"
-          >
-            {{ getDanmuName(danmu) }}
+          <!-- 名称显示/编辑 -->
+          <div class="flex-1 min-w-0 mr-2">
+            <!-- 编辑模式 -->
+            <Input
+              v-if="editingId === danmu.id"
+              :ref="setEditInputRef"
+              v-model="editingName"
+              type="text"
+              :placeholder="getDefaultName(danmu)"
+              class="h-6 px-1.5 text-xs"
+              @click.stop
+              @keydown="handleEditKeydown($event, danmu)"
+              @blur="saveEdit(danmu)"
+            />
+            <!-- 显示模式 -->
+            <div
+              v-else
+              class="truncate font-medium text-sidebar-foreground group-hover:text-sidebar-accent-foreground"
+              :class="{ 'text-muted-foreground': !danmu.name }"
+              @dblclick="startEdit(danmu, $event)"
+              :title="getDanmuName(danmu) + ' (双击编辑)'"
+            >
+              {{ getDanmuName(danmu) }}
+            </div>
           </div>
-          <div class="w-16 text-center text-muted-foreground/70">
+          <div class="w-14 text-center text-muted-foreground/70 flex-shrink-0">
             <span
               class="px-1.5 py-0.5 rounded text-[10px] bg-sidebar-accent"
               :class="{
@@ -218,13 +300,23 @@ const addNewDanmu = (type: DanmuType) => {
               {{ getDanmuTypeLabel(danmu.type) }}
             </span>
           </div>
-          <div class="w-16 text-right text-muted-foreground/70 font-mono">
+          <div
+            class="w-14 text-right text-muted-foreground/70 font-mono flex-shrink-0"
+          >
             {{ formatDuration(danmu.durationMs) }}
           </div>
+          <!-- 编辑按钮 -->
+          <button
+            @click="startEdit(danmu, $event)"
+            class="ml-1 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-sidebar-accent text-muted-foreground hover:text-primary transition-all"
+            title="编辑名称"
+          >
+            <Pencil class="size-3" />
+          </button>
           <!-- 删除按钮 -->
           <button
             @click="handleDeleteDanmu(danmu, $event)"
-            class="ml-2 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/20 text-destructive transition-all"
+            class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/20 text-destructive transition-all"
             title="删除弹幕"
           >
             <Trash2 class="size-3.5" />

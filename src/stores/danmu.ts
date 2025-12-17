@@ -51,6 +51,12 @@ export const useDanmuStore = defineStore("danmu", () => {
     danmus.value[idx] = { ...danmus.value[idx], ...payload } as AnyDanmu
   }
 
+  function updateDanmu(id: string, payload: Partial<AnyDanmu>) {
+    const idx = danmus.value.findIndex((dm) => dm.id === id)
+    if (idx === -1) return
+    danmus.value[idx] = { ...danmus.value[idx], ...payload } as AnyDanmu
+  }
+
   function moveSelected(x: number, y: number) {
     updateSelected({ x, y })
   }
@@ -92,6 +98,7 @@ export const useDanmuStore = defineStore("danmu", () => {
     remove,
     select,
     updateSelected,
+    updateDanmu,
     moveSelected,
     setViewport,
     zoom,

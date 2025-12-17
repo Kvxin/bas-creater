@@ -26,6 +26,7 @@ function baseDefaults(type: DanmuType, ov: Partial<DanmuBase> = {}): DanmuBase {
   return {
     id: genId(10),
     type,
+    name: ov.name, // 用户自定义名称，可选
     x: (ov as any).x ?? 50,
     y: (ov as any).y ?? 50,
     zIndex: ov.zIndex ?? 1,
@@ -92,7 +93,7 @@ export function createDanmuByKey(key: string): AnyDanmu {
   switch (key) {
     case "text":
       return createTextDanmu({
-        content: "bilibili",
+        content: "",
         zIndex: 3,
         durationMs: 5000,
       });
