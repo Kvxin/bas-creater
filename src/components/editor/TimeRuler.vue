@@ -87,7 +87,10 @@ const calculateMaxTime = (visibleWidth: number, scale: number) => {
   const intervals = getTickIntervals(scale);
   const visibleTimeMs = visibleWidth / pixelPerMs;
   // 向上取整到大刻度的下一个倍数，确保铺满
-  return Math.ceil(visibleTimeMs / intervals.major) * intervals.major + intervals.major;
+  return (
+    Math.ceil(visibleTimeMs / intervals.major) * intervals.major +
+    intervals.major
+  );
 };
 
 // 绘制时间刻度
@@ -126,7 +129,8 @@ const drawRuler = () => {
   // 绘制刻度
   for (let time = 0; time <= maxTime; time += intervals.minor) {
     // 添加 paddingLeft 偏移，使刻度与轨道对齐
-    const x = props.paddingLeft + getGridPixel(props.scale, time) - props.scrollLeft;
+    const x =
+      props.paddingLeft + getGridPixel(props.scale, time) - props.scrollLeft;
 
     if (x < props.paddingLeft - 50 || x > width + 50) continue;
 
@@ -161,7 +165,9 @@ const drawRuler = () => {
 };
 
 // 监听属性变化重新绘制
-watch(() => [props.scale, props.scrollLeft, props.paddingLeft], drawRuler, { immediate: false });
+watch(() => [props.scale, props.scrollLeft, props.paddingLeft], drawRuler, {
+  immediate: false,
+});
 
 onMounted(() => {
   // 初始绘制
@@ -189,7 +195,10 @@ onUnmounted(() => {
     class="time-ruler w-full h-8 relative cursor-pointer"
     @click="handleClick"
   >
-    <canvas ref="canvasRef" class="absolute inset-0 pointer-events-none"></canvas>
+    <canvas
+      ref="canvasRef"
+      class="absolute inset-0 pointer-events-none"
+    ></canvas>
   </div>
 </template>
 
@@ -198,4 +207,3 @@ onUnmounted(() => {
   min-height: 32px;
 }
 </style>
-

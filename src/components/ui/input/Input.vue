@@ -42,4 +42,3 @@ defineExpose({
     "
   />
 </template>
-
