@@ -260,7 +260,7 @@ const addNewDanmu = (type: DanmuType) => {
         >
           <component
             :is="getIcon(danmu.type)"
-            class="size-4 text-muted-foreground mr-3 group-hover:text-primary transition-colors flex-shrink-0"
+            class="size-4 text-muted-foreground mr-3 group-hover:text-primary transition-colors shrink-0"
             :class="{ 'text-primary': danmuStore.selectedId === danmu.id }"
           />
           <!-- 名称显示/编辑 -->
@@ -288,7 +288,7 @@ const addNewDanmu = (type: DanmuType) => {
               {{ getDanmuName(danmu) }}
             </div>
           </div>
-          <div class="w-14 text-center text-muted-foreground/70 flex-shrink-0">
+          <div class="w-14 text-center text-muted-foreground/70 shrink-0">
             <span
               class="px-1.5 py-0.5 rounded text-[10px] bg-sidebar-accent"
               :class="{
@@ -301,7 +301,7 @@ const addNewDanmu = (type: DanmuType) => {
             </span>
           </div>
           <div
-            class="w-14 text-right text-muted-foreground/70 font-mono flex-shrink-0"
+            class="w-14 text-right text-muted-foreground/70 font-mono shrink-0"
           >
             {{ formatDuration(danmu.durationMs) }}
           </div>
