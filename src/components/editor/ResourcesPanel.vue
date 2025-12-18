@@ -13,15 +13,31 @@ import {
 import { useDanmuStore } from "@/stores/danmu";
 import { Input } from "@/components/ui/input";
 import type { DanmuType, AnyDanmu } from "@/types/danmu";
+import type { AudioResource } from "@/types/resource";
 
 const danmuStore = useDanmuStore();
+
+const localAudioResources = ref<AudioResource[]>([]);
+
+const getAudioDuration = (file: File): Promise<number> => {
+  return new Promise((resolve) => {
+    const audio = document.createElement("audio");
+    const url = URL.createObjectURL(file);
+    audio.src = url;
+    audio.onloadedmetadata = () => {
+      resolve(audio.duration * 1000);
+      URL.revokeObjectURL(url);
+    };
+    audio.onerror = () => resolve(0);
+  });
+};
 
 const tabs = [
   { id: "all", icon: Folder, label: "全部" },
   { id: "text", icon: MessageSquareText, label: "文本弹幕" },
   { id: "button", icon: SquareMousePointer, label: "按钮弹幕" },
   { id: "path", icon: Waypoints, label: "路径弹幕" },
-  { id: "audio", icon: AudioLines, label: "音频弹幕" },
+  { id: "audio", icon: AudioLines, label: "音频资源" },
 ];
 
 const activeTab = ref("all");
@@ -43,13 +59,15 @@ const setEditInputRef = (el: any) => {
 };
 
 // 根据当前 tab 过滤弹幕列表
-const filteredDanmus = computed(() => {
-  if (activeTab.value === "all") return danmuStore.danmus;
-  return danmuStore.danmus.filter((d) => d.type === activeTab.value);
+const filteredItems = computed<Array<AnyDanmu | AudioResource>>(() => {
+  if (activeTab.value === "all")
+    return [...danmuStore.danmus, ...localAudioResources.value];
+  if (activeTab.value === "audio") return localAudioResources.value;
+  return danmuStore.danmus.filter((d: AnyDanmu) => d.type === activeTab.value);
 });
 
 // 获取弹幕类型对应的图标
-const getIcon = (type: DanmuType) => {
+const getIcon = (type: string) => {
   switch (type) {
     case "text":
       return MessageSquareText;
@@ -57,7 +75,7 @@ const getIcon = (type: DanmuType) => {
       return SquareMousePointer;
     case "path":
       return Waypoints;
-    case "audio":
+    case "audio-file":
       return AudioLines;
     default:
       return Folder;
@@ -65,28 +83,28 @@ const getIcon = (type: DanmuType) => {
 };
 
 // 获取弹幕默认名称（当没有自定义名称时使用）
-const getDefaultName = (danmu: AnyDanmu): string => {
-  switch (danmu.type) {
+const getDefaultName = (item: AnyDanmu | AudioResource): string => {
+  switch (item.type) {
     case "text":
-      return danmu.content || "文本弹幕";
+      return (item as { content: string }).content || "文本弹幕";
     case "button":
-      return danmu.text || "按钮弹幕";
+      return (item as { text: string }).text || "按钮弹幕";
     case "path":
       return "路径弹幕";
-    case "audio":
-      return "音频弹幕";
+    case "audio-file":
+      return (item as AudioResource).file.name || "未命名音频";
     default:
-      return "未知弹幕";
+      return "未知项目";
   }
 };
 
 // 获取弹幕显示名称（优先使用自定义名称）
-const getDanmuName = (danmu: AnyDanmu): string => {
-  return danmu.name || getDefaultName(danmu);
+const getItemName = (item: AnyDanmu | AudioResource): string => {
+  return item.name || getDefaultName(item);
 };
 
 // 获取弹幕类型标签
-const getDanmuTypeLabel = (type: DanmuType): string => {
+const getItemTypeLabel = (type: string): string => {
   switch (type) {
     case "text":
       return "文本";
@@ -94,7 +112,7 @@ const getDanmuTypeLabel = (type: DanmuType): string => {
       return "按钮";
     case "path":
       return "路径";
-    case "audio":
+    case "audio-file":
       return "音频";
     default:
       return "未知";
@@ -112,31 +130,52 @@ const formatDuration = (ms?: number): string => {
   ).padStart(2, "0")}`;
 };
 
-// 点击弹幕项 - 选中
-const handleDanmuClick = (danmu: AnyDanmu) => {
+const getItemDuration = (
+  item: AnyDanmu | AudioResource
+): number | undefined => {
+  if (item.type === "audio-file") {
+    return (item as AudioResource).duration;
+  }
+  return (item as AnyDanmu).durationMs;
+};
+
+// 点击列表项
+const handleItemClick = (item: AnyDanmu | AudioResource) => {
   // 如果正在编辑其他项，先取消
-  if (editingId.value && editingId.value !== danmu.id) {
+  if (editingId.value && editingId.value !== item.id) {
     cancelEdit();
   }
-  danmuStore.select(danmu.id);
+  // 目前 store.select 只支持弹幕 ID，如果是音频，暂时可能只需高亮或不做 store 选中
+  // 这里暂时只对弹幕做 store 选中
+  if (item.type !== "audio-file") {
+    danmuStore.select(item.id);
+  }
 };
 
 // 双击开始编辑名称
-const startEdit = (danmu: AnyDanmu, event: Event) => {
+const startEdit = (item: AnyDanmu | AudioResource, event: Event) => {
   event.stopPropagation();
   hasInitialFocus.value = false; // 重置聚焦标记
-  editingId.value = danmu.id;
-  editingName.value = danmu.name || "";
+  editingId.value = item.id;
+  editingName.value = item.name || "";
 };
 
 // 保存编辑
-const saveEdit = (danmu: AnyDanmu) => {
-  if (editingId.value === danmu.id) {
+const saveEdit = (item: AnyDanmu | AudioResource) => {
+  if (editingId.value === item.id) {
     const newName = editingName.value.trim();
-    // 更新弹幕名称
-    danmuStore.updateDanmu(danmu.id, { name: newName || undefined });
+    if (item.type === "audio-file") {
+      const idx = localAudioResources.value.findIndex((r) => r.id === item.id);
+      if (idx !== -1 && localAudioResources.value[idx]) {
+        localAudioResources.value[idx].name =
+          newName || localAudioResources.value[idx].file.name;
+      }
+    } else {
+      // 更新弹幕名称
+      danmuStore.updateDanmu(item.id, { name: newName || undefined });
+    }
     console.log(
-      `[ResourcesPanel] 更新弹幕名称: ${danmu.id} -> ${newName || "(默认)"}`
+      `[ResourcesPanel] 更新名称: ${item.id} -> ${newName || "(默认)"}`
     );
   }
   cancelEdit();
@@ -149,19 +188,30 @@ const cancelEdit = () => {
 };
 
 // 处理编辑输入框按键
-const handleEditKeydown = (event: KeyboardEvent, danmu: AnyDanmu) => {
+const handleEditKeydown = (
+  event: KeyboardEvent,
+  item: AnyDanmu | AudioResource
+) => {
   if (event.key === "Enter") {
-    saveEdit(danmu);
+    saveEdit(item);
   } else if (event.key === "Escape") {
     cancelEdit();
   }
 };
 
-// 删除弹幕
-const handleDeleteDanmu = (danmu: AnyDanmu, event: Event) => {
+// 删除项
+const handleDeleteItem = (item: AnyDanmu | AudioResource, event: Event) => {
   event.stopPropagation();
-  danmuStore.remove(danmu.id);
-  console.log(`[ResourcesPanel] 删除弹幕: ${danmu.id}`);
+  if (item.type === "audio-file") {
+    const idx = localAudioResources.value.findIndex((r) => r.id === item.id);
+    if (idx !== -1 && localAudioResources.value[idx]) {
+      URL.revokeObjectURL(localAudioResources.value[idx].url);
+      localAudioResources.value.splice(idx, 1);
+    }
+  } else {
+    danmuStore.remove(item.id);
+  }
+  console.log(`[ResourcesPanel] 删除: ${item.id}`);
 };
 
 // 音频上传处理
@@ -171,21 +221,30 @@ const triggerAudioUpload = () => {
   audioInputRef.value?.click();
 };
 
-const handleAudioUpload = (event: Event) => {
+const handleAudioUpload = async (event: Event) => {
   const input = event.target as HTMLInputElement;
   if (input.files && input.files[0]) {
     const file = input.files[0];
     const url = URL.createObjectURL(file);
-    
-    // 创建音频对象获取时长（可选优化，这里暂时直接添加）
-    danmuStore.add("audio", {
+    const duration = await getAudioDuration(file);
+
+    // 添加到本地列表
+    const resource: AudioResource = {
+      id: Math.random().toString(36).slice(2),
+      type: "audio-file",
       name: file.name,
-      src: url,
-    });
-    
+      url,
+      file,
+      duration,
+    };
+    localAudioResources.value.push(resource);
+
+    console.log(
+      `[ResourcesPanel] 上传音频文件: ${file.name}, 时长: ${duration}ms`
+    );
+
     // 重置 input 以便重复上传同一文件
     input.value = "";
-    console.log(`[ResourcesPanel] 上传音频: ${file.name}`);
   }
 };
 
@@ -297,66 +356,66 @@ const addNewDanmu = (type: DanmuType) => {
       <!-- List Body -->
       <div class="flex-1 overflow-y-auto p-1 space-y-0.5">
         <div
-          v-for="danmu in filteredDanmus"
-          :key="danmu.id"
-          @click="handleDanmuClick(danmu)"
+          v-for="item in filteredItems"
+          :key="item.id"
+          @click="handleItemClick(item)"
           class="group flex items-center px-3 py-2 rounded-md hover:bg-sidebar-accent cursor-pointer transition-colors text-xs"
           :class="{
             'bg-sidebar-accent/70 ring-1 ring-primary/50':
-              danmuStore.selectedId === danmu.id,
+              danmuStore.selectedId === item.id,
           }"
         >
           <component
-            :is="getIcon(danmu.type)"
+            :is="getIcon(item.type)"
             class="size-4 text-muted-foreground mr-3 group-hover:text-primary transition-colors shrink-0"
-            :class="{ 'text-primary': danmuStore.selectedId === danmu.id }"
+            :class="{ 'text-primary': danmuStore.selectedId === item.id }"
           />
           <!-- 名称显示/编辑 -->
           <div class="flex-1 min-w-0 mr-2">
             <!-- 编辑模式 -->
             <Input
-              v-if="editingId === danmu.id"
+              v-if="editingId === item.id"
               :ref="setEditInputRef"
               v-model="editingName"
               type="text"
-              :placeholder="getDefaultName(danmu)"
+              :placeholder="getDefaultName(item)"
               class="h-6 px-1.5 text-xs"
               @click.stop
-              @keydown="handleEditKeydown($event, danmu)"
-              @blur="saveEdit(danmu)"
+              @keydown="handleEditKeydown($event, item)"
+              @blur="saveEdit(item)"
             />
             <!-- 显示模式 -->
             <div
               v-else
               class="truncate font-medium text-sidebar-foreground group-hover:text-sidebar-accent-foreground"
-              :class="{ 'text-muted-foreground': !danmu.name }"
-              @dblclick="startEdit(danmu, $event)"
-              :title="getDanmuName(danmu) + ' (双击编辑)'"
+              :class="{ 'text-muted-foreground': !item.name }"
+              @dblclick="startEdit(item, $event)"
+              :title="getItemName(item) + ' (双击编辑)'"
             >
-              {{ getDanmuName(danmu) }}
+              {{ getItemName(item) }}
             </div>
           </div>
           <div class="w-14 text-center text-muted-foreground/70 shrink-0">
             <span
               class="px-1.5 py-0.5 rounded text-[10px] bg-sidebar-accent"
               :class="{
-                'bg-blue-500/20 text-blue-400': danmu.type === 'text',
-                'bg-orange-500/20 text-orange-400': danmu.type === 'button',
-                'bg-green-500/20 text-green-400': danmu.type === 'path',
-                'bg-purple-500/20 text-purple-400': danmu.type === 'audio',
+                'bg-blue-500/20 text-blue-400': item.type === 'text',
+                'bg-orange-500/20 text-orange-400': item.type === 'button',
+                'bg-green-500/20 text-green-400': item.type === 'path',
+                'bg-purple-500/20 text-purple-400': item.type === 'audio-file',
               }"
             >
-              {{ getDanmuTypeLabel(danmu.type) }}
+              {{ getItemTypeLabel(item.type) }}
             </span>
           </div>
           <div
             class="w-14 text-right text-muted-foreground/70 font-mono shrink-0"
           >
-            {{ formatDuration(danmu.durationMs) }}
+            {{ formatDuration(getItemDuration(item)) }}
           </div>
           <!-- 编辑按钮 -->
           <button
-            @click="startEdit(danmu, $event)"
+            @click="startEdit(item, $event)"
             class="ml-1 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-sidebar-accent text-muted-foreground hover:text-primary transition-all"
             title="编辑名称"
           >
@@ -364,20 +423,20 @@ const addNewDanmu = (type: DanmuType) => {
           </button>
           <!-- 删除按钮 -->
           <button
-            @click="handleDeleteDanmu(danmu, $event)"
+            @click="handleDeleteItem(item, $event)"
             class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/20 text-destructive transition-all"
-            title="删除弹幕"
+            title="删除"
           >
             <Trash2 class="size-3.5" />
           </button>
         </div>
 
         <div
-          v-if="filteredDanmus.length === 0"
+          v-if="filteredItems.length === 0"
           class="flex flex-col items-center justify-center h-32 text-muted-foreground"
         >
           <Folder class="size-8 mb-2 opacity-20" />
-          <span>暂无弹幕</span>
+          <span>暂无项目</span>
           <span class="text-xs mt-1">点击上方按钮添加</span>
         </div>
       </div>
@@ -386,9 +445,13 @@ const addNewDanmu = (type: DanmuType) => {
       <div
         class="h-8 border-t border-sidebar-border flex items-center justify-between px-4 text-xs text-muted-foreground bg-sidebar/30"
       >
-        <span>共 {{ danmuStore.danmus.length }} 个弹幕</span>
-        <span v-if="danmuStore.selectedId" class="text-primary">
-          已选中: {{ getDanmuName(danmuStore.selected!) }}
+        <span
+          >共
+          {{ danmuStore.danmus.length + localAudioResources.length }}
+          个项目</span
+        >
+        <span v-if="danmuStore.selected" class="text-primary">
+          已选中: {{ getItemName(danmuStore.selected) }}
         </span>
       </div>
     </div>
