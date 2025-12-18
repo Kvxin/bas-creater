@@ -8,6 +8,7 @@ import {
   SquareMousePointer,
   Trash2,
   Pencil,
+  AudioLines,
 } from "lucide-vue-next";
 import { useDanmuStore } from "@/stores/danmu";
 import { Input } from "@/components/ui/input";
@@ -20,6 +21,7 @@ const tabs = [
   { id: "text", icon: MessageSquareText, label: "文本弹幕" },
   { id: "button", icon: SquareMousePointer, label: "按钮弹幕" },
   { id: "path", icon: Waypoints, label: "路径弹幕" },
+  { id: "audio", icon: AudioLines, label: "音频弹幕" },
 ];
 
 const activeTab = ref("all");
@@ -55,6 +57,8 @@ const getIcon = (type: DanmuType) => {
       return SquareMousePointer;
     case "path":
       return Waypoints;
+    case "audio":
+      return AudioLines;
     default:
       return Folder;
   }
@@ -69,6 +73,8 @@ const getDefaultName = (danmu: AnyDanmu): string => {
       return danmu.text || "按钮弹幕";
     case "path":
       return "路径弹幕";
+    case "audio":
+      return "音频弹幕";
     default:
       return "未知弹幕";
   }
@@ -88,6 +94,8 @@ const getDanmuTypeLabel = (type: DanmuType): string => {
       return "按钮";
     case "path":
       return "路径";
+    case "audio":
+      return "音频";
     default:
       return "未知";
   }
@@ -156,6 +164,31 @@ const handleDeleteDanmu = (danmu: AnyDanmu, event: Event) => {
   console.log(`[ResourcesPanel] 删除弹幕: ${danmu.id}`);
 };
 
+// 音频上传处理
+const audioInputRef = ref<HTMLInputElement | null>(null);
+
+const triggerAudioUpload = () => {
+  audioInputRef.value?.click();
+};
+
+const handleAudioUpload = (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  if (input.files && input.files[0]) {
+    const file = input.files[0];
+    const url = URL.createObjectURL(file);
+    
+    // 创建音频对象获取时长（可选优化，这里暂时直接添加）
+    danmuStore.add("audio", {
+      name: file.name,
+      src: url,
+    });
+    
+    // 重置 input 以便重复上传同一文件
+    input.value = "";
+    console.log(`[ResourcesPanel] 上传音频: ${file.name}`);
+  }
+};
+
 // 添加新弹幕（快捷按钮）
 const addNewDanmu = (type: DanmuType) => {
   const newDanmu = danmuStore.add(type);
@@ -222,6 +255,21 @@ const addNewDanmu = (type: DanmuType) => {
             >
               <Waypoints class="size-3.5" />
             </button>
+            <button
+              @click="triggerAudioUpload"
+              class="p-1 rounded hover:bg-sidebar-accent text-muted-foreground hover:text-primary transition-colors"
+              title="上传音频文件"
+            >
+              <AudioLines class="size-3.5" />
+            </button>
+            <!-- 隐藏的音频输入框 -->
+            <input
+              type="file"
+              ref="audioInputRef"
+              accept="audio/*"
+              class="hidden"
+              @change="handleAudioUpload"
+            />
           </div>
           <div class="relative">
             <Search
@@ -295,6 +343,7 @@ const addNewDanmu = (type: DanmuType) => {
                 'bg-blue-500/20 text-blue-400': danmu.type === 'text',
                 'bg-orange-500/20 text-orange-400': danmu.type === 'button',
                 'bg-green-500/20 text-green-400': danmu.type === 'path',
+                'bg-purple-500/20 text-purple-400': danmu.type === 'audio',
               }"
             >
               {{ getDanmuTypeLabel(danmu.type) }}
