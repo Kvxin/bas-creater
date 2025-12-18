@@ -1,5 +1,6 @@
 import type {
   AnyDanmu,
+  AudioDanmu,
   ButtonDanmu,
   DanmuBase,
   DanmuType,
@@ -89,22 +90,45 @@ export function createPathDanmu(ov: Partial<PathDanmu> = {}): PathDanmu {
   };
 }
 
-export function createDanmuByKey(key: string): AnyDanmu {
+export function createAudioDanmu(ov: Partial<AudioDanmu> = {}): AudioDanmu {
+  const base = baseDefaults("audio", ov);
+  return {
+    ...base,
+    type: "audio",
+    src: ov.src ?? "",
+    startTime: ov.startTime ?? 0,
+    volume: ov.volume ?? 1,
+  };
+}
+
+export function createDanmuByKey(key: string, payload: Partial<AnyDanmu> = {}): AnyDanmu {
   switch (key) {
     case "text":
       return createTextDanmu({
         content: "",
         zIndex: 3,
         durationMs: 5000,
+        ...payload,
       });
     case "path":
-      return createPathDanmu({ zIndex: 1, durationMs: 2000, scale: 0.8 });
+      return createPathDanmu({
+        zIndex: 1,
+        durationMs: 2000,
+        scale: 0.8,
+        ...payload,
+      });
     case "button":
       return createButtonDanmu({
         text: "按钮弹幕",
         zIndex: 1,
         durationMs: 2000,
         scale: 1,
+        ...payload,
+      });
+    case "audio":
+      return createAudioDanmu({
+        durationMs: 5000, // 默认给一个时长，后续可能需要根据音频实际时长更新
+        ...payload,
       });
     default:
       return createTextDanmu({});
@@ -186,6 +210,9 @@ export function danmuToDSL(danmu: AnyDanmu): string {
     zIndex = ${d.zIndex ?? 1}
 }`;
     setBlock = `set ${name} {} ${durationSec}s`;
+  } else if (danmu.type === "audio") {
+    // BAS DSL 暂时不支持 audio，或者使用特殊注释标记
+    return `// [Audio] ${danmu.name || 'Unknown Audio'} (duration: ${durationSec}s)`;
   }
 
   return `${defBlock}\n${setBlock}`;

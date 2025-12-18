@@ -30,8 +30,8 @@ export const useDanmuStore = defineStore("danmu", () => {
     selectedId.value = id
   }
 
-  function add(type: DanmuType) {
-    const dm = createDanmuByKey(type)
+  function add(type: DanmuType, payload: Partial<AnyDanmu> = {}) {
+    const dm = createDanmuByKey(type, payload)
     danmus.value.push(dm)
     select(dm.id)
     return dm

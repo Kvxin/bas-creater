@@ -1,4 +1,4 @@
-export type DanmuType = 'text' | 'button' | 'path'
+export type DanmuType = 'text' | 'button' | 'path' | 'audio'
 
 // durationMs: 毫秒；颜色使用 0x 开头的十六进制数值；alpha/opacity 0~1
 export interface DanmuBase {
@@ -17,6 +17,13 @@ export interface DanmuBase {
   anchorX?: number // 0~1
   anchorY?: number // 0~1
   parentId?: string | null
+}
+
+export interface AudioDanmu extends DanmuBase {
+  type: 'audio'
+  src: string // Blob URL or Base64
+  startTime?: number // 音频开始播放的时间偏移 (秒) - 可选，默认 0
+  volume?: number // 0~1
 }
 
 export interface TextDanmu extends DanmuBase {
@@ -56,5 +63,5 @@ export interface PathDanmu extends DanmuBase {
   width?: number | string // 支持 20 或 '20%'
 }
 
-export type AnyDanmu = TextDanmu | ButtonDanmu | PathDanmu
+export type AnyDanmu = TextDanmu | ButtonDanmu | PathDanmu | AudioDanmu
 

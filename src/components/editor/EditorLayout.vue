@@ -12,7 +12,7 @@ const isDark = useDark();
 const toggleDark = useToggle(isDark);
 
 // Layout State
-const leftWidth = ref(300);
+const leftWidth = ref(450);
 const rightWidth = ref(300);
 const bottomHeight = ref(250);
 
