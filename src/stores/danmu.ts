@@ -41,7 +41,7 @@ export const useDanmuStore = defineStore("danmu", () => {
     const next = danmus.value.filter((dm) => dm.id !== id)
     danmus.value = next
     if (selectedId.value === id) {
-      selectedId.value = next.at(-1)?.id ?? null
+      selectedId.value = next[next.length - 1]?.id ?? null
     }
   }
 
