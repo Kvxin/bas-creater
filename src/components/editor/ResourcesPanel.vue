@@ -253,6 +253,26 @@ const addNewDanmu = (type: DanmuType) => {
   const newDanmu = danmuStore.add(type);
   console.log(`[ResourcesPanel] 添加新弹幕:`, newDanmu);
 };
+
+// 拖拽处理
+const handleDragStart = (
+  item: AnyDanmu | AudioResource,
+  event: DragEvent
+) => {
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = "copy";
+    // 序列化 item 数据。注意：File 对象无法通过 JSON 传递，如果需要传递文件引用，
+    // 在同一页面内通常建议通过全局状态或 ID 查找，这里为了演示 "打印详细信息"
+    // 我们尽可能序列化基本字段。
+    const transferData = {
+      ...item,
+      // 如果是 audio resource，file 属性在 JSON 中会丢失，这里手动处理一下文件名等元数据
+      file: item.type === 'audio-file' ? { name: (item as AudioResource).file.name, type: (item as AudioResource).file.type } : undefined
+    };
+    event.dataTransfer.setData("application/json", JSON.stringify(transferData));
+    console.log(`[ResourcesPanel] 开始拖拽: ${getItemName(item)}`);
+  }
+};
 </script>
 
 <template>
@@ -358,6 +378,8 @@ const addNewDanmu = (type: DanmuType) => {
         <div
           v-for="item in filteredItems"
           :key="item.id"
+          draggable="true"
+          @dragstart="handleDragStart(item, $event)"
           @click="handleItemClick(item)"
           class="group flex items-center px-3 py-2 rounded-md hover:bg-sidebar-accent cursor-pointer transition-colors text-xs"
           :class="{

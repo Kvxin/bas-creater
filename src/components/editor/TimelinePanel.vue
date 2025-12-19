@@ -29,6 +29,20 @@ const currentTimeDisplay = computed(() => {
     "0"
   )}:${String(s).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
 });
+
+// 处理拖拽放置
+const handleDrop = (event: DragEvent) => {
+  const data = event.dataTransfer?.getData("application/json");
+  if (data) {
+    try {
+      const item = JSON.parse(data);
+      console.log("[TimelinePanel] 接收到拖拽元素:", item);
+      console.log("详细信息:", JSON.stringify(item, null, 2));
+    } catch (e) {
+      console.error("解析拖拽数据失败", e);
+    }
+  }
+};
 </script>
 
 <template>
@@ -69,7 +83,11 @@ const currentTimeDisplay = computed(() => {
     </div>
 
     <!-- 轨道区域 -->
-    <div class="flex-1 relative overflow-hidden bg-sidebar p-2">
+    <div
+      class="flex-1 relative overflow-hidden bg-sidebar p-2"
+      @dragover.prevent
+      @drop="handleDrop"
+    >
       <!-- Timeline Tracks -->
       <div class="space-y-1">
         <div
