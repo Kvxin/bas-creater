@@ -3,6 +3,9 @@ import { computed } from "vue";
 import { Settings } from "lucide-vue-next";
 import { useDanmuStore } from "@/stores/danmu";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Slider } from "@/components/ui/slider";
 import type { AnyDanmu } from "@/types/danmu";
 
 const danmuStore = useDanmuStore();
@@ -75,9 +78,9 @@ const updateColor = (key: string, htmlHex: string, asNumber: boolean) => {
       
       <!-- 公共属性：身份 -->
       <div class="space-y-3 border-b border-sidebar-border/50 pb-4">
-        <label class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        <Label class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           基本信息
-        </label>
+        </Label>
         <div class="space-y-2">
             <div class="grid grid-cols-[3rem_1fr] items-center gap-2">
             <span class="text-xs text-muted-foreground">名称</span>
@@ -93,9 +96,9 @@ const updateColor = (key: string, htmlHex: string, asNumber: boolean) => {
 
       <!-- 公共属性：变换 -->
       <div class="space-y-3 border-b border-sidebar-border/50 pb-4">
-        <label class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        <Label class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           位置与变换
-        </label>
+        </Label>
         <div class="grid grid-cols-2 gap-3">
           <div class="space-y-1">
             <span class="text-[10px] text-muted-foreground uppercase">X 坐标</span>
@@ -138,23 +141,21 @@ const updateColor = (key: string, htmlHex: string, asNumber: boolean) => {
       
       <!-- 公共属性：外观 -->
        <div class="space-y-3 border-b border-sidebar-border/50 pb-4">
-        <label class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        <Label class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           外观与时长
-        </label>
+        </Label>
          <div class="space-y-3">
             <div class="space-y-1">
-              <div class="flex justify-between items-center">
+              <div class="flex justify-between items-center mb-1.5">
                  <span class="text-[10px] text-muted-foreground uppercase">不透明度</span>
                  <span class="text-[10px] text-muted-foreground font-mono">{{ ((selected.opacity ?? 1) * 100).toFixed(0) }}%</span>
               </div>
-              <input 
-                type="range" 
-                min="0" 
-                max="1" 
-                step="0.01"
-                :value="selected.opacity ?? 1"
-                @input="(e: Event) => updateField('opacity', parseFloat((e.target as HTMLInputElement).value), true)"
-                class="w-full h-1.5 bg-sidebar-accent rounded-lg appearance-none cursor-pointer accent-primary"
+              <Slider
+                :model-value="[selected.opacity ?? 1]"
+                :max="1"
+                :step="0.01"
+                @update:model-value="(v) => updateField('opacity', v[0], true)"
+                class="w-full"
               />
             </div>
             
@@ -173,18 +174,18 @@ const updateColor = (key: string, htmlHex: string, asNumber: boolean) => {
 
       <!-- 类型特定：文本 -->
       <div v-if="selected.type === 'text'" class="space-y-3 pb-4">
-        <label class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        <Label class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           文本样式
-        </label>
+        </Label>
         <div class="space-y-3">
           <div class="space-y-1">
             <span class="text-[10px] text-muted-foreground uppercase">文本内容</span>
-            <textarea
-              :value="(selected as any).content"
-              @input="(e: Event) => updateField('content', (e.target as HTMLTextAreaElement).value)"
-              class="w-full min-h-[60px] rounded-md border border-input bg-transparent px-3 py-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
+            <Textarea
+              :model-value="(selected as any).content"
+              @update:model-value="(v) => updateField('content', v)"
+              class="min-h-[60px] text-xs resize-y"
               placeholder="请输入弹幕内容..."
-            ></textarea>
+            />
           </div>
 
           <div class="grid grid-cols-2 gap-3">
@@ -218,9 +219,9 @@ const updateColor = (key: string, htmlHex: string, asNumber: boolean) => {
 
        <!-- 类型特定：按钮 -->
       <div v-if="selected.type === 'button'" class="space-y-3 pb-4">
-        <label class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        <Label class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           按钮样式
-        </label>
+        </Label>
         <div class="space-y-3">
            <div class="space-y-1">
             <span class="text-[10px] text-muted-foreground uppercase">按钮文字</span>
@@ -262,18 +263,18 @@ const updateColor = (key: string, htmlHex: string, asNumber: boolean) => {
       
        <!-- 类型特定：路径 -->
       <div v-if="selected.type === 'path'" class="space-y-3 pb-4">
-        <label class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        <Label class="text-xs font-medium text-muted-foreground uppercase tracking-wider">
           路径数据
-        </label>
+        </Label>
          <div class="space-y-3">
             <div class="space-y-1">
             <span class="text-[10px] text-muted-foreground uppercase">SVG 路径数据 (d)</span>
-             <textarea
-              :value="(selected as any).d"
-              @input="(e: Event) => updateField('d', (e.target as HTMLTextAreaElement).value)"
-              class="w-full min-h-[60px] rounded-md border border-input bg-transparent px-3 py-2 text-xs font-mono shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
+             <Textarea
+              :model-value="(selected as any).d"
+              @update:model-value="(v) => updateField('d', v)"
+              class="min-h-[60px] text-xs font-mono resize-y"
               placeholder="M0 0 L10 10..."
-            ></textarea>
+            />
           </div>
            <div class="grid grid-cols-2 gap-3">
              <div class="space-y-1">

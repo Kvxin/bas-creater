@@ -12,12 +12,8 @@ export type ViewportState = {
 }
 
 export const useDanmuStore = defineStore("danmu", () => {
-  const danmus = ref<AnyDanmu[]>([
-    createDanmuByKey("text"),
-    createDanmuByKey("button"),
-    createDanmuByKey("path"),
-  ])
-  const selectedId = ref<string | null>(danmus.value[0]?.id ?? null)
+  const danmus = ref<AnyDanmu[]>([])
+  const selectedId = ref<string | null>(null)
   const viewport = reactive<ViewportState>({
     scale: 1,
     offsetX: 0,
