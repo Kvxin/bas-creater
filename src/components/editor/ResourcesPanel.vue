@@ -135,7 +135,7 @@ const handleDragStart = (item: AnyDanmu | AudioResource, event: DragEvent) => {
     <ResourcesSidebar v-model="activeTab" />
 
     <!-- List Content -->
-    <div class="flex-1 flex flex-col min-w-0 bg-background/50">
+    <div class="flex-1 flex flex-col min-w-0 bg-background/50 overflow-hidden">
       <!-- Header -->
       <ResourcesHeader
         v-model:searchQuery="searchQuery"
