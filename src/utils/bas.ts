@@ -56,8 +56,10 @@ class VirtualClock {
 class BasService {
   private bas: any | null = null;
   private clock = new VirtualClock();
+  private lastOpts: BasInitOptions | null = null;
 
   init(opts: BasInitOptions) {
+    this.lastOpts = opts; // Save options for reset
     const BasDanmaku = (window as any).BasDanmaku;
     if (!BasDanmaku)
       throw new Error(
@@ -75,6 +77,30 @@ class BasService {
       timeSyncFunc: () => this.clock.nowMs(),
     });
     this.bas.init?.();
+  }
+
+  // 完全重置实例（用于编辑器重新编译运行）
+  reset() {
+    if (!this.lastOpts) return;
+    this.pause();
+    
+    // 尝试销毁旧实例 (如果有 destroy 方法)
+    try {
+        if (this.bas && typeof this.bas.destroy === 'function') {
+            this.bas.destroy();
+        }
+    } catch (e) {
+        console.warn("Destroy BAS failed", e);
+    }
+    this.bas = null;
+    
+    // 清空容器内容
+    if (this.lastOpts.container) {
+      this.lastOpts.container.innerHTML = "";
+    }
+
+    // 重新初始化
+    this.init(this.lastOpts);
   }
 
   isReady() {
@@ -111,6 +137,11 @@ class BasService {
     this.clock.seek(ms);
     this.bas?.seek?.(sec, refresh);
   }
+  
+  getCurrentTime() {
+    return this.clock.nowMs();
+  }
+
   remove(dmid: string | number) {
     this.bas?.remove?.(dmid);
   }
@@ -141,7 +172,7 @@ class BasService {
     }
   ) {
     this.bas?.add?.({
-      dm: { text, stime: -1 },
+      dm: { text, stime: 0 },
       parsed: false,
       test: options?.test,
       success: options?.success,
