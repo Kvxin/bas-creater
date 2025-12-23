@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from "vue";
-import { getGridPixel, getGridSize, formatTime } from "@/utils/timeline";
+import { getGridPixel, getGridSize, formatTime, getPixelsPerSecond } from "@/utils/timeline";
 
 type Props = {
   scale?: number; // 缩放比例 (1-100)
@@ -65,32 +65,30 @@ const tickHeight = {
 // 文字区域高度
 const textAreaHeight = 14;
 
-// 获取刻度间隔配置
+// 获取刻度间隔配置 (基于 PPS 像素/秒)
 const getTickIntervals = (scale: number) => {
-  if (scale >= 80) {
-    // 毫秒级
-    return { minor: 50, medium: 250, major: 1000 };
-  } else if (scale >= 40) {
-    // 秒级
-    return { minor: 1000, medium: 5000, major: 10000 };
-  } else {
-    // 分钟级
-    return { minor: 10000, medium: 30000, major: 60000 };
-  }
-};
+  const pps = getPixelsPerSecond(scale);
 
-// 根据可视宽度和缩放比例计算需要显示的最大时间
-const calculateMaxTime = (visibleWidth: number, scale: number) => {
-  const gridMs = getGridSize(scale);
-  const pixelPerMs = getGridPixel(scale, gridMs) / gridMs;
-  // 计算可视区域能显示的时间，并向上取整到大刻度的倍数
-  const intervals = getTickIntervals(scale);
-  const visibleTimeMs = visibleWidth / pixelPerMs;
-  // 向上取整到大刻度的下一个倍数，确保铺满
-  return (
-    Math.ceil(visibleTimeMs / intervals.major) * intervals.major +
-    intervals.major
-  );
+  // 1. 高倍缩放 (PPS >= 100): 1s >= 100px
+  if (pps >= 100) {
+    // scale=50 (100px/s) -> major=1s, medium=0.5s, minor=0.1s
+    // scale=100 (200px/s) -> major=1s, medium=0.25s, minor=0.05s
+    return { 
+      minor: pps >= 200 ? 50 : 100, 
+      medium: pps >= 200 ? 250 : 500, 
+      major: 1000 
+    };
+  } 
+  
+  // 2. 中等缩放 (PPS >= 40): 1s >= 40px
+  // scale=25 (50px/s)
+  if (pps >= 40) {
+    return { minor: 500, medium: 1000, major: 5000 };
+  } 
+  
+  // 3. 低倍缩放 (PPS < 40)
+  // scale=10 (20px/s) -> 5s=100px
+  return { minor: 1000, medium: 5000, major: 10000 };
 };
 
 // 绘制时间刻度
@@ -119,20 +117,32 @@ const drawRuler = () => {
 
   // 获取刻度间隔
   const intervals = getTickIntervals(props.scale);
+  const pps = getPixelsPerSecond(props.scale);
 
-  // 计算实际绘制区域宽度（减去左侧 padding）
-  const drawableWidth = width - props.paddingLeft;
+  // 计算可视区域对应的时间范围
+  // x = paddingLeft + (time * pps / 1000) - scrollLeft
+  // => time = (x - paddingLeft + scrollLeft) * 1000 / pps
+  
+  // 增加额外的渲染缓冲区域 (左右各 100px)
+  const bufferPixel = 100;
+  const startPixel = -bufferPixel;
+  const endPixel = width + bufferPixel;
 
-  // 根据可视宽度自动计算最大时间
-  const maxTime = calculateMaxTime(drawableWidth, props.scale);
+  const rawStartTime = ((startPixel - props.paddingLeft + props.scrollLeft) * 1000) / pps;
+  const rawEndTime = ((endPixel - props.paddingLeft + props.scrollLeft) * 1000) / pps;
+
+  // 对齐到最小刻度
+  const startTime = Math.max(0, Math.floor(rawStartTime / intervals.minor) * intervals.minor);
+  const endTime = Math.ceil(rawEndTime / intervals.minor) * intervals.minor;
 
   // 绘制刻度
-  for (let time = 0; time <= maxTime; time += intervals.minor) {
+  for (let time = startTime; time <= endTime; time += intervals.minor) {
     // 添加 paddingLeft 偏移，使刻度与轨道对齐
     const x =
       props.paddingLeft + getGridPixel(props.scale, time) - props.scrollLeft;
 
-    if (x < props.paddingLeft - 50 || x > width + 50) continue;
+    // 再次检查可见性（虽然循环范围已经限制了，但为了保险）
+    if (x < -50 || x > width + 50) continue;
 
     let tickH = tickHeight.minor;
     let tickColor = colors.minorTick;
