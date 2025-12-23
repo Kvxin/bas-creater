@@ -1,18 +1,20 @@
-// 每个小格的像素（可根据 UI 调整）
-const PX_PER_GRID = 10;
+// 统一的缩放逻辑：pixelsPerSecond = scale * 2
+export function getPixelsPerSecond(scale: number): number {
+  return scale * 2;
+}
 
 /**
- * 根据 scale 获取一个小格对应的时间（毫秒）
- * 50ms / 1000ms / 10000ms
+ * 根据 scale 获取网格对齐的基准时间单元（毫秒）
+ * 用于吸附和计算基础网格
  */
 export function getGridSize(scale: number): number {
-  if (scale >= 80) {
-    return 50; // 毫秒级：50ms
-  }
-  if (scale >= 40) {
-    return 1000; // 秒级：1s
-  }
-  return 10000; // 分钟级：10s
+  const pps = getPixelsPerSecond(scale);
+  // 目标：让每个最小网格在视觉上保持在 10px - 50px 之间
+  if (pps >= 200) return 50;   // 1s=200px -> 50ms=10px
+  if (pps >= 100) return 100;  // 1s=100px -> 100ms=10px
+  if (pps >= 40) return 250;   // 1s=40px  -> 250ms=10px
+  if (pps >= 20) return 500;   // 1s=20px  -> 500ms=10px
+  return 1000;                 // 1s=10px  -> 1s=10px (base)
 }
 
 /**
@@ -21,8 +23,8 @@ export function getGridSize(scale: number): number {
  * @param timeMs 毫秒值
  */
 export function getGridPixel(scale: number, timeMs: number): number {
-  const gridMs = getGridSize(scale);
-  return (timeMs / gridMs) * PX_PER_GRID;
+  const pps = getPixelsPerSecond(scale);
+  return (timeMs / 1000) * pps;
 }
 
 /**
@@ -31,8 +33,12 @@ export function getGridPixel(scale: number, timeMs: number): number {
  * @param scale 缩放比例
  */
 export function getGridTime(offsetX: number, scale: number): number {
-  const gridMs = getGridSize(scale);
-  return Math.floor(offsetX / PX_PER_GRID) * gridMs;
+  const pps = getPixelsPerSecond(scale);
+  if (pps === 0) return 0;
+  // 直接转为时间，再吸附到最近的 grid
+  const rawMs = (offsetX / pps) * 1000;
+  const gridSize = getGridSize(scale);
+  return Math.round(rawMs / gridSize) * gridSize;
 }
 
 /**
@@ -60,7 +66,7 @@ export function getShortText(timeMs: number, scale: number): string {
  * 返回格式：hh:mm:ss.xxx
  */
 export function formatTime(timeMs: number) {
-  const ms = timeMs % 1000;
+  const ms = Math.floor(timeMs % 1000);
   let totalSeconds = Math.floor(timeMs / 1000);
 
   const s = totalSeconds % 60;

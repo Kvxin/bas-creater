@@ -1,0 +1,99 @@
+import { defineStore } from "pinia";
+import { ref } from "vue";
+import type { TimelineTrack, TimelineClip } from "@/types/timeline";
+import type { AnyDanmu } from "@/types/danmu";
+import { getItemName } from "@/utils/resourceUtils";
+
+export const useTimelineStore = defineStore("timeline", () => {
+  const tracks = ref<TimelineTrack[]>([
+    {
+      id: "track_1",
+      name: "轨道 1",
+      clips: [],
+      visible: true,
+      locked: false,
+    },
+  ]);
+
+  const currentTime = ref(0);
+  const isPlaying = ref(false);
+  const duration = ref(300000); // 默认总时长 5分钟
+  const zoomScale = ref(50);
+
+  // 添加新轨道
+  const addTrack = (name?: string) => {
+    const id = `track_${Math.random().toString(36).slice(2, 9)}`;
+    tracks.value.push({
+      id,
+      name: name || `轨道 ${tracks.value.length + 1}`,
+      clips: [],
+      visible: true,
+      locked: false,
+    });
+    return id;
+  };
+
+  // 添加片段
+  // resource: 拖入的资源
+  // trackId: 目标轨道 ID
+  // time: 插入的时间点 (ms)
+  const addClip = (resource: AnyDanmu, trackId: string, time: number) => {
+    const track = tracks.value.find((t) => t.id === trackId);
+    if (!track) {
+      console.warn(`[TimelineStore] Track not found: ${trackId}`);
+      return;
+    }
+
+    const clipDuration = resource.durationMs || 5000; // 默认 5秒
+
+    const newClip: TimelineClip = {
+      id: `clip_${Math.random().toString(36).slice(2, 9)}`,
+      resourceId: resource.id,
+      name: getItemName(resource),
+      startTime: time,
+      duration: clipDuration,
+      trackId: trackId,
+    };
+
+    track.clips.push(newClip);
+    // 简单的排序，保证片段按时间顺序排列
+    track.clips.sort((a, b) => a.startTime - b.startTime);
+
+    // 动态扩展时间轴长度
+    const clipEnd = time + clipDuration;
+    if (clipEnd > duration.value) {
+        // 扩展到片段结束时间 + 1分钟缓冲
+        duration.value = clipEnd + 60000;
+    }
+
+    console.log("[TimelineStore] Added clip:", newClip);
+  };
+
+  // 移除片段
+  const removeClip = (clipId: string) => {
+    for (const track of tracks.value) {
+      const index = track.clips.findIndex((c) => c.id === clipId);
+      if (index !== -1) {
+        track.clips.splice(index, 1);
+        return;
+      }
+    }
+  };
+
+  // 更新当前时间
+  const setCurrentTime = (time: number) => {
+    currentTime.value = Math.max(0, Math.min(time, duration.value));
+  };
+
+  return {
+    tracks,
+    currentTime,
+    isPlaying,
+    duration,
+    zoomScale,
+    addTrack,
+    addClip,
+    removeClip,
+    setCurrentTime,
+  };
+});

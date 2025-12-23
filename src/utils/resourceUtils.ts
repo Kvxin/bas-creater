@@ -4,9 +4,9 @@ import type { AudioResource } from "@/types/resource";
 export const getDefaultName = (item: AnyDanmu | AudioResource): string => {
   switch (item.type) {
     case "text":
-      return (item as { content: string }).content || "文本弹幕";
+      return "文本弹幕";
     case "button":
-      return (item as { text: string }).text || "按钮弹幕";
+      return "按钮弹幕";
     case "path":
       return "路径弹幕";
     case "audio-file":

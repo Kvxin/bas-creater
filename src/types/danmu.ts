@@ -57,4 +57,3 @@ export interface PathDanmu extends DanmuBase {
 }
 
 export type AnyDanmu = TextDanmu | ButtonDanmu | PathDanmu
-
