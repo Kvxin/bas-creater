@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from "vue";
 import {
   Play,
   Pause,
@@ -10,6 +10,17 @@ import {
   RotateCcw,
 } from "lucide-vue-next";
 import basService from "@/utils/bas";
+import { useTimelineStore } from "@/stores/timeline";
+import { useDanmuStore } from "@/stores/danmu";
+import { compileTimelineToBas } from "@/utils/compiler";
+
+const ZOOM_SENSITIVITY = 0.001;
+const MIN_SCALE = 0.1;
+const MAX_SCALE = 5.0;
+
+// Stores
+const timelineStore = useTimelineStore();
+const danmuStore = useDanmuStore();
 
 // State
 const scale = ref(1);
@@ -17,13 +28,34 @@ const position = ref({ x: 0, y: 0 });
 const isDragging = ref(false);
 const lastMousePos = { x: 0, y: 0 };
 const containerRef = ref<HTMLElement | null>(null);
-const isPlaying = ref(false);
-const basInitialized = ref(false);
 
-// Constants
-const ZOOM_SENSITIVITY = 0.001;
-const MIN_SCALE = 0.1;
-const MAX_SCALE = 5;
+// Computed isPlaying synced with timelineStore
+const isPlaying = computed(() => timelineStore.isPlaying);
+const basInitialized = ref(false);
+let animationFrameId: number | null = null;
+
+// Sync loop
+const startSyncLoop = () => {
+  if (animationFrameId) cancelAnimationFrame(animationFrameId);
+  const loop = () => {
+    if (timelineStore.isPlaying) {
+      timelineStore.setCurrentTime(basService.getCurrentTime());
+      animationFrameId = requestAnimationFrame(loop);
+    }
+  };
+  animationFrameId = requestAnimationFrame(loop);
+};
+
+const stopSyncLoop = () => {
+  if (animationFrameId) {
+    cancelAnimationFrame(animationFrameId);
+    animationFrameId = null;
+  }
+};
+
+// ... (handleWheel, startDrag, onDrag, stopDrag helpers remain same)
+
+
 
 // Computed styles
 const containerStyle = computed(() => ({
@@ -94,6 +126,22 @@ const stopDrag = () => {
   document.body.style.cursor = "";
 };
 
+// 自动刷新预览（当资源或时间轴改变时）
+watch(
+  [() => danmuStore.danmus, () => timelineStore.tracks],
+  () => {
+    // 只有在暂停状态下才自动刷新，避免播放时频繁重置
+    if (!timelineStore.isPlaying && basInitialized.value && basService.isReady()) {
+      const code = compileTimelineToBas(timelineStore.tracks, danmuStore.danmus);
+      basService.reset();
+      basService.addRaw(code);
+      // 恢复到当前时间，强制刷新画面
+      basService.seek(timelineStore.currentTime / 1000, true);
+    }
+  },
+  { deep: true }
+);
+
 // Initial centering and BAS init
 onMounted(() => {
   if (containerRef.value) {
@@ -111,9 +159,8 @@ onMounted(() => {
     if (danmakuEl && !basService.isReady()) {
       try {
         basService.init({ container: danmakuEl });
-        basService.play();
+        // 初始化时不自动播放，或者根据需要
         basInitialized.value = true;
-        isPlaying.value = true;
         console.log("[PreviewPanel] BAS initialized");
       } catch (err) {
         console.warn("[PreviewPanel] BAS init failed:", err);
@@ -138,12 +185,24 @@ const resetView = () => {
 // 播放控制
 const togglePlay = () => {
   if (!basInitialized.value) return;
-  if (isPlaying.value) {
+
+  if (timelineStore.isPlaying) {
     basService.pause();
-    isPlaying.value = false;
+    timelineStore.isPlaying = false;
+    stopSyncLoop();
   } else {
+    // 1. 编译当前时间轴内容
+    const code = compileTimelineToBas(timelineStore.tracks, danmuStore.danmus);
+    console.log("[PreviewPanel] Compiling & Playing BAS Code:\n", code);
+
+    // 2. 重置并加载新代码
+    basService.reset();
+    basService.addRaw(code);
+    
+    // 3. 开始播放
     basService.play();
-    isPlaying.value = true;
+    timelineStore.isPlaying = true;
+    startSyncLoop();
   }
 };
 
