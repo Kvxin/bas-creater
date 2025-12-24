@@ -97,6 +97,8 @@ const tempState = reactive({
   duration: 0
 });
 
+const tooltipPosition = reactive({ x: 0, y: 0 });
+
 // 获取 Clip 样式
 const getClipStyle = (clip: any) => {
   let startTime = clip.startTime;
@@ -202,6 +204,10 @@ const startDragClip = (e: MouseEvent, clip: any) => {
   // 初始化临时状态
   tempState.startTime = clip.startTime;
   tempState.duration = clip.duration;
+  
+  // 初始化 tooltip 位置
+  tooltipPosition.x = e.clientX + 15;
+  tooltipPosition.y = e.clientY + 15;
 
   document.body.style.cursor = "move";
   window.addEventListener("mousemove", onDragClip);
@@ -219,6 +225,10 @@ const onDragClip = (e: MouseEvent) => {
   
   // 只更新本地临时状态，不触发 Store 更新
   tempState.startTime = newStartTime;
+
+  // 更新 tooltip 位置
+  tooltipPosition.x = e.clientX + 15;
+  tooltipPosition.y = e.clientY + 15;
 };
 
 const stopDragClip = () => {
@@ -257,6 +267,10 @@ const startResizeClip = (e: MouseEvent, clip: any, handle: 'left' | 'right') => 
     tempState.startTime = clip.startTime;
     tempState.duration = clip.duration;
     
+    // 初始化 tooltip 位置
+    tooltipPosition.x = e.clientX + 15;
+    tooltipPosition.y = e.clientY + 15;
+    
     document.body.style.cursor = handle === 'left' ? 'w-resize' : 'e-resize';
     window.addEventListener('mousemove', onResizeClip);
     window.addEventListener('mouseup', stopResizeClip);
@@ -294,6 +308,10 @@ const onResizeClip = (e: MouseEvent) => {
         tempState.startTime = newStartTime;
         tempState.duration = newDuration;
     }
+    
+    // 更新 tooltip 位置
+    tooltipPosition.x = e.clientX + 15;
+    tooltipPosition.y = e.clientY + 15;
 };
 
 const stopResizeClip = () => {
@@ -508,6 +526,18 @@ const stopDragPlayhead = () => {
             </div>
         </div>
       </div>
+    </div>
+    
+    <!-- Drag/Resize Tooltip -->
+    <div
+      v-if="isDraggingClip || isResizingClip"
+      class="fixed z-50 pointer-events-none bg-popover text-popover-foreground px-2 py-1.5 rounded shadow-md border border-border text-xs font-mono whitespace-pre flex flex-col gap-0.5"
+      :style="{ top: tooltipPosition.y + 'px', left: tooltipPosition.x + 'px' }"
+    >
+      <div v-if="isDraggingClip">Start: {{ formatTime(tempState.startTime).str }}</div>
+      <div v-else-if="isResizingClip">Start:    {{ formatTime(tempState.startTime).str }}
+Duration: {{ formatTime(tempState.duration).str }}
+End:      {{ formatTime(tempState.startTime + tempState.duration).str }}</div>
     </div>
   </div>
 </template>
