@@ -154,7 +154,7 @@ const updateColor = (key: string, htmlHex: string, asNumber: boolean) => {
                 :model-value="[selected.opacity ?? 1]"
                 :max="1"
                 :step="0.01"
-                @update:model-value="(v) => updateField('opacity', v[0], true)"
+                @update:model-value="(v) => v && updateField('opacity', v[0], true)"
                 class="w-full"
               />
             </div>

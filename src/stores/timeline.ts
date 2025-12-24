@@ -19,6 +19,7 @@ export const useTimelineStore = defineStore("timeline", () => {
   const isPlaying = ref(false);
   const duration = ref(300000); // 默认总时长 5分钟
   const zoomScale = ref(50);
+  const selectedClipId = ref<string | null>(null);
 
   // 添加新轨道
   const addTrack = (name?: string) => {
@@ -80,10 +81,36 @@ export const useTimelineStore = defineStore("timeline", () => {
     }
   };
 
+  // 更新片段
+  const updateClip = (clipId: string, updates: Partial<TimelineClip>) => {
+    for (const track of tracks.value) {
+      const clip = track.clips.find((c) => c.id === clipId);
+      if (clip) {
+        Object.assign(clip, updates);
+        
+        // 如果更新了时间，重新排序
+        if (updates.startTime !== undefined) {
+             track.clips.sort((a, b) => a.startTime - b.startTime);
+             
+             // 检查是否超出总时长
+             const clipEnd = clip.startTime + clip.duration;
+             if (clipEnd > duration.value) {
+                 duration.value = clipEnd + 60000;
+             }
+        }
+        return;
+      }
+    }
+  };
+
   // 更新当前时间
   const setCurrentTime = (time: number) => {
     currentTime.value = Math.max(0, Math.min(time, duration.value));
   };
+
+  const setSelectedClip = (id: string | null) => {
+      selectedClipId.value = id;
+  }
 
   return {
     tracks,
@@ -91,9 +118,12 @@ export const useTimelineStore = defineStore("timeline", () => {
     isPlaying,
     duration,
     zoomScale,
+    selectedClipId,
     addTrack,
     addClip,
     removeClip,
+    updateClip,
     setCurrentTime,
+    setSelectedClip
   };
 });

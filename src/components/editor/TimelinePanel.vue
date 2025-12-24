@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch } from "vue";
+import { ref, computed, watch, reactive } from "vue";
 import {
   Clock,
   ZoomIn,
@@ -91,13 +91,37 @@ const handleAddTrack = () => {
   timelineStore.addTrack();
 };
 
+// 临时状态，用于拖拽/调整大小时的高性能更新
+const tempState = reactive({
+  startTime: 0,
+  duration: 0
+});
+
 // 获取 Clip 样式
 const getClipStyle = (clip: any) => {
-  const left = (clip.startTime / 1000) * pixelsPerSecond.value;
-  const width = (clip.duration / 1000) * pixelsPerSecond.value;
+  let startTime = clip.startTime;
+  let duration = clip.duration;
+  let zIndex = 1;
+
+  // 如果正在拖拽这个片段，使用临时状态
+  if (isDraggingClip.value && draggedClipId.value === clip.id) {
+    startTime = tempState.startTime;
+    zIndex = 100;
+  } 
+  // 如果正在调整这个片段大小，使用临时状态
+  else if (isResizingClip.value && resizingClipId.value === clip.id) {
+    startTime = tempState.startTime;
+    duration = tempState.duration;
+    zIndex = 100;
+  }
+
+  const left = (startTime / 1000) * pixelsPerSecond.value;
+  const width = (duration / 1000) * pixelsPerSecond.value;
+  
   return {
     left: `${left}px`,
     width: `${width}px`,
+    zIndex
   };
 };
 
@@ -147,6 +171,147 @@ const updateTime = (time: number) => {
       basService.seek(time / 1000);
   }
 }
+
+// Clip 拖拽逻辑
+const isDraggingClip = ref(false);
+const draggedClipId = ref<string | null>(null);
+const initialClipStartTime = ref(0);
+const dragStartX = ref(0);
+
+const handleClipClick = (clip: any, e: MouseEvent) => {
+    timelineStore.setSelectedClip(clip.id);
+};
+
+const startDragClip = (e: MouseEvent, clip: any) => {
+  // 左键点击才触发
+  if (e.button !== 0) return;
+  
+  // 如果点击的是 resize handle，不要触发拖拽移动
+  if ((e.target as HTMLElement).dataset.handle) return;
+
+  e.stopPropagation(); // 阻止冒泡
+  
+  // 拖拽时同时也选中
+  timelineStore.setSelectedClip(clip.id);
+
+  isDraggingClip.value = true;
+  draggedClipId.value = clip.id;
+  initialClipStartTime.value = clip.startTime;
+  dragStartX.value = e.clientX;
+  
+  // 初始化临时状态
+  tempState.startTime = clip.startTime;
+  tempState.duration = clip.duration;
+
+  document.body.style.cursor = "move";
+  window.addEventListener("mousemove", onDragClip);
+  window.addEventListener("mouseup", stopDragClip);
+};
+
+const onDragClip = (e: MouseEvent) => {
+  if (!isDraggingClip.value || !draggedClipId.value) return;
+  
+  const deltaX = e.clientX - dragStartX.value;
+  const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
+  
+  let newStartTime = initialClipStartTime.value + deltaMs;
+  newStartTime = Math.max(0, newStartTime); // 限制最小时间为 0
+  
+  // 只更新本地临时状态，不触发 Store 更新
+  tempState.startTime = newStartTime;
+};
+
+const stopDragClip = () => {
+  if (isDraggingClip.value && draggedClipId.value) {
+      // 拖拽结束，一次性提交到 Store
+      timelineStore.updateClip(draggedClipId.value, { startTime: tempState.startTime });
+  }
+
+  isDraggingClip.value = false;
+  draggedClipId.value = null;
+  document.body.style.cursor = "";
+  window.removeEventListener("mousemove", onDragClip);
+  window.removeEventListener("mouseup", stopDragClip);
+};
+
+// Clip 调整大小逻辑 (Resize)
+const isResizingClip = ref(false);
+const resizingClipId = ref<string | null>(null);
+const resizingHandle = ref<'left' | 'right' | null>(null);
+const initialResizeStartTime = ref(0);
+const initialResizeDuration = ref(0);
+const resizeStartX = ref(0);
+
+const startResizeClip = (e: MouseEvent, clip: any, handle: 'left' | 'right') => {
+    e.stopPropagation();
+    e.preventDefault(); // 防止选中文本
+    
+    isResizingClip.value = true;
+    resizingClipId.value = clip.id;
+    resizingHandle.value = handle;
+    initialResizeStartTime.value = clip.startTime;
+    initialResizeDuration.value = clip.duration;
+    resizeStartX.value = e.clientX;
+    
+    // 初始化临时状态
+    tempState.startTime = clip.startTime;
+    tempState.duration = clip.duration;
+    
+    document.body.style.cursor = handle === 'left' ? 'w-resize' : 'e-resize';
+    window.addEventListener('mousemove', onResizeClip);
+    window.addEventListener('mouseup', stopResizeClip);
+};
+
+const onResizeClip = (e: MouseEvent) => {
+    if (!isResizingClip.value || !resizingClipId.value) return;
+    
+    const deltaX = e.clientX - resizeStartX.value;
+    const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
+    
+    if (resizingHandle.value === 'right') {
+        // 右侧拖拽：只改变时长
+        let newDuration = initialResizeDuration.value + deltaMs;
+        newDuration = Math.max(100, newDuration); // 最小 100ms
+        
+        // 更新临时状态
+        tempState.duration = newDuration;
+    } else {
+        // 左侧拖拽：改变开始时间和时长
+        let newStartTime = initialResizeStartTime.value + deltaMs;
+        let newDuration = initialResizeDuration.value - deltaMs;
+        
+        // 限制
+        if (newStartTime < 0) {
+            newStartTime = 0;
+            newDuration = initialResizeStartTime.value + initialResizeDuration.value;
+        }
+        if (newDuration < 100) {
+            newDuration = 100;
+            newStartTime = initialResizeStartTime.value + initialResizeDuration.value - 100;
+        }
+        
+        // 更新临时状态
+        tempState.startTime = newStartTime;
+        tempState.duration = newDuration;
+    }
+};
+
+const stopResizeClip = () => {
+    if (isResizingClip.value && resizingClipId.value) {
+        // 调整结束，一次性提交到 Store
+        timelineStore.updateClip(resizingClipId.value, { 
+            startTime: tempState.startTime,
+            duration: tempState.duration
+        });
+    }
+
+    isResizingClip.value = false;
+    resizingClipId.value = null;
+    resizingHandle.value = null;
+    document.body.style.cursor = "";
+    window.removeEventListener('mousemove', onResizeClip);
+    window.removeEventListener('mouseup', stopResizeClip);
+};
 
 // Playhead 拖拽逻辑
 const isDraggingPlayhead = ref(false);
@@ -300,10 +465,32 @@ const stopDragPlayhead = () => {
                     v-for="clip in track.clips"
                     :key="clip.id"
                     class="absolute top-1 bottom-1 rounded border border-primary/40 bg-primary/20 hover:bg-primary/30 text-[10px] flex items-center px-2 text-primary-foreground overflow-hidden cursor-move select-none"
+                    :class="{ 'ring-2 ring-primary ring-offset-1 z-10': timelineStore.selectedClipId === clip.id }"
                     :style="getClipStyle(clip)"
                     :title="getClipName(clip)"
+                    @click.stop="handleClipClick(clip, $event)"
+                    @mousedown.stop="startDragClip($event, clip)"
                 >
                     <span class="truncate text-foreground/90 font-medium">{{ getClipName(clip) }}</span>
+                    
+                    <!-- Resize Handles -->
+                    <template v-if="timelineStore.selectedClipId === clip.id">
+                        <div 
+                            class="absolute left-0 top-0 bottom-0 w-2 cursor-w-resize hover:bg-primary/50 z-20 flex items-center justify-center group/handle"
+                            data-handle="left"
+                            @mousedown.stop="startResizeClip($event, clip, 'left')"
+                        >
+                             <div class="w-1 h-3 bg-primary/40 rounded-full group-hover/handle:bg-primary"></div>
+                        </div>
+                        
+                        <div 
+                            class="absolute right-0 top-0 bottom-0 w-2 cursor-e-resize hover:bg-primary/50 z-20 flex items-center justify-center group/handle"
+                            data-handle="right"
+                            @mousedown.stop="startResizeClip($event, clip, 'right')"
+                        >
+                             <div class="w-1 h-3 bg-primary/40 rounded-full group-hover/handle:bg-primary"></div>
+                        </div>
+                    </template>
                 </div>
             </div>
             

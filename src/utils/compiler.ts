@@ -13,14 +13,17 @@ const formatValue = (key: string, value: any): string => {
   }
 
   // 坐标处理: 假设 0-100 的数值代表百分比，除非显式带了 'px'
-  if ((key === "x" || key === "y" || key === "fontSize") && typeof value === "number") {
+  if (
+    (key === "x" || key === "y" || key === "fontSize") &&
+    typeof value === "number"
+  ) {
     return `${value}%`;
   }
 
   // 字符串加引号
   if (typeof value === "string") {
     // 简单的转义
-    return `"${value.replace(/"/g, '\"')}"`;
+    return `"${value.replace(/"/g, '"')}"`;
   }
 
   return String(value);
@@ -47,8 +50,13 @@ export const compileTimelineToBas = (
       if (resource.type === "button") defType = "button";
       if (resource.type === "path") defType = "path";
 
-      // 计算总存活时间 = 开始时间 + 持续时间 + 这里的缓冲区(可选)
-      const totalDurationSec = (clip.startTime + clip.duration) / 1000;
+      // 2. 生成 SET (时间轴逻辑)
+      const startSec = clip.startTime / 1000;
+      const durationSec = clip.duration / 1000;
+      // 计算总存活时间 = 开始时间 + 持续时间
+      const totalDurationSec = startSec + durationSec;
+      
+      const targetAlpha = resource.opacity ?? 1;
 
       basCode += `def ${defType} ${varName} {
 `;
@@ -56,7 +64,10 @@ export const compileTimelineToBas = (
       // --- 属性映射 ---
       // 必需属性
       if (resource.type === "text") {
-        basCode += `    content = ${formatValue("content", (resource as any).content)}
+        basCode += `    content = ${formatValue(
+          "content",
+          (resource as any).content
+        )}
 `;
       } else if (resource.type === "button") {
         basCode += `    text = ${formatValue("text", (resource as any).text)}
@@ -68,59 +79,53 @@ export const compileTimelineToBas = (
 
       // 通用属性 (遍历 resource 属性)
       // 排除列表：这些由 timeline 控制或有特殊逻辑
-      const excludeKeys = ["id", "type", "name", "durationMs", "parentId", "content", "text", "d"];
-      
+      const excludeKeys = [
+        "id",
+        "type",
+        "name",
+        "durationMs",
+        "parentId",
+        "content",
+        "text",
+        "d",
+        // 如果有延迟开始，alpha/opacity 由 def 初始值和 set 动画控制，不在此处输出
+        ...(startSec > 0 ? ["alpha", "opacity"] : []),
+      ];
+
       Object.entries(resource).forEach(([key, val]) => {
         if (excludeKeys.includes(key)) return;
-        // alpha 特殊处理：初始设为 0
-        if (key === "opacity" || key === "alpha") return; 
-        
+
         const fmtVal = formatValue(key, val);
         if (fmtVal) {
-           // BAS 使用 alpha 而不是 opacity
-           const basKey = key === 'opacity' ? 'alpha' : key;
-           basCode += `    ${basKey} = ${fmtVal}
+          // BAS 使用 alpha 而不是 opacity
+          const basKey = key === "opacity" ? "alpha" : key;
+          basCode += `    ${basKey} = ${fmtVal}
 `;
         }
       });
 
-      // 强制覆盖属性
+      // 显式设置 duration (BAS 需要秒)
       basCode += `    duration = ${totalDurationSec}s
 `;
-      basCode += `    alpha = 0
-`; // 初始隐藏
+
+      // 如果有延迟，初始 alpha 设为 0
+      if (startSec > 0) {
+        basCode += `    alpha = 0
+`;
+      }
 
       basCode += `}
 `;
 
-      // 2. 生成 SET (时间轴逻辑)
-      const startSec = clip.startTime / 1000;
-      const durationSec = clip.duration / 1000;
-      const targetAlpha = resource.opacity ?? 1;
-
-      // 阶段1: 等待开始 (Pre-wait)
+      // 生成 SET (仅当需要延迟显示时)
       if (startSec > 0) {
+        // 1. 等待 (保持 alpha = 0)
         basCode += `set ${varName} {} ${startSec}s
 `;
+        // 2. 显示 (恢复到目标透明度)
         basCode += `then set ${varName} { alpha = ${targetAlpha} } 0s
 `;
-      } else {
-        // 如果 start=0，直接出现
-        basCode += `set ${varName} { alpha = ${targetAlpha} } 0s
-`;
       }
-
-      // 阶段2: 持续显示 (Hold)
-      // 如果有入场动画，这里需要拆分，目前仅做静态显示
-      if (durationSec > 0) {
-          basCode += `then set ${varName} {} ${durationSec}s
-`;
-      }
-
-      // 阶段3: 消失 (End)
-      // 可以在最后加一个 alpha=0 确保消失，或者依赖 duration 自动销毁
-      // 为了平滑，我们在 duration 结束时设为 alpha 0 (0s 动画)
-      basCode += `then set ${varName} { alpha = 0 } 0s\n`;
 
       basCode += "\n";
     });
