@@ -6,10 +6,11 @@ import {
   SquareMousePointer,
   Waypoints,
   AudioLines,
-  Pencil,
+  Plus,
   Trash2,
 } from "lucide-vue-next";
 import { Input } from "@/components/ui/input";
+import { useTimelineStore } from "@/stores/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 
@@ -31,6 +32,8 @@ const emit = defineEmits<{
   (e: "update-name", item: AnyDanmu | AudioResource, name: string): void;
   (e: "drag-start", item: AnyDanmu | AudioResource, event: DragEvent): void;
 }>();
+
+const timelineStore = useTimelineStore();
 
 // 编辑状态
 const editingId = ref<string | null>(null);
@@ -129,6 +132,12 @@ const handleDragStart = (
 ) => {
   emit("drag-start", item, event);
 };
+
+const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
+  event.stopPropagation();
+  const trackId = timelineStore.addTrack();
+  timelineStore.addClip(item, trackId, 0);
+};
 </script>
 
 <template>
@@ -205,13 +214,13 @@ const handleDragStart = (
         >
           {{ formatDuration(getItemDuration(item)) }}
         </div>
-        <!-- 编辑按钮 -->
+        <!-- 编辑按钮 (改为添加到轨道) -->
         <button
-          @click="startEdit(item, $event)"
+          @click="addToNewTrack(item, $event)"
           class="ml-1 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-sidebar-accent text-muted-foreground hover:text-primary transition-all"
-          title="编辑名称"
+          title="添加到新轨道"
         >
-          <Pencil class="size-3" />
+          <Plus class="size-3" />
         </button>
         <!-- 删除按钮 -->
         <button
