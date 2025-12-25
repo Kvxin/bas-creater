@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, reactive } from "vue";
+import { ref, computed, watch, reactive, onMounted, onUnmounted } from "vue";
 import {
   Clock,
   ZoomIn,
@@ -89,6 +89,11 @@ const handleDrop = (event: DragEvent, trackId: string) => {
 // 添加轨道
 const handleAddTrack = () => {
   timelineStore.addTrack();
+};
+
+// 删除轨道
+const handleRemoveTrack = (trackId: string) => {
+  timelineStore.removeTrack(trackId);
 };
 
 // 临时状态，用于拖拽/调整大小时的高性能更新
@@ -365,6 +370,30 @@ const stopDragPlayhead = () => {
   }
 };
 
+// 键盘事件处理 (删除片段)
+const handleKeyDown = (e: KeyboardEvent) => {
+  if (e.key === "Delete" || e.key === "Backspace") {
+    // 如果焦点在输入框中，不触发删除
+    const activeTag = document.activeElement?.tagName.toLowerCase();
+    if (activeTag === "input" || activeTag === "textarea" || (document.activeElement as HTMLElement).isContentEditable) {
+      return;
+    }
+
+    if (timelineStore.selectedClipId) {
+      timelineStore.removeClip(timelineStore.selectedClipId);
+      timelineStore.selectedClipId = null;
+    }
+  }
+};
+
+onMounted(() => {
+  window.addEventListener("keydown", handleKeyDown);
+});
+
+onUnmounted(() => {
+  window.removeEventListener("keydown", handleKeyDown);
+});
+
 </script>
 
 <template>
@@ -441,7 +470,10 @@ const stopDragPlayhead = () => {
               class="h-10 border-b border-sidebar-border flex items-center px-3 text-xs group hover:bg-sidebar-accent/30 transition-colors shrink-0"
           >
               <div class="flex-1 truncate font-medium">{{ track.name }}</div>
-              <button class="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive transition-opacity">
+              <button 
+                  class="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive transition-opacity"
+                  @click="handleRemoveTrack(track.id)"
+              >
                   <Trash2 class="size-3" />
               </button>
           </div>
