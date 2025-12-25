@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { useDanmuStore } from "@/stores/danmu";
+import { useTimelineStore } from "@/stores/timeline";
 import type { DanmuType, AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 import { getItemName } from "@/utils/resourceUtils";
@@ -10,6 +11,7 @@ import ResourcesHeader from "./resources/ResourcesHeader.vue";
 import ResourcesList from "./resources/ResourcesList.vue";
 
 const danmuStore = useDanmuStore();
+const timelineStore = useTimelineStore();
 
 const localAudioResources = ref<AudioResource[]>([]);
 const activeTab = ref("all");
@@ -73,6 +75,10 @@ const handleDelete = (item: AnyDanmu | AudioResource) => {
   } else {
     danmuStore.remove(item.id);
   }
+  
+  // 同步删除轨道中的相关片段
+  timelineStore.removeClipsByResourceId(item.id);
+  
   console.log(`[ResourcesPanel] 删除: ${item.id}`);
 };
 
