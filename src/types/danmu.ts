@@ -37,6 +37,7 @@ export interface ButtonDanmu extends DanmuBase {
   text: string
   fontSize?: number
   textColor?: number
+  textAlpha?: number // 0~1
   fillColor?: number
   fillAlpha?: number // 0~1
   target?:
@@ -54,6 +55,7 @@ export interface PathDanmu extends DanmuBase {
   fillColor?: number
   fillAlpha?: number
   width?: number | string // 支持 20 或 '20%'
+  height?: number | string
 }
 
 export type AnyDanmu = TextDanmu | ButtonDanmu | PathDanmu
