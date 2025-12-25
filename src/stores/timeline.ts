@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 import type { TimelineTrack, TimelineClip } from "@/types/timeline";
 import type { AnyDanmu } from "@/types/danmu";
+import type { AudioResource } from "@/types/resource";
 import { getItemName } from "@/utils/resourceUtils";
 
 export const useTimelineStore = defineStore("timeline", () => {
@@ -34,18 +35,31 @@ export const useTimelineStore = defineStore("timeline", () => {
     return id;
   };
 
+  // 移除轨道
+  const removeTrack = (trackId: string) => {
+    const index = tracks.value.findIndex((t) => t.id === trackId);
+    if (index !== -1) {
+      tracks.value.splice(index, 1);
+    }
+  };
+
   // 添加片段
   // resource: 拖入的资源
   // trackId: 目标轨道 ID
   // time: 插入的时间点 (ms)
-  const addClip = (resource: AnyDanmu, trackId: string, time: number) => {
+  const addClip = (resource: AnyDanmu | AudioResource, trackId: string, time: number) => {
     const track = tracks.value.find((t) => t.id === trackId);
     if (!track) {
       console.warn(`[TimelineStore] Track not found: ${trackId}`);
       return;
     }
 
-    const clipDuration = resource.durationMs || 5000; // 默认 5秒
+    let clipDuration = 5000;
+    if ("durationMs" in resource && resource.durationMs) {
+      clipDuration = resource.durationMs;
+    } else if ("duration" in resource && resource.duration) {
+      clipDuration = resource.duration;
+    }
 
     const newClip: TimelineClip = {
       id: `clip_${Math.random().toString(36).slice(2, 9)}`,
@@ -75,8 +89,26 @@ export const useTimelineStore = defineStore("timeline", () => {
     for (const track of tracks.value) {
       const index = track.clips.findIndex((c) => c.id === clipId);
       if (index !== -1) {
+        if (selectedClipId.value === clipId) {
+          selectedClipId.value = null;
+        }
         track.clips.splice(index, 1);
         return;
+      }
+    }
+  };
+
+  // 根据 resourceId 移除片段
+  const removeClipsByResourceId = (resourceId: string) => {
+    for (const track of tracks.value) {
+      for (let i = track.clips.length - 1; i >= 0; i--) {
+        const clip = track.clips[i];
+        if (clip && clip.resourceId === resourceId) {
+          if (selectedClipId.value === clip.id) {
+            selectedClipId.value = null;
+          }
+          track.clips.splice(i, 1);
+        }
       }
     }
   };
@@ -120,8 +152,10 @@ export const useTimelineStore = defineStore("timeline", () => {
     zoomScale,
     selectedClipId,
     addTrack,
+    removeTrack,
     addClip,
     removeClip,
+    removeClipsByResourceId,
     updateClip,
     setCurrentTime,
     setSelectedClip
