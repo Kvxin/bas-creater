@@ -67,7 +67,7 @@ onClickOutside(containerRef, () => {
       v-if="visible"
       ref="containerRef"
       :class="cn(
-        'fixed z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-80 zoom-in-95',
+        'fixed z-50 min-w-32 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md animate-in fade-in-80 zoom-in-95',
         props.class
       )"
       :style="{
