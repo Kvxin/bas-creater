@@ -2,3 +2,5 @@ danmu
 Danmus
 lucide
 Playhead
+reka
+vueuse
