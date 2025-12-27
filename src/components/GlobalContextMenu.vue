@@ -25,8 +25,8 @@ const currentMenu = computed(() => {
     @close="store.hide()"
   >
     <template v-if="currentMenu">
-      <!-- 可选的分组标签 -->
-      <ContextMenuLabel v-if="currentMenu.label">
+      <!-- 可选的分组标签：仅当 label 存在且不为空字符串时渲染 -->
+      <ContextMenuLabel v-if="currentMenu.label && currentMenu.label.trim() !== ''">
         {{ currentMenu.label }}
       </ContextMenuLabel>
       
