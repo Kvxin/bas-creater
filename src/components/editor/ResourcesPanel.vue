@@ -9,13 +9,25 @@ import { getItemName } from "@/utils/resourceUtils";
 import ResourcesSidebar from "./resources/ResourcesSidebar.vue";
 import ResourcesHeader from "./resources/ResourcesHeader.vue";
 import ResourcesList from "./resources/ResourcesList.vue";
+import { useContextMenuStore } from "@/stores/contextMenu";
 
 const danmuStore = useDanmuStore();
 const timelineStore = useTimelineStore();
+const contextMenu = useContextMenuStore();
 
 const localAudioResources = ref<AudioResource[]>([]);
 const activeTab = ref("all");
 const searchQuery = ref("");
+
+const handleContextMenu = (item: AnyDanmu | AudioResource, event: MouseEvent) => {
+  contextMenu.show(event, 'resource-item', item, {
+    // Override 'resource.delete' to handle local audio files
+    'resource.delete': (data) => handleDelete(data),
+    // Override 'resource.rename' (if we had logic implemented)
+    'resource.rename': (data) => console.log('Local Rename logic', data)
+  });
+};
+
 
 // 根据当前 tab 过滤弹幕列表
 const filteredItems = computed<Array<AnyDanmu | AudioResource>>(() => {
@@ -157,6 +169,7 @@ const handleDragStart = (item: AnyDanmu | AudioResource, event: DragEvent) => {
         @update-name="handleUpdateName"
         @delete="handleDelete"
         @drag-start="handleDragStart"
+        @contextmenu="handleContextMenu"
       />
 
       <!-- Footer: 弹幕数量统计 -->

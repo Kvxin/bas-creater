@@ -15,9 +15,28 @@ import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { compileTimelineToBas } from "@/utils/compiler";
 import basService from "@/utils/bas";
+import { useContextMenuStore } from "@/stores/contextMenu";
 
 const timelineStore = useTimelineStore();
 const danmuStore = useDanmuStore();
+const contextMenu = useContextMenuStore();
+
+const handleContextMenu = (e: MouseEvent, type: 'track' | 'clip' | 'background', data?: any) => {
+  e.preventDefault();
+  e.stopPropagation();
+
+  if (type === 'track') {
+    // data is trackId. The global command expects { id: ... } or just the ID depending on how we wrote it.
+    // In menus.ts: store.removeTrack(data.id). So we need to pass an object { id: trackId }
+    contextMenu.show(e, 'track-header', { id: data });
+  } else if (type === 'clip') {
+    // data is the clip object.
+    contextMenu.show(e, 'timeline-clip', data);
+  } else {
+    contextMenu.show(e, 'timeline-bg');
+  }
+};
+
 
 // 像素/秒 计算
 const pixelsPerSecond = computed(() => timelineStore.zoomScale * 2);
@@ -468,6 +487,7 @@ onUnmounted(() => {
               v-for="track in timelineStore.tracks"
               :key="track.id"
               class="h-10 border-b border-sidebar-border flex items-center px-3 text-xs group hover:bg-sidebar-accent/30 transition-colors shrink-0"
+              @contextmenu="handleContextMenu($event, 'track', track.id)"
           >
               <div class="flex-1 truncate font-medium">{{ track.name }}</div>
               <button 
@@ -501,6 +521,7 @@ onUnmounted(() => {
           class="relative"
           :style="{ width: Math.max(1000, totalWidth) + 'px' }"
           @mousedown.self="handleTimelineClick"
+          @contextmenu.prevent="handleContextMenu($event, 'background')"
         >
             <!-- 轨道行 -->
             <div
@@ -520,6 +541,7 @@ onUnmounted(() => {
                     :title="getClipName(clip)"
                     @click.stop="handleClipClick(clip, $event)"
                     @mousedown.stop="startDragClip($event, clip)"
+                    @contextmenu.stop="handleContextMenu($event, 'clip', clip)"
                 >
                     <span class="truncate text-foreground/90 font-medium">{{ getClipName(clip) }}</span>
                     
@@ -573,3 +595,4 @@ End:      {{ formatTime(tempState.startTime + tempState.duration).str }}</div>
     </div>
   </div>
 </template>
+

@@ -31,6 +31,7 @@ const emit = defineEmits<{
   (e: "delete", item: AnyDanmu | AudioResource): void;
   (e: "update-name", item: AnyDanmu | AudioResource, name: string): void;
   (e: "drag-start", item: AnyDanmu | AudioResource, event: DragEvent): void;
+  (e: "contextmenu", item: AnyDanmu | AudioResource, event: MouseEvent): void;
 }>();
 
 const timelineStore = useTimelineStore();
@@ -160,6 +161,7 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
         draggable="true"
         @dragstart="handleDragStart(item, $event)"
         @click="handleItemClick(item)"
+        @contextmenu.prevent="emit('contextmenu', item, $event)"
         class="group flex items-center px-3 py-2 rounded-md hover:bg-sidebar-accent cursor-pointer transition-colors text-xs"
         :class="{
           'bg-sidebar-accent/70 ring-1 ring-primary/50':
