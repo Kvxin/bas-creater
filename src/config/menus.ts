@@ -1,5 +1,6 @@
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
+import { useClipDetailsStore } from "@/stores/clipDetails";
 
 /**
  * =============================================================================
@@ -53,6 +54,7 @@ export interface MenuConfig {
 
 // --- 1. 菜单定义 (结构) ---
 export const MENU_REGISTRY: Record<string, MenuConfig> = {
+  // 轨道列表相关右键菜单区域
   "track-header": {
     // label: "轨道操作",
     items: [
@@ -64,9 +66,12 @@ export const MENU_REGISTRY: Record<string, MenuConfig> = {
       },
     ],
   },
+  // 轨道列表中的片段右键菜单区域
   "timeline-clip": {
     label: "片段操作",
     items: [
+      { id: "detail", label: "查看详情", action: "clip.viewDetails" },
+      { id: "sep0", separator: true, label: "" },
       { id: "copy", label: "复制", action: "clip.copy" },
       { id: "cut", label: "剪切", disabled: true, action: "clip.cut" },
       { id: "sep2", separator: true, label: "" },
@@ -78,6 +83,7 @@ export const MENU_REGISTRY: Record<string, MenuConfig> = {
       },
     ],
   },
+  // 轨道列表中的轨道背景右键菜单区域
   "timeline-bg": {
     label: "时间轴",
     items: [
@@ -85,6 +91,7 @@ export const MENU_REGISTRY: Record<string, MenuConfig> = {
       { id: "paste", label: "粘贴", disabled: true, action: "track.paste" },
     ],
   },
+  // 弹幕资源区域的弹幕列表的右键菜单区域
   "resource-item": {
     label: "资源操作",
     items: [
@@ -115,6 +122,10 @@ export const GLOBAL_COMMANDS: Record<string, (data: any) => void> = {
   },
 
   // 片段命令
+  "clip.viewDetails": (clip) => {
+    const store = useClipDetailsStore();
+    store.open(clip);
+  },
   "clip.delete": (clip) => {
     const store = useTimelineStore();
     store.removeClip(clip.id);
