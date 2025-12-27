@@ -29,21 +29,11 @@ const formatValue = (key: string, value: any): string => {
   return String(value);
 };
 
-export const compileTimelineToBas = (
-  tracks: TimelineTrack[],
-  resources: AnyDanmu[]
-): string => {
-  let basCode = "";
-
-  tracks.forEach((track) => {
-    if (!track.visible) return; // 忽略不可见轨道
-
-    track.clips.forEach((clip) => {
-      const resource = resources.find((r) => r.id === clip.resourceId);
-      if (!resource) return;
-
+export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string => {
       // 生成合法的 BAS 变量名 (移除特殊字符)
       const varName = `obj_${clip.id.replace(/[^a-zA-Z0-9]/g, "_")}`;
+
+      let basCode = "";
 
       // 1. 生成 DEF (定义)
       let defType = "text";
@@ -126,7 +116,24 @@ export const compileTimelineToBas = (
         basCode += `then set ${varName} { alpha = ${targetAlpha} } 0s
 `;
       }
+      
+      return basCode;
+};
 
+export const compileTimelineToBas = (
+  tracks: TimelineTrack[],
+  resources: AnyDanmu[]
+): string => {
+  let basCode = "";
+
+  tracks.forEach((track) => {
+    if (!track.visible) return; // 忽略不可见轨道
+
+    track.clips.forEach((clip) => {
+      const resource = resources.find((r) => r.id === clip.resourceId);
+      if (!resource) return;
+
+      basCode += compileClipToBas(clip, resource);
       basCode += "\n";
     });
   });
