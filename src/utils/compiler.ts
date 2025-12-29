@@ -52,17 +52,17 @@ export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string
 `;
 
       // --- 属性映射 ---
-      // 必需属性
-      if (resource.type === "text") {
+      // 必需属性 (改为按需输出)
+      if (resource.type === "text" && (resource as any).content !== undefined) {
         basCode += `    content = ${formatValue(
           "content",
           (resource as any).content
         )}
 `;
-      } else if (resource.type === "button") {
+      } else if (resource.type === "button" && (resource as any).text !== undefined) {
         basCode += `    text = ${formatValue("text", (resource as any).text)}
 `;
-      } else if (resource.type === "path") {
+      } else if (resource.type === "path" && (resource as any).d !== undefined) {
         basCode += `    d = ${formatValue("d", (resource as any).d)}
 `;
       }
@@ -84,6 +84,7 @@ export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string
 
       Object.entries(resource).forEach(([key, val]) => {
         if (excludeKeys.includes(key)) return;
+        if (val === undefined || val === null) return; // 跳过空值
 
         const fmtVal = formatValue(key, val);
         if (fmtVal) {

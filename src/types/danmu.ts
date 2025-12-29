@@ -21,7 +21,7 @@ export interface DanmuBase {
 
 export interface TextDanmu extends DanmuBase {
   type: 'text'
-  content: string
+  content?: string
   fontSize?: number | string // 支持 5 或 '5%'
   fontFamily?: string
   bold?: number | boolean
@@ -34,7 +34,7 @@ export interface TextDanmu extends DanmuBase {
 
 export interface ButtonDanmu extends DanmuBase {
   type: 'button'
-  text: string
+  text?: string
   fontSize?: number
   textColor?: number
   textAlpha?: number // 0~1
@@ -47,7 +47,7 @@ export interface ButtonDanmu extends DanmuBase {
 
 export interface PathDanmu extends DanmuBase {
   type: 'path'
-  d: string
+  d?: string
   viewBox?: string
   borderWidth?: number
   borderColor?: number
