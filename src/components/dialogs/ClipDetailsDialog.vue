@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { Copy, Check } from 'lucide-vue-next'
 import {
   Dialog,
   DialogContent,
@@ -28,6 +29,18 @@ const generatedCode = computed(() => {
   return compileClipToBas(currentClip.value, currentResource.value)
 })
 
+const copied = ref(false)
+const handleCopy = async () => {
+  if (!generatedCode.value) return
+  try {
+    await navigator.clipboard.writeText(generatedCode.value)
+    copied.value = true
+    setTimeout(() => copied.value = false, 2000)
+  } catch (err) {
+    console.error('Failed to copy:', err)
+  }
+}
+
 const handleOpenChange = (open: boolean) => {
   if (!open) store.close()
 }
@@ -53,7 +66,17 @@ const updateClip = (key: string, val: any) => {
       <div class="grid grid-cols-2 gap-6 py-4">
         <!-- Left: Code Preview -->
         <div class="flex flex-col gap-2">
-            <Label>BAS 代码预览</Label>
+            <div class="flex items-center justify-between">
+                <Label>BAS 代码预览</Label>
+                <button 
+                    @click="handleCopy"
+                    class="p-1 hover:bg-muted-foreground/10 rounded-md transition-colors cursor-pointer"
+                    title="复制完整代码"
+                >
+                    <Check v-if="copied" class="w-4 h-4 text-green-500" />
+                    <Copy v-else class="w-4 h-4 text-muted-foreground" />
+                </button>
+            </div>
             <div class="flex-1 bg-muted p-4 rounded-md font-mono text-xs whitespace-pre overflow-auto h-[400px] border border-border">
                 {{ generatedCode }}
             </div>
