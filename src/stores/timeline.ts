@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import type { TimelineTrack, TimelineClip } from "@/types/timeline";
+import type { TimelineTrack, TimelineClip, AnimationSegment } from "@/types/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 import { getItemName } from "@/utils/resourceUtils";
@@ -21,6 +21,7 @@ export const useTimelineStore = defineStore("timeline", () => {
   const duration = ref(300000); // 默认总时长 5分钟
   const zoomScale = ref(50);
   const selectedClipId = ref<string | null>(null);
+  const selectedAnimationId = ref<string | null>(null);
 
   // 添加新轨道
   const addTrack = (name?: string) => {
@@ -31,6 +32,7 @@ export const useTimelineStore = defineStore("timeline", () => {
       clips: [],
       visible: true,
       locked: false,
+      expanded: false,
     });
     return id;
   };
@@ -68,6 +70,7 @@ export const useTimelineStore = defineStore("timeline", () => {
       startTime: time,
       duration: clipDuration,
       trackId: trackId,
+      animations: [],
     };
 
     track.clips.push(newClip);
@@ -142,6 +145,76 @@ export const useTimelineStore = defineStore("timeline", () => {
 
   const setSelectedClip = (id: string | null) => {
       selectedClipId.value = id;
+      if (id === null) {
+          selectedAnimationId.value = null;
+      }
+  }
+
+  const setSelectedAnimation = (id: string | null) => {
+    selectedAnimationId.value = id;
+  }
+
+  const toggleTrackExpand = (trackId: string) => {
+    const track = tracks.value.find((t) => t.id === trackId);
+    if (track) {
+      track.expanded = !track.expanded;
+    }
+  }
+
+  // 动画管理
+  const addClipAnimation = (clipId: string, animation: AnimationSegment) => {
+    for (const track of tracks.value) {
+      const clip = track.clips.find(c => c.id === clipId);
+      if (clip) {
+        if (!clip.animations) clip.animations = [];
+        clip.animations.push(animation);
+        return;
+      }
+    }
+  }
+
+  const insertClipAnimation = (clipId: string, index: number, animation: AnimationSegment) => {
+    for (const track of tracks.value) {
+      const clip = track.clips.find(c => c.id === clipId);
+      if (clip) {
+        if (!clip.animations) clip.animations = [];
+        // Ensure index is valid
+        if (index < 0) index = 0;
+        if (index > clip.animations.length) index = clip.animations.length;
+        
+        clip.animations.splice(index, 0, animation);
+        return;
+      }
+    }
+  }
+
+  const removeClipAnimation = (clipId: string, animationId: string) => {
+    for (const track of tracks.value) {
+      const clip = track.clips.find(c => c.id === clipId);
+      if (clip && clip.animations) {
+        const idx = clip.animations.findIndex(a => a.id === animationId);
+        if (idx !== -1) {
+          clip.animations.splice(idx, 1);
+          if (selectedAnimationId.value === animationId) {
+            selectedAnimationId.value = null;
+          }
+        }
+        return;
+      }
+    }
+  }
+
+  const updateClipAnimation = (clipId: string, animationId: string, updates: Partial<AnimationSegment>) => {
+    for (const track of tracks.value) {
+      const clip = track.clips.find(c => c.id === clipId);
+      if (clip && clip.animations) {
+        const animation = clip.animations.find(a => a.id === animationId);
+        if (animation) {
+          Object.assign(animation, updates);
+        }
+        return;
+      }
+    }
   }
 
   return {
@@ -151,6 +224,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     duration,
     zoomScale,
     selectedClipId,
+    selectedAnimationId,
     addTrack,
     removeTrack,
     addClip,
@@ -158,6 +232,12 @@ export const useTimelineStore = defineStore("timeline", () => {
     removeClipsByResourceId,
     updateClip,
     setCurrentTime,
-    setSelectedClip
+    setSelectedClip,
+    setSelectedAnimation,
+    toggleTrackExpand,
+    addClipAnimation,
+    insertClipAnimation,
+    removeClipAnimation,
+    updateClipAnimation
   };
 });
