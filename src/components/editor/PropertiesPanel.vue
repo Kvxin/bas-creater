@@ -1,15 +1,71 @@
 <script setup lang="ts">
 import { computed, reactive } from "vue";
-import { Settings, ChevronRight, ChevronDown } from "lucide-vue-next";
+import { Settings, ChevronRight, ChevronDown, Plus, Trash2, ArrowLeft } from "lucide-vue-next";
 import { useDanmuStore } from "@/stores/danmu";
+import { useTimelineStore } from "@/stores/timeline";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import type { AnyDanmu } from "@/types/danmu";
+import type { AnimationSegment } from "@/types/timeline";
 
 const danmuStore = useDanmuStore();
+const timelineStore = useTimelineStore();
 const selected = computed(() => danmuStore.selected);
+
+const selectedClip = computed(() => {
+    if (!timelineStore.selectedClipId) return null;
+    for (const track of timelineStore.tracks) {
+        const clip = track.clips.find(c => c.id === timelineStore.selectedClipId);
+        if (clip) return clip;
+    }
+    return null;
+});
+
+const selectedAnimation = computed(() => {
+    if (!selectedClip.value || !timelineStore.selectedAnimationId) return null;
+    return selectedClip.value.animations?.find(a => a.id === timelineStore.selectedAnimationId);
+});
+
+// 动画属性更新
+const updateAnimationField = (key: keyof AnimationSegment, value: any) => {
+    if (!selectedClip.value || !selectedAnimation.value) return;
+    timelineStore.updateClipAnimation(selectedClip.value.id, selectedAnimation.value.id, { [key]: value });
+};
+
+const updateAnimationProperty = (key: string, value: any, asNumber = true) => {
+    if (!selectedClip.value || !selectedAnimation.value) return;
+    const props = { ...selectedAnimation.value.properties };
+    
+    if (value === '' || value === undefined) {
+        delete (props as any)[key];
+    } else {
+        (props as any)[key] = asNumber ? Number(value) : value;
+    }
+    
+    timelineStore.updateClipAnimation(selectedClip.value.id, selectedAnimation.value.id, { properties: props });
+};
+
+const addAnimation = () => {
+    if (!selectedClip.value) return;
+    const newAnim: AnimationSegment = {
+        id: `anim_${Date.now()}`,
+        type: 'then',
+        duration: 1000,
+        properties: {}
+    };
+    timelineStore.addClipAnimation(selectedClip.value.id, newAnim);
+};
+
+const removeAnimation = () => {
+    if (!selectedClip.value || !selectedAnimation.value) return;
+    timelineStore.removeClipAnimation(selectedClip.value.id, selectedAnimation.value.id);
+};
+
+const backToClip = () => {
+    timelineStore.setSelectedAnimation(null);
+}
 
 // 折叠状态管理
 const sectionState = reactive({
@@ -22,6 +78,7 @@ const toggleSection = (key: keyof typeof sectionState) => {
   sectionState[key] = !sectionState[key];
 };
 
+// ... (Existing helpers remain the same) ...
 // 类型名称映射
 const typeNames: Record<string, string> = {
   text: "文本弹幕",
@@ -42,8 +99,6 @@ const updateField = (key: string, value: any, asNumber: boolean = false) => {
 };
 
 // --- 颜色辅助函数 ---
-
-// Store (0xRRGGBB 字符串或数字) -> UI (#RRGGBB)
 const toHtmlColor = (val: string | number | undefined): string => {
   if (val === undefined) return "#000000";
   let hexStr = "";
@@ -55,13 +110,12 @@ const toHtmlColor = (val: string | number | undefined): string => {
     } else if (val.startsWith("#")) {
       return val;
     } else {
-      return "#000000"; // 回退方案
+      return "#000000";
     }
   }
   return "#" + hexStr;
 };
 
-// UI (#RRGGBB) -> Store
 const updateColor = (key: string, htmlHex: string, asNumber: boolean) => {
   const cleanHex = htmlHex.replace("#", "");
   if (asNumber) {
@@ -71,24 +125,19 @@ const updateColor = (key: string, htmlHex: string, asNumber: boolean) => {
   }
 };
 
-// 更新按钮 AV 号
 const updateButtonAV = (val: string | number) => {
   const av = typeof val === 'string' ? parseInt(val) : val;
   if (!isNaN(av)) {
-      // 简单起见，默认创建 av 跳转目标
-      // 如果需要保留 page/timeMs，需要更复杂的逻辑，这里假设是设置新的跳转目标
       danmuStore.updateSelected({
           target: { av: { av, page: 1, timeMs: 0 } }
       } as Partial<AnyDanmu>);
   }
 }
 
-// 更新布尔值属性 (0/1)
 const updateBoolean = (key: string, value: boolean) => {
   danmuStore.updateSelected({ [key]: value ? 1 : 0 } as Partial<AnyDanmu>);
 };
 
-// 获取按钮 AV 号
 const getButtonAV = (item: any): number | undefined => {
     if (item.target && 'av' in item.target) {
         return item.target.av.av;
@@ -105,12 +154,111 @@ const getButtonAV = (item: any): number | undefined => {
     <div
       class="h-12 border-b border-sidebar-border flex items-center px-4 font-medium text-sidebar-foreground justify-between shrink-0"
     >
-      <span>属性设置</span>
+      <div class="flex items-center gap-2">
+          <button v-if="selectedAnimation" @click="backToClip" class="hover:bg-sidebar-accent p-1 rounded-md transition-colors">
+              <ArrowLeft class="size-4" />
+          </button>
+          <span>{{ selectedAnimation ? '动画设置' : '属性设置' }}</span>
+      </div>
       <Settings class="size-4 text-muted-foreground" />
     </div>
 
-    <!-- 内容区 -->
-    <div v-if="selected" class="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-custom">
+    <!-- 动画编辑模式 -->
+    <div v-if="selectedAnimation" class="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-custom">
+        <div class="space-y-4 border-b border-sidebar-border/50 pb-5">
+            <div class="flex items-center justify-between">
+                <Label class="text-xs font-semibold text-primary uppercase tracking-wider">基础配置</Label>
+                <button @click="removeAnimation" class="text-destructive hover:bg-destructive/10 p-1 rounded transition-colors" title="删除动画">
+                    <Trash2 class="size-4" />
+                </button>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-1">
+                    <Label class="text-[10px] text-muted-foreground uppercase">类型</Label>
+                    <select 
+                        :value="selectedAnimation.type" 
+                        @change="(e: any) => updateAnimationField('type', e.target.value)"
+                        class="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                        <option value="then">串行 (Then Set)</option>
+                        <option value="set">并行 (Set)</option>
+                    </select>
+                </div>
+                 <div class="space-y-1">
+                    <Label class="text-[10px] text-muted-foreground uppercase">时长 (ms)</Label>
+                    <Input type="number" step="100" :model-value="selectedAnimation.duration" @update:model-value="v => updateAnimationField('duration', Number(v))" class="h-8 text-xs font-mono" />
+                </div>
+            </div>
+            
+            <div v-if="selectedAnimation.type === 'set'" class="space-y-1">
+                <Label class="text-[10px] text-muted-foreground uppercase">延迟 (Delay ms)</Label>
+                 <Input type="number" step="100" :model-value="selectedAnimation.delay" @update:model-value="v => updateAnimationField('delay', Number(v))" class="h-8 text-xs font-mono" />
+            </div>
+        </div>
+        
+        <div class="space-y-4">
+             <Label class="text-xs font-semibold text-primary uppercase tracking-wider block mb-2">属性变更 (Properties)</Label>
+             <p class="text-[10px] text-muted-foreground mb-4">仅填写需要变化的属性，留空则保持不变。</p>
+             
+             <div class="grid grid-cols-2 gap-4">
+                  <div class="space-y-1">
+                    <Label class="text-[10px] text-muted-foreground uppercase">X 坐标</Label>
+                    <Input :model-value="selectedAnimation.properties.x" @update:model-value="v => updateAnimationProperty('x', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
+                </div>
+                <div class="space-y-1">
+                    <Label class="text-[10px] text-muted-foreground uppercase">Y 坐标</Label>
+                    <Input :model-value="selectedAnimation.properties.y" @update:model-value="v => updateAnimationProperty('y', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
+                </div>
+                <div class="space-y-1">
+                    <Label class="text-[10px] text-muted-foreground uppercase">不透明度 (Opacity)</Label>
+                    <Input type="number" step="0.1" :model-value="selectedAnimation.properties.opacity" @update:model-value="v => updateAnimationProperty('opacity', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
+                </div>
+                <div class="space-y-1">
+                    <Label class="text-[10px] text-muted-foreground uppercase">缩放 (Scale)</Label>
+                    <Input type="number" step="0.1" :model-value="selectedAnimation.properties.scale" @update:model-value="v => updateAnimationProperty('scale', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
+                </div>
+             </div>
+             
+              <div class="grid grid-cols-3 gap-2 pt-2">
+                <div class="space-y-1">
+                    <span class="text-[10px] text-muted-foreground uppercase">旋转 X</span>
+                    <Input type="number" :model-value="selectedAnimation.properties.rotateX" @update:model-value="(v) => updateAnimationProperty('rotateX', v)" class="h-7 text-xs font-mono" placeholder="-" />
+                </div>
+                <div class="space-y-1">
+                    <span class="text-[10px] text-muted-foreground uppercase">旋转 Y</span>
+                    <Input type="number" :model-value="selectedAnimation.properties.rotateY" @update:model-value="(v) => updateAnimationProperty('rotateY', v)" class="h-7 text-xs font-mono" placeholder="-" />
+                </div>
+                <div class="space-y-1">
+                    <span class="text-[10px] text-muted-foreground uppercase">旋转 Z</span>
+                    <Input type="number" :model-value="selectedAnimation.properties.rotateZ" @update:model-value="(v) => updateAnimationProperty('rotateZ', v)" class="h-7 text-xs font-mono" placeholder="-" />
+                </div>
+            </div>
+             
+             <!-- Color -->
+             <div class="space-y-1 pt-2">
+                 <Label class="text-[10px] text-muted-foreground uppercase">颜色</Label>
+                  <div class="flex gap-2">
+                     <!-- Helper input for color picker, simplified logic -->
+                    <Input type="text" :model-value="(selectedAnimation.properties as any).color || (selectedAnimation.properties as any).textColor" @update:model-value="v => updateAnimationProperty('color', v, false)" class="h-7 text-[10px] font-mono flex-1" placeholder="0xFFFFFF" />
+                </div>
+             </div>
+        </div>
+    </div>
+
+    <!-- 常规资源编辑模式 -->
+    <div v-else-if="selected" class="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-custom">
+      
+      <!-- 添加动画入口 -->
+      <div v-if="selectedClip" class="mb-2">
+          <button 
+            @click="addAnimation"
+            class="w-full flex items-center justify-center gap-2 h-9 rounded-md border border-dashed border-sidebar-border hover:bg-sidebar-accent hover:text-primary transition-colors text-xs text-muted-foreground"
+          >
+              <Plus class="size-3.5" />
+              添加动画片段 (Animation)
+          </button>
+      </div>
       
       <!-- 第一阶段：内容与身份 (根据类型自适应) -->
       <div class="space-y-4 border-b border-sidebar-border/50 pb-5">

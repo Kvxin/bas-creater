@@ -8,6 +8,8 @@ import {
   Pause,
   Plus,
   Trash2,
+  ChevronRight,
+  ChevronDown,
 } from "lucide-vue-next";
 import TimeRuler from "./TimeRuler.vue";
 import { formatTime } from "@/utils/timeline";
@@ -16,6 +18,8 @@ import { useDanmuStore } from "@/stores/danmu";
 import { compileTimelineToBas } from "@/utils/compiler";
 import basService from "@/utils/bas";
 import { useContextMenuStore } from "@/stores/contextMenu";
+
+import type { AnimationSegment } from "@/types/timeline";
 
 const timelineStore = useTimelineStore();
 const danmuStore = useDanmuStore();
@@ -26,8 +30,6 @@ const handleContextMenu = (e: MouseEvent, type: 'track' | 'clip' | 'background',
   e.stopPropagation();
 
   if (type === 'track') {
-    // data is trackId. The global command expects { id: ... } or just the ID depending on how we wrote it.
-    // In menus.ts: store.removeTrack(data.id). So we need to pass an object { id: trackId }
     contextMenu.show(e, 'track-header', { id: data });
   } else if (type === 'clip') {
     // data is the clip object.
@@ -37,6 +39,76 @@ const handleContextMenu = (e: MouseEvent, type: 'track' | 'clip' | 'background',
   }
 };
 
+// 计算动画片段的样式
+const getAnimationSegmentStyle = (clip: any, anim: AnimationSegment, index: number) => {
+    let startOffset = 0;
+    
+    // Check if dragging or resizing this specific animation
+    const isDragging = isDraggingAnimation.value && draggedAnimationId.value === anim.id;
+    const isResizing = isResizingAnimation.value && resizingAnimationId.value === anim.id;
+    
+    // Use temp state if active
+    const delay = (isDragging && anim.type === 'set') ? tempAnimationState.delay : (anim.delay || 0);
+    const duration = isResizing ? tempAnimationState.duration : anim.duration;
+
+    if (anim.type === 'set') {
+        startOffset = delay;
+    } else {
+        // For 'then', calculate start based on previous items
+        for (let i = 0; i < index; i++) {
+            const prev = clip.animations[i];
+            if (!prev) continue;
+            
+            // If prev is being resized, use its temp duration
+            const prevDuration = (isResizingAnimation.value && resizingAnimationId.value === prev.id) 
+                ? tempAnimationState.duration 
+                : prev.duration;
+            const prevDelay = (isDraggingAnimation.value && draggedAnimationId.value === prev.id && prev.type === 'set')
+                ? tempAnimationState.delay
+                : (prev.delay || 0);
+            
+            // Check if prev is a 'then' block being dragged (inserting gap AFTER it? No, insert BEFORE it)
+            // If dragging prev (then block), it visually shifts right.
+            // Does it affect subsequent blocks? Yes, subsequent blocks shift right too.
+            const prevGap = (isDraggingAnimation.value && draggedAnimationId.value === prev.id && prev.type === 'then')
+                ? tempAnimationState.delay
+                : 0;
+
+            startOffset += prevDuration + prevDelay + prevGap;
+        }
+        
+        // If current block is 'then' and being dragged, add its own gap offset
+        if (isDragging && anim.type === 'then') {
+            startOffset += tempAnimationState.delay;
+        }
+    }
+    
+    const leftPercent = (startOffset / clip.duration) * 100;
+    const widthPercent = (duration / clip.duration) * 100;
+    
+    // Colors
+    const bgColor = anim.type === 'set' ? 'rgba(16, 185, 129, 0.9)' : 'rgba(245, 158, 11, 0.9)'; // Green / Orange
+    const borderColor = anim.type === 'set' ? 'rgba(5, 150, 105, 1)' : 'rgba(217, 119, 6, 1)';
+
+    return {
+        left: `${leftPercent}%`,
+        width: `${widthPercent}%`,
+        height: '80%', // Fill most of the expanded row height
+        top: '10%',
+        backgroundColor: bgColor,
+        borderColor: borderColor,
+        borderWidth: '1px',
+        borderRadius: '2px',
+        zIndex: isDragging || isResizing ? 20 : 15
+    };
+}
+
+const handleAnimationClick = (clip: any, anim: AnimationSegment, e: MouseEvent) => {
+    e.stopPropagation();
+    timelineStore.setSelectedClip(clip.id);
+    timelineStore.setSelectedAnimation(anim.id);
+    danmuStore.select(clip.resourceId);
+}
 
 // 像素/秒 计算
 const pixelsPerSecond = computed(() => timelineStore.zoomScale * 2);
@@ -206,6 +278,7 @@ const dragStartX = ref(0);
 
 const handleClipClick = (clip: any, e: MouseEvent) => {
     timelineStore.setSelectedClip(clip.id);
+    danmuStore.select(clip.resourceId);
 };
 
 const startDragClip = (e: MouseEvent, clip: any) => {
@@ -355,6 +428,172 @@ const stopResizeClip = () => {
     window.removeEventListener('mouseup', stopResizeClip);
 };
 
+// Animation Drag/Resize Logic
+const isDraggingAnimation = ref(false);
+const draggedAnimationId = ref<string | null>(null);
+const initialAnimationDelay = ref(0);
+const dragAnimStartX = ref(0);
+
+const isResizingAnimation = ref(false);
+const resizingAnimationId = ref<string | null>(null);
+const initialAnimationDuration = ref(0);
+const resizeAnimStartX = ref(0);
+
+const tempAnimationState = reactive({
+    delay: 0,
+    duration: 0
+});
+
+// Helper to find animation start time (offset) within clip
+const getAnimationStartOffset = (clip: any, anim: AnimationSegment, index: number) => {
+    let startOffset = 0;
+    if (anim.type === 'set') {
+        startOffset = anim.delay || 0;
+    } else {
+        // 'then': cumulative
+        for (let i = 0; i < index; i++) {
+            const prev = clip.animations[i];
+            startOffset += prev.duration + (prev.delay || 0);
+        }
+    }
+    return startOffset;
+}
+
+const startDragAnimation = (e: MouseEvent, clip: any, anim: AnimationSegment) => {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).dataset.handle) return; // Ignore resize handle
+    
+    e.stopPropagation();
+    
+    timelineStore.setSelectedClip(clip.id);
+    timelineStore.setSelectedAnimation(anim.id);
+
+    isDraggingAnimation.value = true;
+    draggedAnimationId.value = anim.id;
+    dragAnimStartX.value = e.clientX;
+    
+    // For 'set', we track absolute delay. For 'then', we track the *new gap* (delta).
+    if (anim.type === 'set') {
+        initialAnimationDelay.value = anim.delay || 0;
+        tempAnimationState.delay = anim.delay || 0;
+    } else {
+        initialAnimationDelay.value = 0; // Represents gap
+        tempAnimationState.delay = 0;
+    }
+    
+    document.body.style.cursor = "move";
+    window.addEventListener("mousemove", onDragAnimation);
+    window.addEventListener("mouseup", stopDragAnimation);
+}
+
+const onDragAnimation = (e: MouseEvent) => {
+    if (!isDraggingAnimation.value || !draggedAnimationId.value) return;
+    
+    const deltaX = e.clientX - dragAnimStartX.value;
+    const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
+    
+    // Determine type from selected animation
+    // Note: We need access to the animation object or type here.
+    // We can infer it or look it up.
+    // Simple way: check selectedAnimationId in store? Or just assume logic based on initialization.
+    // Let's look it up.
+    const clip = timelineStore.tracks.find(t => t.clips.some(c => c.id === timelineStore.selectedClipId))?.clips.find(c => c.id === timelineStore.selectedClipId);
+    const anim = clip?.animations?.find(a => a.id === draggedAnimationId.value);
+    
+    if (!anim) return;
+
+    if (anim.type === 'set') {
+        let newDelay = initialAnimationDelay.value + deltaMs;
+        newDelay = Math.max(0, newDelay);
+        tempAnimationState.delay = newDelay;
+    } else {
+        // 'then': dragging right creates a gap
+        let gap = deltaMs; // initialAnimationDelay is 0
+        gap = Math.max(0, gap);
+        tempAnimationState.delay = gap;
+    }
+}
+
+const stopDragAnimation = () => {
+    if (isDraggingAnimation.value && draggedAnimationId.value && timelineStore.selectedClipId) {
+        const clip = timelineStore.tracks.find(t => t.clips.some(c => c.id === timelineStore.selectedClipId))?.clips.find(c => c.id === timelineStore.selectedClipId);
+        const anim = clip?.animations?.find(a => a.id === draggedAnimationId.value);
+
+        if (clip && anim) {
+            if (anim.type === 'set') {
+                timelineStore.updateClipAnimation(
+                    timelineStore.selectedClipId, 
+                    draggedAnimationId.value, 
+                    { delay: tempAnimationState.delay }
+                );
+            } else if (tempAnimationState.delay > 50) { // Threshold to create gap
+                // Create 'gap' animation
+                const index = clip.animations!.findIndex(a => a.id === anim.id);
+                if (index !== -1) {
+                    const gapAnim: AnimationSegment = {
+                        id: `anim_${Date.now()}`,
+                        type: 'then',
+                        duration: tempAnimationState.delay,
+                        properties: {} // Empty properties = maintain state
+                    };
+                    timelineStore.insertClipAnimation(timelineStore.selectedClipId, index, gapAnim);
+                }
+            }
+        }
+    }
+    isDraggingAnimation.value = false;
+    draggedAnimationId.value = null;
+    document.body.style.cursor = "";
+    window.removeEventListener("mousemove", onDragAnimation);
+    window.removeEventListener("mouseup", stopDragAnimation);
+}
+
+const startResizeAnimation = (e: MouseEvent, clip: any, anim: AnimationSegment) => {
+    e.stopPropagation();
+    e.preventDefault();
+    
+    timelineStore.setSelectedClip(clip.id);
+    timelineStore.setSelectedAnimation(anim.id);
+
+    isResizingAnimation.value = true;
+    resizingAnimationId.value = anim.id;
+    initialAnimationDuration.value = anim.duration;
+    resizeAnimStartX.value = e.clientX;
+    
+    tempAnimationState.duration = anim.duration;
+    
+    document.body.style.cursor = "e-resize";
+    window.addEventListener("mousemove", onResizeAnimation);
+    window.addEventListener("mouseup", stopResizeAnimation);
+}
+
+const onResizeAnimation = (e: MouseEvent) => {
+    if (!isResizingAnimation.value || !resizingAnimationId.value) return;
+    
+    const deltaX = e.clientX - resizeAnimStartX.value;
+    const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
+    
+    let newDuration = initialAnimationDuration.value + deltaMs;
+    newDuration = Math.max(100, newDuration); // Min 100ms
+    
+    tempAnimationState.duration = newDuration;
+}
+
+const stopResizeAnimation = () => {
+     if (isResizingAnimation.value && resizingAnimationId.value && timelineStore.selectedClipId) {
+        timelineStore.updateClipAnimation(
+            timelineStore.selectedClipId, 
+            resizingAnimationId.value, 
+            { duration: tempAnimationState.duration }
+        );
+    }
+    isResizingAnimation.value = false;
+    resizingAnimationId.value = null;
+    document.body.style.cursor = "";
+    window.removeEventListener("mousemove", onResizeAnimation);
+    window.removeEventListener("mouseup", stopResizeAnimation);
+}
+
 // Playhead 拖拽逻辑
 const isDraggingPlayhead = ref(false);
 
@@ -398,7 +637,10 @@ const handleKeyDown = (e: KeyboardEvent) => {
       return;
     }
 
-    if (timelineStore.selectedClipId) {
+    if (timelineStore.selectedAnimationId && timelineStore.selectedClipId) {
+      timelineStore.removeClipAnimation(timelineStore.selectedClipId, timelineStore.selectedAnimationId);
+      timelineStore.selectedAnimationId = null;
+    } else if (timelineStore.selectedClipId) {
       timelineStore.removeClip(timelineStore.selectedClipId);
       timelineStore.selectedClipId = null;
     }
@@ -483,20 +725,32 @@ onUnmounted(() => {
         ref="trackListRef"
       >
           <!-- 轨道头列表 -->
-          <div
-              v-for="track in timelineStore.tracks"
-              :key="track.id"
-              class="h-10 border-b border-sidebar-border flex items-center px-3 text-xs group hover:bg-sidebar-accent/30 transition-colors shrink-0"
-              @contextmenu="handleContextMenu($event, 'track', track.id)"
-          >
-              <div class="flex-1 truncate font-medium">{{ track.name }}</div>
-              <button 
-                  class="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive transition-opacity"
-                  @click="handleRemoveTrack(track.id)"
+          <template v-for="track in timelineStore.tracks" :key="track.id">
+              <div
+                  class="h-10 border-b border-sidebar-border flex items-center px-2 text-xs group hover:bg-sidebar-accent/30 transition-colors shrink-0"
+                  @contextmenu="handleContextMenu($event, 'track', track.id)"
               >
-                  <Trash2 class="size-3" />
-              </button>
-          </div>
+                  <button 
+                      @click="timelineStore.toggleTrackExpand(track.id)"
+                      class="p-0.5 hover:bg-sidebar-accent rounded mr-1 transition-colors"
+                  >
+                      <component :is="track.expanded ? ChevronDown : ChevronRight" class="size-3 text-muted-foreground" />
+                  </button>
+
+                  <div class="flex-1 truncate font-medium">{{ track.name }}</div>
+                  <button 
+                      class="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive transition-opacity"
+                      @click="handleRemoveTrack(track.id)"
+                  >
+                      <Trash2 class="size-3" />
+                  </button>
+              </div>
+              
+              <!-- Expanded Panel Header -->
+              <div v-if="track.expanded" class="h-16 border-b border-sidebar-border bg-sidebar-accent/5 flex items-center px-8 text-[10px] text-muted-foreground shrink-0 border-l-4 border-l-primary/20">
+                  <span class="opacity-70">动画关键帧</span>
+              </div>
+          </template>
           
           <button
               @click="handleAddTrack"
@@ -524,47 +778,79 @@ onUnmounted(() => {
           @contextmenu.prevent="handleContextMenu($event, 'background')"
         >
             <!-- 轨道行 -->
-            <div
-                v-for="track in timelineStore.tracks"
-                :key="track.id"
-                class="h-10 border-b border-sidebar-border/50 relative group bg-sidebar/10 hover:bg-sidebar/30 transition-colors"
-                @dragover.prevent
-                @drop="handleDrop($event, track.id)"
-            >
-                <!-- Clips -->
+            <template v-for="track in timelineStore.tracks" :key="track.id">
                 <div
-                    v-for="clip in track.clips"
-                    :key="clip.id"
-                    class="absolute top-1 bottom-1 rounded border border-primary/40 bg-primary/20 hover:bg-primary/30 text-[10px] flex items-center px-2 text-primary-foreground overflow-hidden cursor-move select-none"
-                    :class="{ 'ring-2 ring-primary ring-offset-1 z-10': timelineStore.selectedClipId === clip.id }"
-                    :style="getClipStyle(clip)"
-                    :title="getClipName(clip)"
-                    @click.stop="handleClipClick(clip, $event)"
-                    @mousedown.stop="startDragClip($event, clip)"
-                    @contextmenu.stop="handleContextMenu($event, 'clip', clip)"
+                    class="h-10 border-b border-sidebar-border/50 relative group bg-sidebar/10 hover:bg-sidebar/30 transition-colors"
+                    @dragover.prevent
+                    @drop="handleDrop($event, track.id)"
                 >
-                    <span class="truncate text-foreground/90 font-medium">{{ getClipName(clip) }}</span>
-                    
-                    <!-- Resize Handles -->
-                    <template v-if="timelineStore.selectedClipId === clip.id">
-                        <div 
-                            class="absolute left-0 top-0 bottom-0 w-2 cursor-w-resize hover:bg-primary/50 z-20 flex items-center justify-center group/handle"
-                            data-handle="left"
-                            @mousedown.stop="startResizeClip($event, clip, 'left')"
-                        >
-                             <div class="w-1 h-3 bg-primary/40 rounded-full group-hover/handle:bg-primary"></div>
-                        </div>
+                    <!-- Clips -->
+                    <div
+                        v-for="clip in track.clips"
+                        :key="clip.id"
+                        class="absolute top-1 bottom-1 rounded border border-primary/40 bg-primary/20 hover:bg-primary/30 text-[10px] flex items-center px-2 text-primary-foreground overflow-hidden cursor-move select-none"
+                        :class="{ 'ring-2 ring-primary ring-offset-1 z-10': timelineStore.selectedClipId === clip.id }"
+                        :style="getClipStyle(clip)"
+                        :title="getClipName(clip)"
+                        @click.stop="handleClipClick(clip, $event)"
+                        @mousedown.stop="startDragClip($event, clip)"
+                        @contextmenu.stop="handleContextMenu($event, 'clip', clip)"
+                    >
+                        <span class="truncate text-foreground/90 font-medium z-10 relative pointer-events-none">{{ getClipName(clip) }}</span>
                         
-                        <div 
-                            class="absolute right-0 top-0 bottom-0 w-2 cursor-e-resize hover:bg-primary/50 z-20 flex items-center justify-center group/handle"
-                            data-handle="right"
-                            @mousedown.stop="startResizeClip($event, clip, 'right')"
-                        >
-                             <div class="w-1 h-3 bg-primary/40 rounded-full group-hover/handle:bg-primary"></div>
-                        </div>
-                    </template>
+                        <!-- Resize Handles -->
+                        <template v-if="timelineStore.selectedClipId === clip.id">
+                            <div 
+                                class="absolute left-0 top-0 bottom-0 w-2 cursor-w-resize hover:bg-primary/50 z-20 flex items-center justify-center group/handle"
+                                data-handle="left"
+                                @mousedown.stop="startResizeClip($event, clip, 'left')"
+                            >
+                                <div class="w-1 h-3 bg-primary/40 rounded-full group-hover/handle:bg-primary"></div>
+                            </div>
+                            
+                            <div 
+                                class="absolute right-0 top-0 bottom-0 w-2 cursor-e-resize hover:bg-primary/50 z-20 flex items-center justify-center group/handle"
+                                data-handle="right"
+                                @mousedown.stop="startResizeClip($event, clip, 'right')"
+                            >
+                                <div class="w-1 h-3 bg-primary/40 rounded-full group-hover/handle:bg-primary"></div>
+                            </div>
+                        </template>
+                    </div>
                 </div>
-            </div>
+
+                <!-- Expanded Animation Row -->
+                <div v-if="track.expanded" class="h-16 border-b border-sidebar-border/50 relative bg-sidebar/5">
+                     <!-- Animation Ghost Containers (aligned with clips) -->
+                     <div 
+                        v-for="clip in track.clips"
+                        :key="clip.id"
+                        class="absolute top-0 bottom-0 pointer-events-none" 
+                        :style="{ ...getClipStyle(clip), border: 'none', background: 'transparent' }" 
+                    >
+                         <!-- Animation Segments -->
+                         <div class="absolute inset-0">
+                             <div 
+                                v-for="(anim, index) in clip.animations" 
+                                :key="anim.id"
+                                class="absolute pointer-events-auto hover:brightness-110 cursor-pointer group/anim"
+                                :class="{ 'ring-1 ring-white': timelineStore.selectedAnimationId === anim.id }"
+                                :style="getAnimationSegmentStyle(clip, anim, index)"
+                                @click="handleAnimationClick(clip, anim, $event)"
+                                @mousedown.stop="startDragAnimation($event, clip, anim)"
+                                title="动画片段"
+                             >
+                                <!-- Resize Handle for Animation -->
+                                <div 
+                                    class="absolute right-0 top-0 bottom-0 w-1 cursor-e-resize hover:bg-white/50 z-20 opacity-0 group-hover/anim:opacity-100"
+                                    data-handle="right"
+                                    @mousedown.stop="startResizeAnimation($event, clip, anim)"
+                                ></div>
+                             </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
             
             <!-- 底部占位 -->
             <div class="h-20"></div>
