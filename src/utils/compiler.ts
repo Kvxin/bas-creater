@@ -114,8 +114,58 @@ export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string
         basCode += `set ${varName} {} ${startSec}s
 `;
         // 2. 显示 (恢复到目标透明度)
-        basCode += `then set ${varName} { alpha = ${targetAlpha} } 0s
+        // 如果没有自定义动画，或者第一个动画不是 'set' (并行)，我们需要一个 'then set' 来显示它
+        // 但是如果有 animations，我们将在下面处理
+        if (!clip.animations || clip.animations.length === 0) {
+           basCode += `then set ${varName} { alpha = ${targetAlpha} } 0s
 `;
+        } else {
+             // 如果有动画，且第一个动画有延迟或者是 'then' 类型，我们需要先显示出来吗？
+             // 实际上，如果第一个动画是 'set' 且 startDelay=0，它会与 "等待" 结束同时发生。
+             // 但我们需要把 alpha 设回来。
+             // 简单起见，我们总是添加一个瞬间的显示指令，除非动画明确处理了 alpha
+             // 但这可能会冲突。
+             // 更好的策略：如果 startSec > 0，我们已经把 def alpha = 0 了。
+             // 如果第一个动画包含 alpha，那就用动画的。如果没有，我们需要显式显示。
+             
+             // 暂时保留旧逻辑：先显示出来。
+             // 注意：这里的 0s 可能会导致瞬间闪烁如果后面紧接动画
+             basCode += `then set ${varName} { alpha = ${targetAlpha} } 0s
+`;
+        }
+      }
+
+      // 3. 生成动画序列
+      if (clip.animations && clip.animations.length > 0) {
+          clip.animations.forEach(anim => {
+              const cmd = anim.type === 'set' ? 'set' : 'then set';
+              let propsStr = '';
+              Object.entries(anim.properties).forEach(([k, v]) => {
+                  const basKey = k === 'opacity' ? 'alpha' : k;
+                  const val = formatValue(k, v);
+                  if (val) propsStr += ` ${basKey} = ${val}`;
+              });
+              
+              const durationStr = `${anim.duration / 1000}s`;
+              
+              // 对于 'set'，如果有 delay
+              // BAS 语法：set object { ... } duration
+              // 并没有直接的 "delay" 参数。
+              // set 是并行启动的。如果需要 delay，通常是先 set {} delay then set ...
+              // 或者使用 timeline 逻辑。
+              // 这里简化处理：如果是 'set' 且有 delay，我们先插入一个空 set
+              if (anim.type === 'set' && anim.delay && anim.delay > 0) {
+                  // 这会产生并行线程
+                  // set object {} delay
+                  // then set object { ... } duration
+                  basCode += `set ${varName} {} ${anim.delay / 1000}s
+then set ${varName} {${propsStr} } ${durationStr}
+`;
+              } else {
+                  basCode += `${cmd} ${varName} {${propsStr} } ${durationStr}
+`;
+              }
+          });
       }
       
       return basCode;
