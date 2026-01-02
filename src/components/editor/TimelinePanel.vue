@@ -13,6 +13,7 @@ import {
 } from "lucide-vue-next";
 import TimeRuler from "./TimeRuler.vue";
 import { formatTime } from "@/utils/timeline";
+import { getItemName } from "@/utils/resourceUtils";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { compileTimelineToBas } from "@/utils/compiler";
@@ -224,6 +225,10 @@ const getClipStyle = (clip: any) => {
 };
 
 const getClipName = (clip: any) => {
+    const danmu = danmuStore.danmus.find(d => d.id === clip.resourceId);
+    if (danmu) {
+        return getItemName(danmu);
+    }
     return clip.name || 'Unknown Clip';
 }
 
