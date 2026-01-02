@@ -80,26 +80,25 @@ class BasService {
   }
 
   // 完全重置实例（用于编辑器重新编译运行）
+  // 不再使用destroy方法，在bas.js(大概1035行)中destroy是一个空的方法，调用这个方法没有效果
   reset() {
     if (!this.lastOpts) return;
     this.pause();
-    
-    // 尝试销毁旧实例 (如果有 destroy 方法)
-    try {
-        if (this.bas && typeof this.bas.destroy === 'function') {
-            this.bas.destroy();
-        }
-    } catch (e) {
-        console.warn("Destroy BAS failed", e);
-    }
-    this.bas = null;
-    
-    // 清空容器内容
-    if (this.lastOpts.container) {
-      this.lastOpts.container.innerHTML = "";
+
+    if (this.bas) {
+      try {
+        this.bas.clear?.();
+        if (Array.isArray(this.bas.dmList)) this.bas.dmList = [];
+        if (Array.isArray(this.bas.testDanmakus)) this.bas.testDanmakus = [];
+      } catch (e) {
+        console.warn("Clear BAS failed", e);
+      }
+
+      this.clock.set(0);
+      return;
     }
 
-    // 重新初始化
+    // 重新初始化（首次或异常状态）
     this.init(this.lastOpts);
   }
 
