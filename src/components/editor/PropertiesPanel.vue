@@ -291,7 +291,7 @@ const getButtonAV = (item: any): number | undefined => {
             <Textarea
               :model-value="(selected as any).content"
               @update:model-value="(v) => updateField('content', v)"
-              class="min-h-[80px] text-xs resize-y leading-extended"
+              class="min-h-20 text-xs resize-y leading-extended"
               placeholder="请输入弹幕文本..."
             />
           </div>
@@ -326,7 +326,7 @@ const getButtonAV = (item: any): number | undefined => {
               <Textarea
                 :model-value="(selected as any).d"
                 @update:model-value="(v) => updateField('d', v)"
-                class="min-h-[80px] text-xs font-mono resize-y"
+                class="min-h-20 text-xs font-mono resize-y"
                 placeholder="M0 0 L10 10..."
               />
             </div>
