@@ -33,6 +33,7 @@ const containerRef = ref<HTMLElement | null>(null);
 const isPlaying = computed(() => timelineStore.isPlaying);
 const basInitialized = ref(false);
 let animationFrameId: number | null = null;
+const needsRecompile = ref(false);
 
 // Sync loop
 const startSyncLoop = () => {
@@ -126,20 +127,47 @@ const stopDrag = () => {
   document.body.style.cursor = "";
 };
 
+const compileAndLoad = (seekToCurrent = true) => {
+  if (!basInitialized.value || !basService.isReady()) return false;
+  const code = compileTimelineToBas(timelineStore.tracks, danmuStore.danmus);
+  basService.reset();
+  basService.addRaw(code);
+  if (seekToCurrent) {
+    basService.seek(timelineStore.currentTime / 1000, true);
+  }
+  needsRecompile.value = false;
+  return true;
+};
+
 // 自动刷新预览（当资源或时间轴改变时）
 watch(
   [() => danmuStore.danmus, () => timelineStore.tracks],
   () => {
+    needsRecompile.value = true;
     // 只有在暂停状态下才自动刷新，避免播放时频繁重置
     if (!timelineStore.isPlaying && basInitialized.value && basService.isReady()) {
-      const code = compileTimelineToBas(timelineStore.tracks, danmuStore.danmus);
-      basService.reset();
-      basService.addRaw(code);
-      // 恢复到当前时间，强制刷新画面
-      basService.seek(timelineStore.currentTime / 1000, true);
+      compileAndLoad(true);
     }
   },
   { deep: true }
+);
+
+watch(
+  () => timelineStore.isPlaying,
+  (isPlayingNow) => {
+    if (!isPlayingNow && needsRecompile.value) {
+      compileAndLoad(true);
+    }
+  }
+);
+
+watch(
+  () => basInitialized.value,
+  (ready) => {
+    if (ready && !timelineStore.isPlaying && needsRecompile.value) {
+      compileAndLoad(true);
+    }
+  }
 );
 
 // Initial centering and BAS init
@@ -191,15 +219,10 @@ const togglePlay = () => {
     timelineStore.isPlaying = false;
     stopSyncLoop();
   } else {
-    // 1. 编译当前时间轴内容
-    const code = compileTimelineToBas(timelineStore.tracks, danmuStore.danmus);
-    console.log("[PreviewPanel] Compiling & Playing BAS Code:\n", code);
-
-    // 2. 重置并加载新代码
-    basService.reset();
-    basService.addRaw(code);
-    
-    // 3. 开始播放
+    if (needsRecompile.value) {
+      const compiled = compileAndLoad(true);
+      if (!compiled) return;
+    }
     basService.play();
     timelineStore.isPlaying = true;
     startSyncLoop();
