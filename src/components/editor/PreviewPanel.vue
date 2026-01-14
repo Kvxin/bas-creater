@@ -229,6 +229,25 @@ const togglePlay = () => {
   }
 };
 
+const playFromStart = () => {
+  if (!basInitialized.value) return;
+
+  timelineStore.setCurrentTime(0);
+
+  if (needsRecompile.value) {
+    const compiled = compileAndLoad(true);
+    if (!compiled) return;
+  } else {
+    basService.seek(0);
+  }
+
+  if (!timelineStore.isPlaying) {
+    basService.play();
+    timelineStore.isPlaying = true;
+    startSyncLoop();
+  }
+};
+
 const seekToStart = () => {
   if (!basInitialized.value) return;
   basService.seek(0);
@@ -302,6 +321,13 @@ const skipForward = () => {
     <div
       class="h-12 border-t border-border flex items-center justify-center gap-4 bg-card text-card-foreground shrink-0 z-20"
     >
+      <button
+        @click="playFromStart"
+        class="p-2 rounded-full hover:bg-accent hover:text-accent-foreground transition-colors"
+        title="从头播放"
+      >
+        <RotateCcw class="size-4" />
+      </button>
       <button
         @click="seekToStart"
         class="p-2 rounded-full hover:bg-accent hover:text-accent-foreground transition-colors"
