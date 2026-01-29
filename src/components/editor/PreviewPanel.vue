@@ -13,10 +13,14 @@ import basService from "@/utils/bas";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { compileTimelineToBas } from "@/utils/compiler";
+import TransformControls from "./controls/TransformControls.vue";
+import type { AnyDanmu } from "@/types/danmu";
 
 const ZOOM_SENSITIVITY = 0.001;
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 5.0;
+const DANMAKU_WIDTH = 800;
+const DANMAKU_HEIGHT = 450; // 16:9 aspect ratio
 
 // Stores
 const timelineStore = useTimelineStore();
@@ -28,6 +32,87 @@ const position = ref({ x: 0, y: 0 });
 const isDragging = ref(false);
 const lastMousePos = { x: 0, y: 0 };
 const containerRef = ref<HTMLElement | null>(null);
+const danmakuRef = ref<HTMLElement | null>(null);
+
+// Selected danmu for transform controls
+const selectedDanmuForTransform = computed(() => {
+  // Get selected from timeline clip first
+  if (timelineStore.selectedClipId) {
+    for (const track of timelineStore.tracks) {
+      const clip = track.clips.find(c => c.id === timelineStore.selectedClipId);
+      if (clip) {
+        return danmuStore.danmus.find(d => d.id === clip.resourceId) ?? null;
+      }
+    }
+  }
+  // Fall back to danmu store selection
+  return danmuStore.selected;
+});
+
+// Handle transform updates
+const handleTransformUpdate = (changes: Partial<AnyDanmu>) => {
+  if (selectedDanmuForTransform.value) {
+    danmuStore.updateDanmu(selectedDanmuForTransform.value.id, changes);
+  }
+};
+
+// Helper to find clip by BAS element class name
+const findClipByElement = (element: Element): { clip: any; track: any } | null => {
+  const classList = Array.from(element.classList);
+
+  // BAS generates class like: bas-danmaku-item--obj_clipId
+  for (const className of classList) {
+    if (className.startsWith('bas-danmaku-item--obj_')) {
+      const objName = className.replace('bas-danmaku-item--', '');
+
+      // Match against all clips
+      for (const track of timelineStore.tracks) {
+        for (const clip of track.clips) {
+          const expectedObjName = `obj_${clip.id.replace(/[^a-zA-Z0-9]/g, '_')}`;
+          if (objName === expectedObjName) {
+            return { clip, track };
+          }
+        }
+      }
+    }
+  }
+  return null;
+};
+
+// Handle clicking on danmaku preview area to select items
+const handleDanmakuClick = (e: MouseEvent) => {
+  // Don't handle if alt is pressed (panning) or middle mouse
+  if (e.altKey || e.button !== 0) return;
+
+  const target = e.target as HTMLElement;
+
+  // Don't handle clicks on transform controls
+  if (target.closest('.transform-controls')) return;
+
+  // Look for bas-danmaku-item element (could be the target or an ancestor)
+  const danmakuItem = target.closest('.bas-danmaku-item') ||
+                      (target.classList.contains('bas-danmaku-item') ? target : null);
+
+  if (danmakuItem) {
+    const result = findClipByElement(danmakuItem);
+    if (result) {
+      timelineStore.setSelectedClip(result.clip.id);
+      danmuStore.select(result.clip.resourceId);
+      e.stopPropagation();
+      return;
+    }
+  }
+
+  // Click on empty area - deselect (only if clicking on the danmaku container itself)
+  const isDanmakuContainer = target.id === 'danmaku' || target === danmakuRef.value;
+  const isInsideDanmaku = danmakuRef.value?.contains(target);
+
+  if (isDanmakuContainer || (isInsideDanmaku && !danmakuItem)) {
+    timelineStore.setSelectedClip(null);
+    timelineStore.setSelectedAnimation(null);
+    danmuStore.select(null);
+  }
+};
 
 // Computed isPlaying synced with timelineStore
 const isPlaying = computed(() => timelineStore.isPlaying);
@@ -309,10 +394,22 @@ const skipForward = () => {
       >
         <!-- Content (Centered on 0,0 of wrapper) -->
         <div
+          ref="danmakuRef"
           id="danmaku"
-          class="w-[800px] aspect-video bg-black rounded-lg shadow-2xl border border-border/10 flex items-center justify-center -translate-x-1/2 -translate-y-1/2 relative group overflow-hidden select-none"
+          class="w-[800px] aspect-video bg-black rounded-lg shadow-2xl border border-border/10 flex items-center justify-center -translate-x-1/2 -translate-y-1/2 relative group select-none"
+          @click="handleDanmakuClick"
         >
-          <!-- 这里用来显示预览 -->
+          <!-- BAS renders danmaku items here -->
+
+          <!-- Transform Controls Overlay -->
+          <TransformControls
+            v-if="selectedDanmuForTransform && !isPlaying"
+            :selected="selectedDanmuForTransform"
+            :container-width="DANMAKU_WIDTH"
+            :container-height="DANMAKU_HEIGHT"
+            :canvas-scale="scale"
+            @update="handleTransformUpdate"
+          />
         </div>
       </div>
     </div>

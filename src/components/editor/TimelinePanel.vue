@@ -258,13 +258,18 @@ const handleRulerClick = (timeMs: number) => {
 const handleTimelineClick = (e: MouseEvent) => {
   // 如果正在拖拽 Playhead，不处理点击
   if (isDraggingPlayhead.value) return;
-  
+
   const rect = timelineContentRef.value!.getBoundingClientRect();
   const clickX = e.clientX - rect.left + scrollLeft.value;
   // 计算时间 (ms)
   const time = Math.max(0, (clickX / pixelsPerSecond.value) * 1000);
-  
+
   updateTime(time);
+
+  // 点击空白区域取消选中
+  timelineStore.setSelectedClip(null);
+  timelineStore.setSelectedAnimation(null);
+  danmuStore.select(null);
 };
 
 const updateTime = (time: number) => {
