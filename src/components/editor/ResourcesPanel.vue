@@ -2,6 +2,7 @@
 import { ref, computed } from "vue";
 import { useDanmuStore } from "@/stores/danmu";
 import { useTimelineStore } from "@/stores/timeline";
+import { useAudioStore } from "@/stores/audio";
 import type { DanmuType, AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 import { getItemName } from "@/utils/resourceUtils";
@@ -13,9 +14,8 @@ import { useContextMenuStore } from "@/stores/contextMenu";
 
 const danmuStore = useDanmuStore();
 const timelineStore = useTimelineStore();
+const audioStore = useAudioStore();
 const contextMenu = useContextMenuStore();
-
-const localAudioResources = ref<AudioResource[]>([]);
 const activeTab = ref("all");
 const searchQuery = ref("");
 
@@ -34,9 +34,9 @@ const filteredItems = computed<Array<AnyDanmu | AudioResource>>(() => {
   let items: Array<AnyDanmu | AudioResource> = [];
 
   if (activeTab.value === "all") {
-    items = [...danmuStore.danmus, ...localAudioResources.value];
+    items = [...danmuStore.danmus, ...audioStore.audioResources];
   } else if (activeTab.value === "audio") {
-    items = localAudioResources.value;
+    items = audioStore.audioResources;
   } else {
     items = danmuStore.danmus.filter((d: AnyDanmu) => d.type === activeTab.value);
   }
@@ -63,11 +63,7 @@ const handleSelect = (item: AnyDanmu | AudioResource) => {
 // 处理名称更新
 const handleUpdateName = (item: AnyDanmu | AudioResource, newName: string) => {
   if (item.type === "audio-file") {
-    const idx = localAudioResources.value.findIndex((r) => r.id === item.id);
-    if (idx !== -1 && localAudioResources.value[idx]) {
-      localAudioResources.value[idx].name =
-        newName || localAudioResources.value[idx].file.name;
-    }
+    audioStore.updateName(item.id, newName);
   } else {
     danmuStore.updateDanmu(item.id, { name: newName || undefined });
   }
@@ -79,11 +75,7 @@ const handleUpdateName = (item: AnyDanmu | AudioResource, newName: string) => {
 // 处理删除
 const handleDelete = (item: AnyDanmu | AudioResource) => {
   if (item.type === "audio-file") {
-    const idx = localAudioResources.value.findIndex((r) => r.id === item.id);
-    if (idx !== -1 && localAudioResources.value[idx]) {
-      URL.revokeObjectURL(localAudioResources.value[idx].url);
-      localAudioResources.value.splice(idx, 1);
-    }
+    audioStore.remove(item.id);
   } else {
     danmuStore.remove(item.id);
   }
@@ -109,7 +101,7 @@ const handleAudioUpload = (payload: {
     file,
     duration,
   };
-  localAudioResources.value.push(resource);
+  audioStore.add(resource);
   console.log(
     `[ResourcesPanel] 上传音频文件: ${file.name}, 时长: ${duration}ms`
   );
@@ -178,7 +170,7 @@ const handleDragStart = (item: AnyDanmu | AudioResource, event: DragEvent) => {
       >
         <span
           >共
-          {{ danmuStore.danmus.length + localAudioResources.length }}
+          {{ danmuStore.danmus.length + audioStore.audioResources.length }}
           个项目</span
         >
         <span v-if="danmuStore.selected" class="text-primary">

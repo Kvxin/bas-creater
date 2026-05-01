@@ -12,6 +12,7 @@ import {
 import basService from "@/utils/bas";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
+import { useAudioStore } from "@/stores/audio";
 import { compileTimelineToBas } from "@/utils/compiler";
 import TransformControls from "./controls/TransformControls.vue";
 import type { AnyDanmu } from "@/types/danmu";
@@ -25,6 +26,7 @@ const DANMAKU_HEIGHT = 450; // 16:9 aspect ratio
 // Stores
 const timelineStore = useTimelineStore();
 const danmuStore = useDanmuStore();
+const audioStore = useAudioStore();
 
 // State
 const scale = ref(1);
@@ -119,6 +121,103 @@ const isPlaying = computed(() => timelineStore.isPlaying);
 const basInitialized = ref(false);
 let animationFrameId: number | null = null;
 const needsRecompile = ref(false);
+
+type ScheduledAudio = {
+  clipId: string;
+  audio: HTMLAudioElement;
+  startTimerId: number;
+  stopTimerId: number;
+};
+
+let scheduledAudio: ScheduledAudio[] = [];
+const audioTimers = new Set<number>();
+let audioSession = 0;
+
+const stopAudioPlayback = () => {
+  audioSession += 1;
+  for (const timerId of audioTimers) {
+    window.clearTimeout(timerId);
+  }
+  audioTimers.clear();
+  for (const entry of scheduledAudio) {
+    try {
+      entry.audio.pause();
+      entry.audio.currentTime = 0;
+    } catch (err) {
+      // Ignore failed resets on unloaded audio elements.
+    }
+  }
+  scheduledAudio = [];
+};
+
+const startAudioPlayback = (startTimeMs: number) => {
+  stopAudioPlayback();
+  const session = audioSession;
+  const resourceById = new Map(
+    audioStore.audioResources.map((resource) => [resource.id, resource])
+  );
+
+  for (const track of timelineStore.tracks) {
+    if (!track.visible) continue;
+    for (const clip of track.clips) {
+      const resource = resourceById.get(clip.resourceId);
+      if (!resource) continue;
+
+      const clipStart = clip.startTime;
+      const clipEnd = clip.startTime + clip.duration;
+      if (clipEnd <= startTimeMs) continue;
+
+      const startDelay = Math.max(0, clipStart - startTimeMs);
+      const offsetMs = Math.max(0, startTimeMs - clipStart);
+      const remainingMs = clipEnd - startTimeMs;
+
+      const audio = new Audio(resource.url);
+      audio.preload = "auto";
+
+      const startPlayback = async () => {
+        if (session !== audioSession) return;
+        const offsetSec = offsetMs / 1000;
+
+        if (audio.readyState < 1) {
+          await new Promise<void>((resolve) => {
+            const handleLoaded = () => {
+              audio.removeEventListener("loadedmetadata", handleLoaded);
+              resolve();
+            };
+            audio.addEventListener("loadedmetadata", handleLoaded);
+          });
+        }
+
+        if (session !== audioSession) return;
+        if (
+          Number.isFinite(audio.duration) &&
+          audio.duration > 0 &&
+          offsetSec >= audio.duration
+        ) {
+          return;
+        }
+
+        try {
+          audio.currentTime = offsetSec;
+        } catch (err) {
+          // Ignore invalid seeks on not-yet-ready audio elements.
+        }
+        audio.play().catch(() => {});
+      };
+
+      const startTimerId = window.setTimeout(() => {
+        void startPlayback();
+      }, startDelay);
+      const stopTimerId = window.setTimeout(() => {
+        audio.pause();
+      }, remainingMs);
+
+      audioTimers.add(startTimerId);
+      audioTimers.add(stopTimerId);
+      scheduledAudio.push({ clipId: clip.id, audio, startTimerId, stopTimerId });
+    }
+  }
+};
 
 // Sync loop
 const startSyncLoop = () => {
@@ -285,6 +384,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("mousemove", onDrag);
   window.removeEventListener("mouseup", stopDrag);
+  stopAudioPlayback();
 });
 
 const resetView = () => {
@@ -300,6 +400,7 @@ const togglePlay = () => {
   if (!basInitialized.value) return;
 
   if (timelineStore.isPlaying) {
+    stopAudioPlayback();
     basService.pause();
     timelineStore.isPlaying = false;
     stopSyncLoop();
@@ -309,6 +410,7 @@ const togglePlay = () => {
       if (!compiled) return;
     }
     basService.play();
+    startAudioPlayback(timelineStore.currentTime);
     timelineStore.isPlaying = true;
     startSyncLoop();
   }
@@ -325,6 +427,8 @@ const playFromStart = () => {
   } else {
     basService.seek(0);
   }
+
+  startAudioPlayback(0);
 
   if (!timelineStore.isPlaying) {
     basService.play();
