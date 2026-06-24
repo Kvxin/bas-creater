@@ -16,7 +16,8 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      'moveable': fileURLToPath(new URL('./node_modules/.pnpm/node_modules/moveable', import.meta.url))
     },
   },
 })

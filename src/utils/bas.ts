@@ -57,6 +57,12 @@ class BasService {
   private bas: any | null = null;
   private clock = new VirtualClock();
   private lastOpts: BasInitOptions | null = null;
+  private readonly seekEpsilonSec = 0.000001;
+
+  private refreshPausedFrame() {
+    if (!this.bas?.paused) return;
+    this.seek(this.clock.nowMs() / 1000, true);
+  }
 
   init(opts: BasInitOptions) {
     this.lastOpts = opts; // Save options for reset
@@ -132,9 +138,10 @@ class BasService {
     this.bas?.resize?.(width, height);
   }
   seek(sec: number, refresh = true) {
-    const ms = (sec || 0) * 1000;
+    const safeSec = Math.max(0, sec || 0) + (refresh ? this.seekEpsilonSec : 0);
+    const ms = safeSec * 1000;
     this.clock.seek(ms);
-    this.bas?.seek?.(sec, refresh);
+    this.bas?.seek?.(safeSec, refresh);
   }
   
   getCurrentTime() {
@@ -157,7 +164,10 @@ class BasService {
       dm,
       parsed: true,
       test: options?.test,
-      success: options?.success,
+      success: (addedDm: any) => {
+        this.refreshPausedFrame();
+        options?.success?.(addedDm);
+      },
       error: options?.error,
     });
   }
@@ -174,7 +184,10 @@ class BasService {
       dm: { text, stime: 0 },
       parsed: false,
       test: options?.test,
-      success: options?.success,
+      success: (addedDm: any) => {
+        this.refreshPausedFrame();
+        options?.success?.(addedDm);
+      },
       error: options?.error,
     });
   }

@@ -32,6 +32,7 @@ const formatValue = (key: string, value: any): string => {
 export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string => {
       // 生成合法的 BAS 变量名 (移除特殊字符)
       const varName = `obj_${clip.id.replace(/[^a-zA-Z0-9]/g, "_")}`;
+  const hasAnimations = !!clip.animations?.length;
 
       let basCode = "";
 
@@ -108,6 +109,20 @@ export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string
       basCode += `}
 `;
 
+      if (!hasAnimations) {
+        if (startSec > 0) {
+          basCode += `set ${varName} {} ${startSec}s
+`;
+          basCode += `then set ${varName} { alpha = ${targetAlpha} } ${durationSec}s
+`;
+        } else {
+          basCode += `set ${varName} {} ${durationSec}s
+`;
+        }
+
+        return basCode;
+      }
+
       // 生成 SET (仅当需要延迟显示时)
       if (startSec > 0) {
         // 1. 等待 (保持 alpha = 0)
@@ -136,7 +151,7 @@ export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string
       }
 
       // 3. 生成动画序列
-      if (clip.animations && clip.animations.length > 0) {
+        if (clip.animations && clip.animations.length > 0) {
           clip.animations.forEach(anim => {
               const cmd = anim.type === 'set' ? 'set' : 'then set';
               let propsStr = '';

@@ -22,24 +22,32 @@ function ms(v: number | string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function coord(v: number | string | undefined, fallback: number): number | string {
+  if (v == null) return fallback;
+  if (typeof v === "string") {
+    return v.trim() === "" ? fallback : v;
+  }
+  return Number.isFinite(v) ? v : fallback;
+}
+
 function baseDefaults(type: DanmuType, ov: Partial<DanmuBase> = {}): DanmuBase {
   // 仅保留 id 和 type，其他属性如果 ov 中有则保留，没有则 undefined
   return {
     id: genId(10),
     type,
     name: ov.name,
-    x: (ov as any).x,
-    y: (ov as any).y,
-    zIndex: ov.zIndex,
+    x: coord((ov as any).x, 0),
+    y: coord((ov as any).y, 0),
+    zIndex: ov.zIndex ?? 1,
     durationMs: ms((ov as any).durationMs, 2000), // duration 还是给一个默认值比较好，或者也留空？BAS需要duration。保留默认值吧。
-    scale: ov.scale,
-    rotateX: ov.rotateX,
-    rotateY: ov.rotateY,
-    rotateZ: ov.rotateZ,
-    opacity: ov.opacity,
-    anchorX: ov.anchorX,
-    anchorY: ov.anchorY,
-    parentId: ov.parentId,
+    scale: ov.scale ?? 1,
+    rotateX: ov.rotateX ?? 0,
+    rotateY: ov.rotateY ?? 0,
+    rotateZ: ov.rotateZ ?? 0,
+    opacity: ov.opacity ?? 1,
+    anchorX: ov.anchorX ?? 0,
+    anchorY: ov.anchorY ?? 0,
+    parentId: ov.parentId ?? null,
   };
 }
 
@@ -48,15 +56,15 @@ export function createTextDanmu(ov: Partial<TextDanmu> = {}): TextDanmu {
   return {
     ...base,
     type: "text",
-    content: ov.content, // 不再默认为 ""
-    fontSize: (ov as any).fontSize,
-    fontFamily: ov.fontFamily,
-    bold: ov.bold,
-    textShadow: ov.textShadow,
-    color: ov.color,
-    strokeWidth: ov.strokeWidth,
-    strokeColor: ov.strokeColor,
-    textColor: ov.textColor,
+    content: ov.content ?? "请输入内容",
+    fontSize: (ov as any).fontSize ?? 5,
+    fontFamily: ov.fontFamily ?? "黑体",
+    bold: ov.bold ?? 0,
+    textShadow: ov.textShadow ?? 0,
+    color: ov.color ?? 0xffffff,
+    strokeWidth: ov.strokeWidth ?? 0,
+    strokeColor: ov.strokeColor ?? 0x000000,
+    textColor: ov.textColor ?? 0xffffff,
   };
 }
 
@@ -65,11 +73,11 @@ export function createButtonDanmu(ov: Partial<ButtonDanmu> = {}): ButtonDanmu {
   return {
     ...base,
     type: "button",
-    text: ov.text,
-    fontSize: (ov as any).fontSize,
-    textColor: ov.textColor,
-    fillColor: ov.fillColor,
-    fillAlpha: ov.fillAlpha,
+    text: ov.text ?? "按钮",
+    fontSize: (ov as any).fontSize ?? 5,
+    textColor: ov.textColor ?? 0xffffff,
+    fillColor: ov.fillColor ?? 0xff9100,
+    fillAlpha: ov.fillAlpha ?? 0.8,
     target: ov.target,
   };
 }
@@ -79,14 +87,15 @@ export function createPathDanmu(ov: Partial<PathDanmu> = {}): PathDanmu {
   return {
     ...base,
     type: "path",
-    d: ov.d,
-    viewBox: ov.viewBox,
-    borderWidth: ov.borderWidth,
-    borderColor: ov.borderColor,
-    borderAlpha: ov.borderAlpha,
-    fillColor: ov.fillColor,
-    fillAlpha: ov.fillAlpha,
-    width: (ov as any).width,
+    d: ov.d ?? "M0 0 H100 V100 H0 Z",
+    viewBox: ov.viewBox ?? "0 0 100 100",
+    borderWidth: ov.borderWidth ?? 1,
+    borderColor: ov.borderColor ?? 0xffffff,
+    borderAlpha: ov.borderAlpha ?? 1,
+    fillColor: ov.fillColor ?? 0x00a1d6,
+    fillAlpha: ov.fillAlpha ?? 0.8,
+    width: (ov as any).width ?? 20,
+    height: (ov as any).height ?? 20,
   };
 }
 

@@ -36,25 +36,45 @@ const lastMousePos = { x: 0, y: 0 };
 const containerRef = ref<HTMLElement | null>(null);
 const danmakuRef = ref<HTMLElement | null>(null);
 
-// Selected danmu for transform controls
-const selectedDanmuForTransform = computed(() => {
-  // Get selected from timeline clip first
-  if (timelineStore.selectedClipId) {
-    for (const track of timelineStore.tracks) {
-      const clip = track.clips.find(c => c.id === timelineStore.selectedClipId);
-      if (clip) {
-        return danmuStore.danmus.find(d => d.id === clip.resourceId) ?? null;
-      }
+const previewTransformItems = computed(() => {
+  const items: Array<{ clipId: string; danmu: AnyDanmu }> = [];
+
+  for (const track of timelineStore.tracks) {
+    if (!track.visible) continue;
+
+    for (const clip of track.clips) {
+      const danmu = danmuStore.danmus.find((item) => item.id === clip.resourceId);
+      if (!danmu) continue;
+
+      items.push({
+        clipId: clip.id,
+        danmu,
+      });
     }
   }
-  // Fall back to danmu store selection
-  return danmuStore.selected;
+
+  return items;
 });
 
-// Handle transform updates
-const handleTransformUpdate = (changes: Partial<AnyDanmu>) => {
-  if (selectedDanmuForTransform.value) {
-    danmuStore.updateDanmu(selectedDanmuForTransform.value.id, changes);
+const handleTransformSelection = (payload: {
+  clipIds: string[];
+  primaryClipId: string | null;
+  primaryDanmuId: string | null;
+}) => {
+  timelineStore.setSelectedClip(payload.primaryClipId);
+
+  if (!payload.primaryClipId) {
+    timelineStore.setSelectedAnimation(null);
+  }
+
+  danmuStore.select(payload.primaryDanmuId);
+};
+
+const handleTransformCommit = (
+  updates: Array<{ id: string; changes: Partial<AnyDanmu> }>
+) => {
+  for (const update of updates) {
+    danmuStore.updateDanmu(update.id, update.changes);
   }
 };
 
@@ -79,41 +99,6 @@ const findClipByElement = (element: Element): { clip: any; track: any } | null =
     }
   }
   return null;
-};
-
-// Handle clicking on danmaku preview area to select items
-const handleDanmakuClick = (e: MouseEvent) => {
-  // Don't handle if alt is pressed (panning) or middle mouse
-  if (e.altKey || e.button !== 0) return;
-
-  const target = e.target as HTMLElement;
-
-  // Don't handle clicks on transform controls
-  if (target.closest('.transform-controls')) return;
-
-  // Look for bas-danmaku-item element (could be the target or an ancestor)
-  const danmakuItem = target.closest('.bas-danmaku-item') ||
-                      (target.classList.contains('bas-danmaku-item') ? target : null);
-
-  if (danmakuItem) {
-    const result = findClipByElement(danmakuItem);
-    if (result) {
-      timelineStore.setSelectedClip(result.clip.id);
-      danmuStore.select(result.clip.resourceId);
-      e.stopPropagation();
-      return;
-    }
-  }
-
-  // Click on empty area - deselect (only if clicking on the danmaku container itself)
-  const isDanmakuContainer = target.id === 'danmaku' || target === danmakuRef.value;
-  const isInsideDanmaku = danmakuRef.value?.contains(target);
-
-  if (isDanmakuContainer || (isInsideDanmaku && !danmakuItem)) {
-    timelineStore.setSelectedClip(null);
-    timelineStore.setSelectedAnimation(null);
-    danmuStore.select(null);
-  }
 };
 
 // Computed isPlaying synced with timelineStore
@@ -254,6 +239,14 @@ const contentStyle = computed(() => ({
   transformOrigin: "0 0",
 }));
 
+const centerStageView = (nextScale = scale.value) => {
+  if (!containerRef.value) return;
+
+  const rect = containerRef.value.getBoundingClientRect();
+  position.value.x = (rect.width - DANMAKU_WIDTH * nextScale) / 2;
+  position.value.y = (rect.height - DANMAKU_HEIGHT * nextScale) / 2;
+};
+
 // Helpers
 const handleWheel = (e: WheelEvent) => {
   if (!containerRef.value) return;
@@ -357,9 +350,7 @@ watch(
 // Initial centering and BAS init
 onMounted(() => {
   if (containerRef.value) {
-    const rect = containerRef.value.getBoundingClientRect();
-    position.value.x = rect.width / 2;
-    position.value.y = rect.height / 2;
+    centerStageView(scale.value);
   }
 
   window.addEventListener("mousemove", onDrag);
@@ -389,10 +380,8 @@ onUnmounted(() => {
 
 const resetView = () => {
   if (!containerRef.value) return;
-  const rect = containerRef.value.getBoundingClientRect();
   scale.value = 0.8; // Slightly zoomed out default
-  position.value.x = rect.width / 2;
-  position.value.y = rect.height / 2;
+  centerStageView(0.8);
 };
 
 // 播放控制
@@ -493,26 +482,26 @@ const skipForward = () => {
 
       <!-- Transform Wrapper -->
       <div
-        class="absolute top-0 left-0 w-full h-full flex items-center justify-center"
+        class="absolute top-0 left-0"
         :style="contentStyle"
       >
-        <!-- Content (Centered on 0,0 of wrapper) -->
         <div
           ref="danmakuRef"
           id="danmaku"
-          class="w-[800px] aspect-video bg-black rounded-lg shadow-2xl border border-border/10 flex items-center justify-center -translate-x-1/2 -translate-y-1/2 relative group select-none"
-          @click="handleDanmakuClick"
+          class="w-[800px] aspect-video bg-black rounded-lg shadow-2xl border border-border/10 flex items-center justify-center relative group select-none"
         >
           <!-- BAS renders danmaku items here -->
 
           <!-- Transform Controls Overlay -->
           <TransformControls
-            v-if="selectedDanmuForTransform && !isPlaying"
-            :selected="selectedDanmuForTransform"
+            v-if="previewTransformItems.length && !isPlaying"
+            :items="previewTransformItems"
+            :selected-clip-id="timelineStore.selectedClipId"
             :container-width="DANMAKU_WIDTH"
             :container-height="DANMAKU_HEIGHT"
             :canvas-scale="scale"
-            @update="handleTransformUpdate"
+            @select="handleTransformSelection"
+            @commit="handleTransformCommit"
           />
         </div>
       </div>

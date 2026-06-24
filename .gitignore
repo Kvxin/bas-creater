@@ -36,3 +36,5 @@ coverage
 __screenshots__/
 
 v2-*
+
+pnpm-lock.yaml

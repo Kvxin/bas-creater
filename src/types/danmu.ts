@@ -26,7 +26,7 @@ export interface TextDanmu extends DanmuBase {
   fontFamily?: string
   bold?: number | boolean
   textShadow?: number
-  color?: string // 0xRRGGBB
+  color?: number | string // 0xRRGGBB
   strokeWidth?: number
   strokeColor?: number // 0xRRGGBB
   textColor?: number // 0xRRGGBB（可选，备用）
