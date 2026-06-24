@@ -1,30 +1,53 @@
 <script setup lang="ts">
 import { ref, computed, watch, reactive, onMounted, onUnmounted } from "vue";
+import { useElementSize } from "@vueuse/core";
 import {
   Clock,
   ZoomIn,
   ZoomOut,
-  Play,
-  Pause,
   Plus,
   Trash2,
   ChevronRight,
   ChevronDown,
+  Eye,
+  EyeOff,
+  Volume2,
+  VolumeX,
+  Captions,
+  Music2,
+  Video,
 } from "lucide-vue-next";
 import TimeRuler from "./TimeRuler.vue";
 import { formatTime } from "@/utils/timeline";
 import { getItemName } from "@/utils/resourceUtils";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
+import { useAudioStore } from "@/stores/audio";
 import { compileTimelineToBas } from "@/utils/compiler";
 import basService from "@/utils/bas";
 import { useContextMenuStore } from "@/stores/contextMenu";
 
-import type { AnimationSegment } from "@/types/timeline";
+import type { AnimationSegment, TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
 
 const timelineStore = useTimelineStore();
 const danmuStore = useDanmuStore();
+const audioStore = useAudioStore();
 const contextMenu = useContextMenuStore();
+
+const TIMELINE_CLIP_THEME: Record<string, { backgroundColor: string; borderColor: string }> = {
+  text: { backgroundColor: "#5DBAA0", borderColor: "#75D2B8" },
+  button: { backgroundColor: "#BA5D7A", borderColor: "#D17B95" },
+  path: { backgroundColor: "#5d93ba", borderColor: "#78ADD2" },
+  audio: { backgroundColor: "#8F5DBA", borderColor: "#A979D1" },
+  default: { backgroundColor: "#5d93ba", borderColor: "#78ADD2" },
+};
+
+const getClipThemeStyle = (clip: any) => {
+  const danmu = danmuStore.danmus.find((d) => d.id === clip.resourceId);
+  const isAudio = audioStore.audioResources.some((resource) => resource.id === clip.resourceId);
+  const type = isAudio ? "audio" : danmu?.type ?? "default";
+  return TIMELINE_CLIP_THEME[type] ?? TIMELINE_CLIP_THEME.default;
+};
 
 const handleContextMenu = (e: MouseEvent, type: 'track' | 'clip' | 'background', data?: any) => {
   e.preventDefault();
@@ -88,8 +111,8 @@ const getAnimationSegmentStyle = (clip: any, anim: AnimationSegment, index: numb
     const widthPercent = (duration / clip.duration) * 100;
     
     // Colors
-    const bgColor = anim.type === 'set' ? 'rgba(16, 185, 129, 0.9)' : 'rgba(245, 158, 11, 0.9)'; // Green / Orange
-    const borderColor = anim.type === 'set' ? 'rgba(5, 150, 105, 1)' : 'rgba(217, 119, 6, 1)';
+    const bgColor = anim.type === 'set' ? 'rgba(93, 186, 160, 0.88)' : 'rgba(93, 147, 186, 0.88)';
+    const borderColor = anim.type === 'set' ? 'rgba(117, 210, 184, 1)' : 'rgba(120, 173, 210, 1)';
 
     return {
         left: `${leftPercent}%`,
@@ -99,7 +122,7 @@ const getAnimationSegmentStyle = (clip: any, anim: AnimationSegment, index: numb
         backgroundColor: bgColor,
         borderColor: borderColor,
         borderWidth: '1px',
-        borderRadius: '2px',
+        borderRadius: '3px',
         zIndex: isDragging || isResizing ? 20 : 15
     };
 }
@@ -111,16 +134,21 @@ const handleAnimationClick = (clip: any, anim: AnimationSegment, e: MouseEvent) 
     danmuStore.select(clip.resourceId);
 }
 
+const TIMELINE_END_PADDING_MS = 10000;
+
 // 像素/秒 计算
 const pixelsPerSecond = computed(() => timelineStore.zoomScale * 2);
+const timelineContentRef = ref<HTMLElement | null>(null);
+const { width: timelineViewportWidth } = useElementSize(timelineContentRef);
 
-// 总宽度 (逻辑时长 + 20% 缓冲，确保有空余拖拽空间)
+// 内容宽度由真实时长驱动，右侧余量只用于视图操作，不写入项目时长。
 const totalWidth = computed(() => {
-  return ((timelineStore.duration * 1.2) / 1000) * pixelsPerSecond.value;
+  const viewPaddingMs = timelineStore.duration > 0 ? TIMELINE_END_PADDING_MS : 0;
+  const contentWidth = ((timelineStore.duration + viewPaddingMs) / 1000) * pixelsPerSecond.value;
+  return Math.max(timelineViewportWidth.value, contentWidth, 1);
 });
 
 // 滚动容器
-const timelineContentRef = ref<HTMLElement | null>(null);
 const trackListRef = ref<HTMLElement | null>(null);
 const scrollLeft = ref(0);
 
@@ -186,6 +214,77 @@ const handleAddTrack = () => {
 // 删除轨道
 const handleRemoveTrack = (trackId: string) => {
   timelineStore.removeTrack(trackId);
+};
+
+const toggleTrackVisibility = (trackId: string) => {
+  timelineStore.toggleTrackVisibility(trackId);
+};
+
+const toggleTrackMute = (trackId: string) => {
+  timelineStore.toggleTrackMute(trackId);
+};
+
+const inferTrackTypeFromClips = (track: TimelineTrack): TimelineTrackType | null => {
+  if (track.clips.length === 0) return null;
+  return track.clips.some((clip) =>
+    audioStore.audioResources.some((resource) => resource.id === clip.resourceId)
+  )
+    ? "audio"
+    : "danmu";
+};
+
+const getTrackType = (track: TimelineTrack): TimelineTrackType | null => {
+  return track.type ?? inferTrackTypeFromClips(track);
+};
+
+const getClipTimelineType = (clip: TimelineClip): TimelineTrackType => {
+  const sourceTrack = timelineStore.tracks.find((track) =>
+    track.clips.some((trackClip) => trackClip.id === clip.id)
+  );
+  if (sourceTrack?.type) return sourceTrack.type;
+
+  return audioStore.audioResources.some((resource) => resource.id === clip.resourceId)
+    ? "audio"
+    : "danmu";
+};
+
+const getTrackTypeLabel = (track: TimelineTrack) => {
+  const type = getTrackType(track);
+  if (type === "audio") return "音频轨道";
+  if (type === "danmu") return "弹幕轨道";
+  return "空轨道";
+};
+
+const getTrackTypeIcon = (track: TimelineTrack) => {
+  const type = getTrackType(track);
+  if (type === "audio") return Music2;
+  return Captions;
+};
+
+const getTrackPrimaryIcon = (track: TimelineTrack) => {
+  if (getTrackType(track) === "audio") {
+    return track.muted ? VolumeX : Volume2;
+  }
+  return track.visible ? Eye : EyeOff;
+};
+
+const getTrackPrimaryLabel = (track: TimelineTrack) => {
+  if (getTrackType(track) === "audio") {
+    return track.muted ? "取消静音轨道" : "静音轨道";
+  }
+  return track.visible ? "隐藏轨道" : "显示轨道";
+};
+
+const isTrackPrimaryActive = (track: TimelineTrack) => {
+  return getTrackType(track) === "audio" ? Boolean(track.muted) : track.visible;
+};
+
+const toggleTrackPrimaryAction = (track: TimelineTrack) => {
+  if (getTrackType(track) === "audio") {
+    toggleTrackMute(track.id);
+    return;
+  }
+  toggleTrackVisibility(track.id);
 };
 
 // 临时状态，用于拖拽/调整大小时的高性能更新
@@ -285,6 +384,70 @@ const isDraggingClip = ref(false);
 const draggedClipId = ref<string | null>(null);
 const initialClipStartTime = ref(0);
 const dragStartX = ref(0);
+const originalClipTrackId = ref<string | null>(null);
+const dragTargetTrackId = ref<string | null>(null);
+const draggedClipType = ref<TimelineTrackType | null>(null);
+
+const draggedClip = computed(() => {
+  if (!draggedClipId.value) return null;
+
+  for (const track of timelineStore.tracks) {
+    const clip = track.clips.find((trackClip) => trackClip.id === draggedClipId.value);
+    if (clip) return clip;
+  }
+
+  return null;
+});
+
+const getTrackIdAtPoint = (event: MouseEvent) => {
+  const element = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+  const trackElement = element?.closest<HTMLElement>("[data-timeline-track-id]");
+  const trackId = trackElement?.dataset.timelineTrackId ?? null;
+
+  if (!trackId || !timelineStore.tracks.some((track) => track.id === trackId)) {
+    return null;
+  }
+
+  return trackId;
+};
+
+const canDropDraggedClipOnTrack = (track: TimelineTrack) => {
+  if (!isDraggingClip.value || !draggedClipId.value || !draggedClipType.value) return false;
+  if (track.id === originalClipTrackId.value) return true;
+
+  const targetType = getTrackType(track);
+  if (targetType && targetType !== draggedClipType.value) return false;
+
+  return track.clips.length === 0 || targetType === draggedClipType.value;
+};
+
+const isDragTargetTrack = (track: TimelineTrack) => {
+  return isDraggingClip.value && dragTargetTrackId.value === track.id;
+};
+
+const isInvalidDragTargetTrack = (track: TimelineTrack) => {
+  return isDragTargetTrack(track) && !canDropDraggedClipOnTrack(track);
+};
+
+const isDraggedClipLeavingTrack = (clip: TimelineClip) => {
+  return (
+    isDraggingClip.value &&
+    draggedClipId.value === clip.id &&
+    Boolean(dragTargetTrackId.value) &&
+    dragTargetTrackId.value !== clip.trackId
+  );
+};
+
+const getDragGhostClipStyle = (clip: TimelineClip) => {
+  const left = (tempState.startTime / 1000) * pixelsPerSecond.value;
+  const width = (clip.duration / 1000) * pixelsPerSecond.value;
+
+  return {
+    left: `${left}px`,
+    width: `${width}px`,
+    zIndex: 110,
+  };
+};
 
 const handleClipClick = (clip: any, e: MouseEvent) => {
     timelineStore.setSelectedClip(clip.id);
@@ -299,6 +462,7 @@ const startDragClip = (e: MouseEvent, clip: any) => {
   if ((e.target as HTMLElement).dataset.handle) return;
 
   e.stopPropagation(); // 阻止冒泡
+  e.preventDefault();
   
   // 拖拽时同时也选中
   timelineStore.setSelectedClip(clip.id);
@@ -307,6 +471,9 @@ const startDragClip = (e: MouseEvent, clip: any) => {
   draggedClipId.value = clip.id;
   initialClipStartTime.value = clip.startTime;
   dragStartX.value = e.clientX;
+  originalClipTrackId.value = clip.trackId;
+  dragTargetTrackId.value = clip.trackId;
+  draggedClipType.value = getClipTimelineType(clip);
   
   // 初始化临时状态
   tempState.startTime = clip.startTime;
@@ -332,6 +499,7 @@ const onDragClip = (e: MouseEvent) => {
   
   // 只更新本地临时状态，不触发 Store 更新
   tempState.startTime = newStartTime;
+  dragTargetTrackId.value = getTrackIdAtPoint(e) ?? dragTargetTrackId.value;
 
   // 更新 tooltip 位置
   tooltipPosition.x = e.clientX + 15;
@@ -340,12 +508,36 @@ const onDragClip = (e: MouseEvent) => {
 
 const stopDragClip = () => {
   if (isDraggingClip.value && draggedClipId.value) {
-      // 拖拽结束，一次性提交到 Store
-      timelineStore.updateClip(draggedClipId.value, { startTime: tempState.startTime });
+      const targetTrackId = dragTargetTrackId.value ?? originalClipTrackId.value;
+      const targetTrack = timelineStore.tracks.find((track) => track.id === targetTrackId);
+      const moved =
+        Boolean(targetTrackId) &&
+        Boolean(targetTrack) &&
+        timelineStore.moveClipToTrack(
+          draggedClipId.value,
+          targetTrackId!,
+          { startTime: tempState.startTime },
+          {
+            clipType: draggedClipType.value ?? undefined,
+            targetTrackType: targetTrack ? getTrackType(targetTrack) : null,
+          }
+        );
+
+      if (!moved && originalClipTrackId.value) {
+        timelineStore.moveClipToTrack(
+          draggedClipId.value,
+          originalClipTrackId.value,
+          { startTime: tempState.startTime },
+          { clipType: draggedClipType.value ?? undefined }
+        );
+      }
   }
 
   isDraggingClip.value = false;
   draggedClipId.value = null;
+  originalClipTrackId.value = null;
+  dragTargetTrackId.value = null;
+  draggedClipType.value = null;
   document.body.style.cursor = "";
   window.removeEventListener("mousemove", onDragClip);
   window.removeEventListener("mouseup", stopDragClip);
@@ -669,31 +861,32 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="h-full w-full bg-sidebar border-t border-sidebar-border flex flex-col select-none"
+    class="panel h-full w-full bg-background border border-border rounded-sm overflow-hidden flex flex-col select-none"
+    data-ui="timeline-panel"
   >
     <!-- 顶部工具栏 -->
     <div
-      class="h-9 bg-sidebar-accent/30 border-b border-sidebar-border flex items-center px-2 text-xs text-muted-foreground gap-4 shrink-0"
+      class="h-10 bg-background border-b border-border flex items-center justify-between px-2 py-1 text-xs text-muted-foreground gap-4 shrink-0"
     >
+      <div class="flex items-center gap-2">
       <Clock class="size-3.5" />
       <span class="font-mono text-foreground/80">{{ currentTimeDisplay }}</span>
-
-      <div class="flex-1"></div>
+      </div>
 
       <div class="flex items-center gap-2">
         <span class="text-[10px] w-8 text-right"
           >{{ timelineStore.zoomScale }}%</span
         >
-        <div class="flex gap-0.5 border border-sidebar-border rounded overflow-hidden">
+        <div class="flex gap-0.5 border border-border rounded-sm overflow-hidden bg-accent">
           <button
-            class="p-1 hover:bg-sidebar-accent cursor-pointer"
+            class="size-7 inline-flex items-center justify-center hover:bg-foreground/10 cursor-pointer"
             @click="zoomOut"
           >
             <ZoomOut class="size-3" />
           </button>
-          <div class="w-px bg-sidebar-border"></div>
+          <div class="w-px bg-border"></div>
           <button
-            class="p-1 hover:bg-sidebar-accent cursor-pointer"
+            class="size-7 inline-flex items-center justify-center hover:bg-foreground/10 cursor-pointer"
             @click="zoomIn"
           >
             <ZoomIn class="size-3" />
@@ -703,14 +896,14 @@ onUnmounted(() => {
     </div>
 
     <!-- 头部区域 (Header Row) -->
-    <div class="flex h-8 shrink-0 bg-sidebar border-b border-sidebar-border">
+    <div class="flex h-[30px] shrink-0 bg-background border-b border-border">
       <!-- 左上角：轨道列表头 -->
-      <div class="w-40 shrink-0 border-r border-sidebar-border bg-sidebar-accent/10 flex items-center px-2 text-xs font-medium text-muted-foreground z-20">
+      <div class="w-56 shrink-0 border-r border-border bg-background flex items-center justify-between px-3 text-xs font-medium text-muted-foreground z-20">
         轨道列表
       </div>
       
       <!-- 右侧：时间刻度尺 (固定视口，内部 canvas 重绘) -->
-      <div class="flex-1 relative overflow-hidden cursor-pointer bg-sidebar">
+      <div class="flex-1 relative overflow-hidden cursor-pointer bg-background">
         <TimeRuler 
             :scale="timelineStore.zoomScale" 
             :scroll-left="scrollLeft" 
@@ -719,10 +912,10 @@ onUnmounted(() => {
         />
         <!-- 标尺上的游标指示器 -->
         <div 
-            class="absolute top-0 bottom-0 w-px bg-destructive z-30 pointer-events-none"
+            class="absolute top-0 bottom-0 w-px bg-primary z-30 pointer-events-none"
             :style="rulerPlayheadStyle"
         >
-            <div class="absolute -top-1 -left-1.5 w-3 h-3 bg-destructive rotate-45 rounded-[1px]"></div>
+            <div class="absolute top-1 left-1/2 size-3 -translate-x-1/2 rounded-full border-2 border-primary/50 bg-primary shadow-xs"></div>
         </div>
       </div>
     </div>
@@ -731,40 +924,67 @@ onUnmounted(() => {
     <div class="flex-1 flex overflow-hidden">
       <!-- 左侧：轨道列表 (无滚动条，由右侧控制 scrollTop) -->
       <div
-        class="w-40 border-r border-sidebar-border bg-sidebar/50 flex flex-col shrink-0 overflow-hidden"
+        class="w-56 border-r border-border bg-background flex flex-col shrink-0 overflow-hidden"
         ref="trackListRef"
       >
           <!-- 轨道头列表 -->
           <template v-for="track in timelineStore.tracks" :key="track.id">
               <div
-                  class="h-10 border-b border-sidebar-border flex items-center px-2 text-xs group hover:bg-sidebar-accent/30 transition-colors shrink-0"
+                  class="h-10 grid grid-cols-[1.25rem_minmax(4.5rem,1fr)_1.5rem_1.5rem_1.5rem_1.5rem] items-center gap-1 px-2 text-xs group border-b border-border/60 hover:bg-accent/50 transition-colors shrink-0"
+                  :class="{ 'text-muted-foreground/55': !track.visible }"
                   @contextmenu="handleContextMenu($event, 'track', track.id)"
               >
                   <button 
                       @click="timelineStore.toggleTrackExpand(track.id)"
-                      class="p-0.5 hover:bg-sidebar-accent rounded mr-1 transition-colors"
+                      class="size-5 hover:bg-accent rounded-sm transition-colors inline-flex items-center justify-center"
+                      aria-label="展开轨道动画"
                   >
                       <component :is="track.expanded ? ChevronDown : ChevronRight" class="size-3 text-muted-foreground" />
                   </button>
 
-                  <div class="flex-1 truncate font-medium">{{ track.name }}</div>
+                  <div class="min-w-0 truncate text-left font-medium text-muted-foreground group-hover:text-foreground" :title="track.name">{{ track.name }}</div>
+                  <button
+                      class="size-5 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                      :class="{ 'text-primary bg-primary/10': isTrackPrimaryActive(track) }"
+                      :aria-label="getTrackPrimaryLabel(track)"
+                      :title="getTrackPrimaryLabel(track)"
+                      @click.stop="toggleTrackPrimaryAction(track)"
+                  >
+                      <component :is="getTrackPrimaryIcon(track)" class="size-3" />
+                  </button>
+                  <span
+                      class="size-5 inline-flex items-center justify-center rounded-sm border border-border/70 bg-background/80 text-muted-foreground"
+                      :aria-label="`${getTrackTypeLabel(track)}，轨道类型由首次放入的资源锁定`"
+                      :title="`${getTrackTypeLabel(track)} · 首次放入资源后锁定类型`"
+                  >
+                      <component :is="getTrackTypeIcon(track)" class="size-3" />
+                  </span>
+                  <span
+                      class="size-5 inline-flex items-center justify-center rounded-sm border border-border/50 bg-background/50 text-muted-foreground/45"
+                      title="视频轨道占位，暂未启用"
+                      aria-label="视频轨道占位，暂未启用"
+                  >
+                      <Video class="size-3" />
+                  </span>
                   <button 
-                      class="opacity-0 group-hover:opacity-100 p-1 hover:text-destructive transition-opacity"
-                      @click="handleRemoveTrack(track.id)"
+                      class="opacity-0 group-hover:opacity-100 size-5 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-opacity"
+                      aria-label="删除轨道"
+                      title="删除轨道"
+                      @click.stop="handleRemoveTrack(track.id)"
                   >
                       <Trash2 class="size-3" />
                   </button>
               </div>
               
               <!-- Expanded Panel Header -->
-              <div v-if="track.expanded" class="h-16 border-b border-sidebar-border bg-sidebar-accent/5 flex items-center px-8 text-[10px] text-muted-foreground shrink-0 border-l-4 border-l-primary/20">
+              <div v-if="track.expanded" class="h-16 bg-muted/30 border-b border-border/60 flex items-center justify-end px-3 text-[10px] text-muted-foreground shrink-0" :class="{ 'opacity-55': !track.visible }">
                   <span class="opacity-70">动画关键帧</span>
               </div>
           </template>
           
           <button
               @click="handleAddTrack"
-              class="w-full h-8 flex items-center justify-center gap-1 text-xs text-muted-foreground hover:text-primary hover:bg-sidebar-accent/50 transition-colors mt-1 shrink-0"
+              class="w-full h-8 flex items-center justify-center gap-1 text-xs text-muted-foreground hover:text-primary hover:bg-accent transition-colors mt-1 shrink-0"
           >
               <Plus class="size-3" />
               添加轨道
@@ -776,21 +996,29 @@ onUnmounted(() => {
 
       <!-- 右侧：时间轴内容 (主滚动容器) -->
       <div
-        class="flex-1 flex flex-col overflow-auto relative bg-background/30"
+        class="flex-1 flex flex-col overflow-auto scrollbar-thin relative bg-background"
         ref="timelineContentRef"
         @scroll="handleScroll"
       >
         <!-- Tracks Container -->
         <div
           class="relative"
-          :style="{ width: Math.max(1000, totalWidth) + 'px' }"
+          :style="{ width: totalWidth + 'px' }"
           @mousedown.self="handleTimelineClick"
           @contextmenu.prevent="handleContextMenu($event, 'background')"
         >
             <!-- 轨道行 -->
             <template v-for="track in timelineStore.tracks" :key="track.id">
                 <div
-                    class="h-10 border-b border-sidebar-border/50 relative group bg-sidebar/10 hover:bg-sidebar/30 transition-colors"
+                    class="h-10 relative group border-b border-border/60 hover:bg-accent/35 transition-colors"
+                    :class="{
+                        'opacity-55': !track.visible,
+                        'bg-primary/10 ring-1 ring-inset ring-primary/30':
+                            isDragTargetTrack(track) && canDropDraggedClipOnTrack(track),
+                        'bg-destructive/10 ring-1 ring-inset ring-destructive/30':
+                            isInvalidDragTargetTrack(track)
+                    }"
+                    :data-timeline-track-id="track.id"
                     @dragover.prevent
                     @drop="handleDrop($event, track.id)"
                 >
@@ -798,39 +1026,63 @@ onUnmounted(() => {
                     <div
                         v-for="clip in track.clips"
                         :key="clip.id"
-                        class="absolute top-1 bottom-1 rounded border border-primary/40 bg-primary/20 hover:bg-primary/30 text-[10px] flex items-center px-2 text-primary-foreground overflow-hidden cursor-move select-none"
-                        :class="{ 'ring-2 ring-primary ring-offset-1 z-10': timelineStore.selectedClipId === clip.id }"
-                        :style="getClipStyle(clip)"
+                        class="absolute top-1 bottom-1 rounded-sm border text-[10px] flex items-center px-2 text-white overflow-hidden cursor-move select-none shadow-sm hover:brightness-110"
+                        :class="{
+                            'ring-1 ring-primary z-10': timelineStore.selectedClipId === clip.id,
+                            'opacity-35': isDraggedClipLeavingTrack(clip)
+                        }"
+                        :style="{ ...getClipStyle(clip), ...getClipThemeStyle(clip) }"
+                        :data-clip-id="clip.id"
                         :title="getClipName(clip)"
                         @click.stop="handleClipClick(clip, $event)"
                         @mousedown.stop="startDragClip($event, clip)"
                         @contextmenu.stop="handleContextMenu($event, 'clip', clip)"
                     >
-                        <span class="truncate text-foreground/90 font-medium z-10 relative pointer-events-none">{{ getClipName(clip) }}</span>
+                        <span class="truncate text-white/90 font-medium z-10 relative pointer-events-none">{{ getClipName(clip) }}</span>
                         
                         <!-- Resize Handles -->
                         <template v-if="timelineStore.selectedClipId === clip.id">
                             <div 
-                                class="absolute left-0 top-0 bottom-0 w-2 cursor-w-resize hover:bg-primary/50 z-20 flex items-center justify-center group/handle"
+                                class="absolute left-0 top-0 bottom-0 w-2 cursor-w-resize hover:bg-white/20 z-20 flex items-center justify-center group/handle"
                                 data-handle="left"
                                 @mousedown.stop="startResizeClip($event, clip, 'left')"
                             >
-                                <div class="w-1 h-3 bg-primary/40 rounded-full group-hover/handle:bg-primary"></div>
+                                <div class="w-0.5 h-4 bg-white/60 rounded-full group-hover/handle:bg-white"></div>
                             </div>
                             
                             <div 
-                                class="absolute right-0 top-0 bottom-0 w-2 cursor-e-resize hover:bg-primary/50 z-20 flex items-center justify-center group/handle"
+                                class="absolute right-0 top-0 bottom-0 w-2 cursor-e-resize hover:bg-white/20 z-20 flex items-center justify-center group/handle"
                                 data-handle="right"
                                 @mousedown.stop="startResizeClip($event, clip, 'right')"
                             >
-                                <div class="w-1 h-3 bg-primary/40 rounded-full group-hover/handle:bg-primary"></div>
+                                <div class="w-0.5 h-4 bg-white/60 rounded-full group-hover/handle:bg-white"></div>
                             </div>
                         </template>
+                    </div>
+
+                    <div
+                        v-if="draggedClip && dragTargetTrackId === track.id && draggedClip.trackId !== track.id"
+                        class="absolute top-1 bottom-1 rounded-sm border text-[10px] flex items-center px-2 text-white overflow-hidden pointer-events-none opacity-80 shadow-md"
+                        :class="{
+                            'ring-1 ring-primary/80': canDropDraggedClipOnTrack(track),
+                            'ring-1 ring-destructive/80 saturate-50': isInvalidDragTargetTrack(track)
+                        }"
+                        :style="{ ...getDragGhostClipStyle(draggedClip), ...getClipThemeStyle(draggedClip) }"
+                    >
+                        <span class="truncate text-white/90 font-medium">{{ getClipName(draggedClip) }}</span>
                     </div>
                 </div>
 
                 <!-- Expanded Animation Row -->
-                <div v-if="track.expanded" class="h-16 border-b border-sidebar-border/50 relative bg-sidebar/5">
+                <div
+                    v-if="track.expanded"
+                    class="h-16 relative bg-muted/30 border-b border-border/60"
+                    :class="{
+                        'bg-primary/10': isDragTargetTrack(track) && canDropDraggedClipOnTrack(track),
+                        'bg-destructive/10': isInvalidDragTargetTrack(track)
+                    }"
+                    :data-timeline-track-id="track.id"
+                >
                      <!-- Animation Ghost Containers (aligned with clips) -->
                      <div 
                         v-for="clip in track.clips"
@@ -843,8 +1095,8 @@ onUnmounted(() => {
                              <div 
                                 v-for="(anim, index) in clip.animations" 
                                 :key="anim.id"
-                                class="absolute pointer-events-auto hover:brightness-110 cursor-pointer group/anim"
-                                :class="{ 'ring-1 ring-white': timelineStore.selectedAnimationId === anim.id }"
+                                class="absolute pointer-events-auto hover:brightness-110 cursor-pointer group/anim rounded-sm"
+                                :class="{ 'ring-1 ring-primary': timelineStore.selectedAnimationId === anim.id }"
                                 :style="getAnimationSegmentStyle(clip, anim, index)"
                                 @click="handleAnimationClick(clip, anim, $event)"
                                 @mousedown.stop="startDragAnimation($event, clip, anim)"
@@ -867,7 +1119,7 @@ onUnmounted(() => {
 
             <!-- Playhead Line (内容区域) -->
             <div 
-                class="absolute top-0 bottom-0 w-px bg-destructive z-30 group cursor-ew-resize"
+                class="absolute top-0 bottom-0 w-px bg-primary z-30 group cursor-ew-resize"
                 :style="playheadStyle"
                 @mousedown.stop="startDragPlayhead"
             >
@@ -881,7 +1133,7 @@ onUnmounted(() => {
     <!-- Drag/Resize Tooltip -->
     <div
       v-if="isDraggingClip || isResizingClip"
-      class="fixed z-50 pointer-events-none bg-popover text-popover-foreground px-2 py-1.5 rounded shadow-md border border-border text-xs font-mono whitespace-pre flex flex-col gap-0.5"
+      class="fixed z-50 pointer-events-none bg-popover text-popover-foreground px-2 py-1.5 rounded-sm shadow-md border border-border text-xs font-mono whitespace-pre flex flex-col gap-0.5"
       :style="{ top: tooltipPosition.y + 'px', left: tooltipPosition.x + 'px' }"
     >
       <div v-if="isDraggingClip">Start: {{ formatTime(tempState.startTime).str }}</div>

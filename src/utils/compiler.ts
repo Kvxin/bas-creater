@@ -113,7 +113,9 @@ export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string
         if (startSec > 0) {
           basCode += `set ${varName} {} ${startSec}s
 `;
-          basCode += `then set ${varName} { alpha = ${targetAlpha} } ${durationSec}s
+          basCode += `then set ${varName} { alpha = ${targetAlpha} } 0s
+`;
+          basCode += `then set ${varName} {} ${durationSec}s
 `;
         } else {
           basCode += `set ${varName} {} ${durationSec}s

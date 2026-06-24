@@ -47,12 +47,18 @@ const containerRef = ref<HTMLDivElement | null>(null);
 let resizeObserver: ResizeObserver | null = null;
 
 // 颜色配置
-const colors = {
-  background: "transparent",
-  majorTick: "hsl(var(--foreground))",
-  mediumTick: "hsl(var(--muted-foreground))",
-  minorTick: "hsl(var(--muted-foreground) / 0.5)",
-  text: "hsl(var(--foreground))",
+const getThemeColors = () => {
+  const styles = getComputedStyle(document.documentElement);
+  const foreground = styles.getPropertyValue("--foreground").trim() || "hsl(0 0% 87%)";
+  const muted = styles.getPropertyValue("--muted-foreground").trim() || "hsl(0 0% 56%)";
+
+  return {
+    background: "transparent",
+    majorTick: foreground,
+    mediumTick: muted,
+    minorTick: `color-mix(in oklab, ${muted} 50%, transparent)`,
+    text: foreground,
+  };
 };
 
 // 刻度高度配置
@@ -111,6 +117,7 @@ const drawRuler = () => {
 
   const width = rect.width;
   const height = rect.height;
+  const colors = getThemeColors();
 
   // 清空画布
   ctx.clearRect(0, 0, width, height);
@@ -202,18 +209,18 @@ onUnmounted(() => {
 <template>
   <div
     ref="containerRef"
-    class="time-ruler w-full h-8 relative cursor-pointer"
+    class="time-ruler w-full h-[22px] relative cursor-pointer"
     @click="handleClick"
   >
     <canvas
       ref="canvasRef"
-      class="absolute inset-0 pointer-events-none"
+      class="time-ruler-canvas absolute inset-0 pointer-events-none"
     ></canvas>
   </div>
 </template>
 
 <style scoped>
 .time-ruler {
-  min-height: 32px;
+  min-height: 22px;
 }
 </style>

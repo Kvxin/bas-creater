@@ -139,13 +139,14 @@ const handleDragStart = (item: AnyDanmu | AudioResource, event: DragEvent) => {
 
 <template>
   <div
-    class="h-full w-full bg-sidebar border-r border-sidebar-border flex text-sm select-none"
+    class="panel h-full w-full bg-background border border-border rounded-sm overflow-hidden flex text-sm select-none"
+    data-ui="resources-panel"
   >
     <!-- Vertical Tabs -->
     <ResourcesSidebar v-model="activeTab" />
 
     <!-- List Content -->
-    <div class="flex-1 flex flex-col min-w-0 bg-background/50 overflow-hidden">
+    <div class="flex-1 flex flex-col min-w-0 bg-background overflow-hidden">
       <!-- Header -->
       <ResourcesHeader
         v-model:searchQuery="searchQuery"
@@ -166,7 +167,7 @@ const handleDragStart = (item: AnyDanmu | AudioResource, event: DragEvent) => {
 
       <!-- Footer: 弹幕数量统计 -->
       <div
-        class="h-8 border-t border-sidebar-border flex items-center justify-between px-4 text-xs text-muted-foreground bg-sidebar/30"
+        class="h-8 border-t border-border flex items-center justify-between gap-3 px-3 text-xs text-muted-foreground bg-background shrink-0"
       >
         <span
           >共

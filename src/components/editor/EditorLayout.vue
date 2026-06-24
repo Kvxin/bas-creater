@@ -8,7 +8,7 @@ import PropertiesPanel from "./PropertiesPanel.vue";
 import TimelinePanel from "./TimelinePanel.vue";
 
 // Theme
-const isDark = useDark();
+const isDark = useDark({ initialValue: "dark" });
 const toggleDark = useToggle(isDark);
 
 // Layout State
@@ -70,93 +70,97 @@ useEventListener("mouseleave", stopResize);
 <template>
   <div
     class="h-screen w-screen flex flex-col bg-background text-foreground overflow-hidden font-sans"
+    data-ui="editor-shell"
   >
     <!-- Header -->
     <header
-      class="h-14 border-b border-border bg-card flex items-center justify-between px-4 shrink-0 z-20"
+      class="h-[3.4rem] bg-background flex items-center justify-between px-3 pt-0.5 shrink-0 z-20"
     >
-      <div class="flex items-center gap-2">
-        <div class="bg-primary rounded p-1 text-primary-foreground">
+      <div class="flex items-center gap-1.5 min-w-0">
+        <div class="size-8 rounded-sm hover:bg-accent flex items-center justify-center text-foreground">
           <Video class="size-5" />
         </div>
-        <h1 class="font-bold text-lg tracking-tight">
-          Lumina <span class="font-normal text-muted-foreground">Cut</span>
+        <h1 class="h-8 px-2 rounded-sm flex items-center text-[0.9rem] font-medium tracking-normal truncate hover:bg-accent">
+          Lumina <span class="ml-1 text-muted-foreground font-normal">Cut</span>
         </h1>
       </div>
 
-      <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2">
         <button
-          class="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          class="h-8 px-3 rounded-sm bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors"
         >
           Export
         </button>
         <button
           @click="toggleDark()"
-          class="p-2 rounded-md hover:bg-accent hover:text-accent-foreground transition-colors focus:outline-none focus:ring-2 focus:ring-ring"
+          class="size-8 rounded-sm hover:bg-accent hover:text-accent-foreground transition-colors focus:outline-none focus:ring-1 focus:ring-ring flex items-center justify-center"
           aria-label="Toggle Theme"
         >
-          <Sun v-if="isDark" class="size-5" />
-          <Moon v-else class="size-5" />
+          <Sun v-if="isDark" class="size-4" />
+          <Moon v-else class="size-4" />
         </button>
         <div
-          class="size-8 rounded-full bg-linear-to-br from-primary to-chart-1"
+          class="size-8 rounded-sm border border-border bg-linear-to-br from-primary/85 to-chart-2/75"
         ></div>
       </div>
     </header>
 
     <!-- Main Content -->
-    <div class="flex-1 flex flex-col min-h-0 relative">
+    <div class="flex-1 flex flex-col min-h-0 relative gap-[0.18rem] pb-3">
       <!-- Top Section -->
-      <div class="flex-1 flex min-h-0">
+      <div class="flex-1 flex min-h-0 gap-[0.19rem] px-3">
         <!-- Left Panel: Resources -->
-        <div class="shrink-0 flex" :style="{ width: `${leftWidth}px` }">
+        <div class="shrink-0 flex min-w-0" :style="{ width: `${leftWidth}px` }">
           <ResourcesPanel />
         </div>
 
         <!-- Resizer -->
         <div
-          class="w-1 hover:w-1.5 bg-border hover:bg-primary/50 cursor-col-resize transition-all z-10 flex items-center justify-center group -ml-0.5"
+          class="w-[0.18rem] hover:w-1 bg-transparent hover:bg-primary/45 cursor-col-resize transition-all z-10 flex items-center justify-center group rounded-full"
           @mousedown="startResizeLeft"
+          aria-label="Resize resources panel"
         >
           <div
-            class="h-8 w-0.5 bg-muted-foreground/20 group-hover:bg-primary rounded-full"
+            class="h-8 w-px bg-border group-hover:bg-primary rounded-full"
           ></div>
         </div>
 
         <!-- Middle Panel: Preview -->
-        <div class="flex-1 min-w-0 bg-background/50 relative">
+        <div class="flex-1 min-w-0 relative">
           <PreviewPanel />
         </div>
 
         <!-- Resizer -->
         <div
-          class="w-1 hover:w-1.5 bg-border hover:bg-primary/50 cursor-col-resize transition-all z-10 flex items-center justify-center group -mr-0.5"
+          class="w-[0.18rem] hover:w-1 bg-transparent hover:bg-primary/45 cursor-col-resize transition-all z-10 flex items-center justify-center group rounded-full"
           @mousedown="startResizeRight"
+          aria-label="Resize properties panel"
         >
           <div
-            class="h-8 w-0.5 bg-muted-foreground/20 group-hover:bg-primary rounded-full"
+            class="h-8 w-px bg-border group-hover:bg-primary rounded-full"
           ></div>
         </div>
 
         <!-- Right Panel: Properties -->
-        <div class="shrink-0 flex" :style="{ width: `${rightWidth}px` }">
+        <div class="shrink-0 flex min-w-0" :style="{ width: `${rightWidth}px` }">
           <PropertiesPanel />
         </div>
       </div>
 
       <!-- Bottom Resizer -->
       <div
-        class="h-1 hover:h-1.5 bg-border hover:bg-primary/50 cursor-row-resize transition-all z-10 flex justify-center items-center group -mt-0.5"
+        class="mx-3 h-[0.18rem] hover:h-1 bg-transparent hover:bg-primary/45 cursor-row-resize transition-all z-10 flex justify-center items-center group rounded-full"
         @mousedown="startResizeBottom"
+        aria-label="Resize timeline panel"
       >
         <div
-          class="w-12 h-0.5 bg-muted-foreground/20 group-hover:bg-primary rounded-full"
+          class="w-12 h-px bg-border group-hover:bg-primary rounded-full"
         ></div>
       </div>
 
       <!-- Bottom Panel: Timeline -->
       <div
-        class="shrink-0 bg-card relative"
+        class="shrink-0 relative px-3"
         :style="{ height: `${bottomHeight}px` }"
       >
         <TimelinePanel />

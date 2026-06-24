@@ -21,11 +21,15 @@ export interface TimelineClip {
   animations?: AnimationSegment[]; // 动画片段列表
 }
 
+export type TimelineTrackType = 'danmu' | 'audio';
+
 export interface TimelineTrack {
   id: string;
   name: string;
+  type?: TimelineTrackType;
   clips: TimelineClip[];
   visible: boolean;
+  muted?: boolean;
   locked: boolean;
   expanded?: boolean; // 是否展开显示动画详情
 }

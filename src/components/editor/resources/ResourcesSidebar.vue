@@ -26,21 +26,22 @@ const tabs = [
 
 <template>
   <div
-    class="w-14 border-r border-sidebar-border flex flex-col items-center py-2 gap-1 bg-sidebar/30"
+    class="w-11 border-r border-border flex flex-col items-center py-1 gap-0.5 bg-background scrollbar-hidden overflow-y-auto"
+    data-ui="resources-tabs"
   >
     <button
       v-for="tab in tabs"
       :key="tab.id"
       @click="emit('update:modelValue', tab.id)"
-      class="w-10 h-10 rounded-md flex items-center justify-center transition-all duration-200 relative group"
+      class="size-8 rounded-sm flex items-center justify-center transition-colors relative group shrink-0"
       :class="
         modelValue === tab.id
-          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
-          : 'text-muted-foreground hover:text-foreground hover:bg-sidebar-accent/50'
+          ? 'bg-secondary text-secondary-foreground border border-secondary-border'
+          : 'text-muted-foreground hover:text-foreground hover:bg-accent'
       "
       :title="tab.label"
     >
-      <component :is="tab.icon" class="size-5" />
+      <component :is="tab.icon" class="size-4" />
       <span
         v-if="modelValue === tab.id"
         class="absolute left-0 top-2 bottom-2 w-0.5 bg-primary rounded-full"

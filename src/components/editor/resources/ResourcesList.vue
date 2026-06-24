@@ -142,10 +142,10 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
 </script>
 
 <template>
-  <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+  <div class="flex-1 flex flex-col min-w-0 overflow-hidden" data-ui="resources-list">
     <!-- List Header -->
     <div
-      class="flex items-center px-4 py-2 text-xs font-medium text-muted-foreground border-b border-sidebar-border/50"
+      class="flex items-center px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border/70 bg-background"
     >
       <div class="flex-1">名称</div>
       <div class="w-16 text-center">类型</div>
@@ -154,7 +154,7 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
     </div>
 
     <!-- List Body -->
-    <div class="flex-1 overflow-y-auto p-1 space-y-0.5">
+    <div class="flex-1 overflow-y-auto scrollbar-hidden p-1 space-y-0.5">
       <div
         v-for="item in items"
         :key="item.id"
@@ -162,15 +162,15 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
         @dragstart="handleDragStart(item, $event)"
         @click="handleItemClick(item)"
         @contextmenu.prevent="emit('contextmenu', item, $event)"
-        class="group flex items-center px-3 py-2 rounded-md hover:bg-sidebar-accent cursor-pointer transition-colors text-xs"
+        class="group flex h-8 items-center px-2 rounded-sm hover:bg-accent cursor-pointer transition-colors text-xs"
         :class="{
-          'bg-sidebar-accent/70 ring-1 ring-primary/50':
+          'bg-secondary text-secondary-foreground ring-1 ring-secondary-border':
             selectedId === item.id,
         }"
       >
         <component
           :is="getIcon(item.type)"
-          class="size-4 text-muted-foreground mr-3 group-hover:text-primary transition-colors shrink-0"
+          class="size-4 text-muted-foreground mr-2.5 group-hover:text-foreground transition-colors shrink-0"
           :class="{ 'text-primary': selectedId === item.id }"
         />
         <!-- 名称显示/编辑 -->
@@ -190,7 +190,7 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
           <!-- 显示模式 -->
           <div
             v-else
-            class="truncate font-medium text-sidebar-foreground group-hover:text-sidebar-accent-foreground"
+            class="truncate font-medium text-foreground group-hover:text-accent-foreground"
             :class="{ 'text-muted-foreground': !item.name }"
             @dblclick="startEdit(item, $event)"
             :title="getItemName(item) + ' (双击编辑)'"
@@ -200,7 +200,7 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
         </div>
         <div class="w-14 text-center text-muted-foreground/70 shrink-0">
           <span
-            class="px-1.5 py-0.5 rounded text-[10px] bg-sidebar-accent"
+            class="px-1.5 py-0.5 rounded-sm text-[10px] bg-accent"
             :class="{
               'bg-blue-500/20 text-blue-400': item.type === 'text',
               'bg-orange-500/20 text-orange-400': item.type === 'button',
@@ -219,7 +219,7 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
         <!-- 编辑按钮 (改为添加到轨道) -->
         <button
           @click="addToNewTrack(item, $event)"
-          class="ml-1 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-sidebar-accent text-muted-foreground hover:text-primary transition-all"
+          class="ml-1 size-6 rounded-sm inline-flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-accent text-muted-foreground hover:text-foreground transition-all"
           title="添加到新轨道"
         >
           <Plus class="size-3" />
@@ -227,7 +227,7 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
         <!-- 删除按钮 -->
         <button
           @click="handleDeleteItem(item, $event)"
-          class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-destructive/20 text-destructive transition-all"
+          class="size-6 rounded-sm inline-flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-destructive/15 text-destructive transition-all"
           title="删除"
         >
           <Trash2 class="size-3.5" />

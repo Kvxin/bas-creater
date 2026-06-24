@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, reactive } from "vue";
-import { Settings, ChevronRight, ChevronDown, Plus, Trash2, ArrowLeft } from "lucide-vue-next";
+import { computed, ref, watch } from "vue";
+import { Settings, Plus, Trash2, ArrowLeft, FileText, Move, Palette, Sparkles } from "lucide-vue-next";
 import { useDanmuStore } from "@/stores/danmu";
 import { useTimelineStore } from "@/stores/timeline";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,8 @@ const selectedAnimation = computed(() => {
     if (!selectedClip.value || !timelineStore.selectedAnimationId) return null;
     return selectedClip.value.animations?.find(a => a.id === timelineStore.selectedAnimationId);
 });
+
+const clipAnimations = computed(() => selectedClip.value?.animations ?? []);
 
 // 动画属性更新
 const updateAnimationField = (key: keyof AnimationSegment, value: any) => {
@@ -56,6 +58,8 @@ const addAnimation = () => {
         properties: {}
     };
     timelineStore.addClipAnimation(selectedClip.value.id, newAnim);
+    timelineStore.setSelectedAnimation(newAnim.id);
+    activeTab.value = "animation";
 };
 
 const removeAnimation = () => {
@@ -67,15 +71,43 @@ const backToClip = () => {
     timelineStore.setSelectedAnimation(null);
 }
 
-// 折叠状态管理
-const sectionState = reactive({
-  identity: true,
-  transform: false,
-  style: false
+type PropertyTabId = "identity" | "transform" | "style" | "animation";
+
+const activeTab = ref<PropertyTabId>("identity");
+
+const propertyTabs = [
+  { id: "identity", label: "内容", title: "内容与标识", icon: FileText },
+  { id: "transform", label: "变换", title: "几何变换", icon: Move },
+  { id: "style", label: "样式", title: "样式与外观", icon: Palette },
+  { id: "animation", label: "动画", title: "动画与关键帧", icon: Sparkles },
+] as const;
+
+watch(selectedAnimation, (animation) => {
+  if (animation) {
+    activeTab.value = "animation";
+  }
 });
 
-const toggleSection = (key: keyof typeof sectionState) => {
-  sectionState[key] = !sectionState[key];
+const selectAnimation = (animationId: string | null) => {
+  timelineStore.setSelectedAnimation(animationId);
+  activeTab.value = "animation";
+};
+
+const getAnimationStartOffset = (animation: AnimationSegment, index: number) => {
+  if (animation.type === "set") {
+    return Math.max(0, animation.delay ?? 0);
+  }
+
+  return clipAnimations.value.slice(0, index).reduce((offset, item) => {
+    return offset + Math.max(0, item.duration) + Math.max(0, item.delay ?? 0);
+  }, 0);
+};
+
+const formatAnimationTime = (ms: number) => `${(Math.max(0, ms) / 1000).toFixed(2)}s`;
+
+const getAnimationSummary = (animation: AnimationSegment) => {
+  const keys = Object.keys(animation.properties ?? {});
+  return keys.length > 0 ? keys.join(", ") : "保持当前状态";
 };
 
 // ... (Existing helpers remain the same) ...
@@ -148,14 +180,15 @@ const getButtonAV = (item: any): number | undefined => {
 
 <template>
   <div
-    class="h-full w-full bg-sidebar border-l border-sidebar-border flex flex-col text-sm"
+    class="panel h-full w-full bg-background border border-border rounded-sm overflow-hidden flex flex-col text-sm"
+    data-ui="properties-panel"
   >
     <!-- 头部 -->
     <div
-      class="h-12 border-b border-sidebar-border flex items-center px-4 font-medium text-sidebar-foreground justify-between shrink-0"
+      class="h-11 border-b border-border flex items-center px-3 font-medium text-foreground justify-between shrink-0 bg-background"
     >
       <div class="flex items-center gap-2">
-          <button v-if="selectedAnimation" @click="backToClip" class="hover:bg-sidebar-accent p-1 rounded-md transition-colors">
+          <button v-if="selectedAnimation" @click="backToClip" class="size-7 hover:bg-accent rounded-sm transition-colors inline-flex items-center justify-center">
               <ArrowLeft class="size-4" />
           </button>
           <span>{{ selectedAnimation ? '动画设置' : '属性设置' }}</span>
@@ -163,117 +196,24 @@ const getButtonAV = (item: any): number | undefined => {
       <Settings class="size-4 text-muted-foreground" />
     </div>
 
-    <!-- 动画编辑模式 -->
-    <div v-if="selectedAnimation" class="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-custom">
-        <div class="space-y-4 border-b border-sidebar-border/50 pb-5">
-            <div class="flex items-center justify-between">
-                <Label class="text-xs font-semibold text-primary uppercase tracking-wider">基础配置</Label>
-                <button @click="removeAnimation" class="text-destructive hover:bg-destructive/10 p-1 rounded transition-colors" title="删除动画">
-                    <Trash2 class="size-4" />
-                </button>
-            </div>
-            
-            <div class="grid grid-cols-2 gap-4">
-                <div class="space-y-1">
-                    <Label class="text-[10px] text-muted-foreground uppercase">类型</Label>
-                    <select 
-                        :value="selectedAnimation.type" 
-                        @change="(e: any) => updateAnimationField('type', e.target.value)"
-                        class="h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-xs shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    >
-                        <option value="then">串行 (Then Set)</option>
-                        <option value="set">并行 (Set)</option>
-                    </select>
-                </div>
-                 <div class="space-y-1">
-                    <Label class="text-[10px] text-muted-foreground uppercase">时长 (ms)</Label>
-                    <Input type="number" step="100" :model-value="selectedAnimation.duration" @update:model-value="v => updateAnimationField('duration', Number(v))" class="h-8 text-xs font-mono" />
-                </div>
-            </div>
-            
-            <div v-if="selectedAnimation.type === 'set'" class="space-y-1">
-                <Label class="text-[10px] text-muted-foreground uppercase">延迟 (Delay ms)</Label>
-                 <Input type="number" step="100" :model-value="selectedAnimation.delay" @update:model-value="v => updateAnimationField('delay', Number(v))" class="h-8 text-xs font-mono" />
-            </div>
-        </div>
-        
-        <div class="space-y-4">
-             <Label class="text-xs font-semibold text-primary uppercase tracking-wider block mb-2">属性变更 (Properties)</Label>
-             <p class="text-[10px] text-muted-foreground mb-4">仅填写需要变化的属性，留空则保持不变。</p>
-             
-             <div class="grid grid-cols-2 gap-4">
-                  <div class="space-y-1">
-                    <Label class="text-[10px] text-muted-foreground uppercase">X 坐标</Label>
-                    <Input :model-value="selectedAnimation.properties.x" @update:model-value="v => updateAnimationProperty('x', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
-                </div>
-                <div class="space-y-1">
-                    <Label class="text-[10px] text-muted-foreground uppercase">Y 坐标</Label>
-                    <Input :model-value="selectedAnimation.properties.y" @update:model-value="v => updateAnimationProperty('y', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
-                </div>
-                <div class="space-y-1">
-                    <Label class="text-[10px] text-muted-foreground uppercase">不透明度 (Opacity)</Label>
-                    <Input type="number" step="0.1" :model-value="selectedAnimation.properties.opacity" @update:model-value="v => updateAnimationProperty('opacity', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
-                </div>
-                <div class="space-y-1">
-                    <Label class="text-[10px] text-muted-foreground uppercase">缩放 (Scale)</Label>
-                    <Input type="number" step="0.1" :model-value="selectedAnimation.properties.scale" @update:model-value="v => updateAnimationProperty('scale', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
-                </div>
-             </div>
-             
-              <div class="grid grid-cols-3 gap-2 pt-2">
-                <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">旋转 X</span>
-                    <Input type="number" :model-value="selectedAnimation.properties.rotateX" @update:model-value="(v) => updateAnimationProperty('rotateX', v)" class="h-7 text-xs font-mono" placeholder="-" />
-                </div>
-                <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">旋转 Y</span>
-                    <Input type="number" :model-value="selectedAnimation.properties.rotateY" @update:model-value="(v) => updateAnimationProperty('rotateY', v)" class="h-7 text-xs font-mono" placeholder="-" />
-                </div>
-                <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">旋转 Z</span>
-                    <Input type="number" :model-value="selectedAnimation.properties.rotateZ" @update:model-value="(v) => updateAnimationProperty('rotateZ', v)" class="h-7 text-xs font-mono" placeholder="-" />
-                </div>
-            </div>
-             
-             <!-- Color -->
-             <div class="space-y-1 pt-2">
-                 <Label class="text-[10px] text-muted-foreground uppercase">颜色</Label>
-                  <div class="flex gap-2">
-                     <!-- Helper input for color picker, simplified logic -->
-                    <Input type="text" :model-value="(selectedAnimation.properties as any).color || (selectedAnimation.properties as any).textColor" @update:model-value="v => updateAnimationProperty('color', v, false)" class="h-7 text-[10px] font-mono flex-1" placeholder="0xFFFFFF" />
-                </div>
-             </div>
-        </div>
-    </div>
-
     <!-- 常规资源编辑模式 -->
-    <div v-else-if="selected" class="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-custom">
-      
-      <!-- 添加动画入口 -->
-      <div v-if="selectedClip" class="mb-2">
-          <button 
-            @click="addAnimation"
-            class="w-full flex items-center justify-center gap-2 h-9 rounded-md border border-dashed border-sidebar-border hover:bg-sidebar-accent hover:text-primary transition-colors text-xs text-muted-foreground"
-          >
-              <Plus class="size-3.5" />
-              添加动画片段 (Animation)
-          </button>
-      </div>
-      
-      <!-- 第一阶段：内容与身份 (根据类型自适应) -->
-      <div class="space-y-4 border-b border-sidebar-border/50 pb-5">
-        <div 
-          class="flex items-center justify-between cursor-pointer group select-none"
-          @click="toggleSection('identity')"
+    <div v-if="selected" class="flex-1 min-h-0 flex overflow-hidden">
+      <div class="min-w-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-hidden p-3">
+        <!-- 第一阶段：内容与身份 (根据类型自适应) -->
+        <div
+          v-show="activeTab === 'identity'"
+          id="properties-tab-identity"
+          role="tabpanel"
+          class="space-y-4 pb-10"
         >
+        <div class="flex items-center justify-between select-none">
             <Label class="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2 cursor-pointer">
             <span class="w-1 h-3 bg-primary rounded-full"></span>
             内容与标识
             </Label>
-            <component :is="sectionState.identity ? ChevronDown : ChevronRight" class="size-4 text-muted-foreground group-hover:text-primary transition-colors" />
         </div>
         
-        <div v-show="sectionState.identity" class="space-y-3 pt-1">
+        <div class="space-y-3 pt-1">
           <!-- 公共：自定义名称 -->
           <div class="space-y-1">
             <span class="text-[10px] text-muted-foreground uppercase font-medium">资源名称 (Identity Name)</span>
@@ -343,28 +283,29 @@ const getButtonAV = (item: any): number | undefined => {
         </div>
       </div>
 
-      <!-- 第二阶段：几何变换 (Transform) -->
-      <div class="space-y-4 border-b border-sidebar-border/50 pb-5">
-        <div 
-          class="flex items-center justify-between cursor-pointer group select-none"
-          @click="toggleSection('transform')"
+        <!-- 第二阶段：几何变换 (Transform) -->
+        <div
+          v-show="activeTab === 'transform'"
+          id="properties-tab-transform"
+          role="tabpanel"
+          class="space-y-4 pb-10"
         >
+        <div class="flex items-center justify-between select-none">
             <Label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 cursor-pointer">
             <span class="w-1 h-3 bg-muted-foreground/50 rounded-full"></span>
             几何变换
             </Label>
-            <component :is="sectionState.transform ? ChevronDown : ChevronRight" class="size-4 text-muted-foreground group-hover:text-foreground transition-colors" />
         </div>
         
-        <div v-show="sectionState.transform" class="space-y-3 pt-1">
+        <div class="space-y-3 pt-1">
             <div class="grid grid-cols-2 gap-x-4 gap-y-3">
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">X 坐标</span>
-                <Input :model-value="selected.x" @update:model-value="(v) => updateField('x', v)" class="h-7 text-xs font-mono bg-sidebar-accent/30" />
+                <Input :model-value="selected.x" @update:model-value="(v) => updateField('x', v)" class="h-7 text-xs font-mono bg-accent" />
             </div>
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">Y 坐标</span>
-                <Input :model-value="selected.y" @update:model-value="(v) => updateField('y', v)" class="h-7 text-xs font-mono bg-sidebar-accent/30" />
+                <Input :model-value="selected.y" @update:model-value="(v) => updateField('y', v)" class="h-7 text-xs font-mono bg-accent" />
             </div>
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">缩放 (Scale)</span>
@@ -404,20 +345,21 @@ const getButtonAV = (item: any): number | undefined => {
         </div>
       </div>
 
-      <!-- 第三阶段：外观、样式与时间 -->
-      <div class="space-y-4 pb-10">
-        <div 
-          class="flex items-center justify-between cursor-pointer group select-none"
-          @click="toggleSection('style')"
+        <!-- 第三阶段：外观、样式与时间 -->
+        <div
+          v-show="activeTab === 'style'"
+          id="properties-tab-style"
+          role="tabpanel"
+          class="space-y-4 pb-10"
         >
+        <div class="flex items-center justify-between select-none">
             <Label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 cursor-pointer">
             <span class="w-1 h-3 bg-muted-foreground/50 rounded-full"></span>
             样式与外观
             </Label>
-            <component :is="sectionState.style ? ChevronDown : ChevronRight" class="size-4 text-muted-foreground group-hover:text-foreground transition-colors" />
         </div>
 
-        <div v-show="sectionState.style" class="space-y-4 pt-1">
+        <div class="space-y-4 pt-1">
             <!-- 通用：不透明度与时长 -->
             <div class="grid grid-cols-2 gap-4">
             <div class="space-y-1">
@@ -588,11 +530,213 @@ const getButtonAV = (item: any): number | undefined => {
             </div>
         </div>
       </div>
+
+        <!-- 第四阶段：动画与关键帧 -->
+        <div
+          v-show="activeTab === 'animation'"
+          id="properties-tab-animation"
+          role="tabpanel"
+          class="space-y-4 pb-10"
+        >
+          <div class="flex items-center justify-between select-none">
+            <Label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 cursor-pointer">
+              <span class="w-1 h-3 bg-muted-foreground/50 rounded-full"></span>
+              动画与关键帧
+            </Label>
+          </div>
+
+          <div v-if="selectedClip" class="space-y-4 pt-1">
+            <button
+              @click="addAnimation"
+              class="w-full flex items-center justify-center gap-2 h-9 rounded-sm border border-dashed border-border hover:bg-accent hover:text-primary transition-colors text-xs text-muted-foreground"
+            >
+              <Plus class="size-3.5" />
+              添加动画片段
+            </button>
+
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] text-muted-foreground uppercase font-medium">关键帧片段</span>
+                <span class="text-[10px] text-muted-foreground font-mono">{{ clipAnimations.length }}</span>
+              </div>
+
+              <button
+                v-for="(animation, index) in clipAnimations"
+                :key="animation.id"
+                type="button"
+                class="w-full rounded-sm border px-2.5 py-2 text-left transition-colors"
+                :class="selectedAnimation?.id === animation.id
+                  ? 'border-primary/50 bg-primary/10 text-foreground'
+                  : 'border-border bg-accent/40 hover:border-border/80 hover:bg-accent text-muted-foreground'"
+                @click="selectAnimation(animation.id)"
+              >
+                <div class="flex min-w-0 items-center justify-between gap-2">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <span
+                      class="h-2 w-2 rounded-full shrink-0"
+                      :class="animation.type === 'set' ? 'bg-[#5DBAA0]' : 'bg-[#5d93ba]'"
+                    ></span>
+                    <span class="truncate text-xs font-medium text-foreground">
+                      {{ animation.type === 'set' ? '并行动画' : '串行动画' }} {{ index + 1 }}
+                    </span>
+                  </div>
+                  <span class="shrink-0 text-[10px] font-mono text-muted-foreground">
+                    {{ formatAnimationTime(getAnimationStartOffset(animation, index)) }}
+                  </span>
+                </div>
+                <div class="mt-1 flex items-center justify-between gap-2 text-[10px]">
+                  <span class="min-w-0 truncate">{{ getAnimationSummary(animation) }}</span>
+                  <span class="shrink-0 font-mono">{{ formatAnimationTime(animation.duration) }}</span>
+                </div>
+              </button>
+
+              <div
+                v-if="clipAnimations.length === 0"
+                class="rounded-sm border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground"
+              >
+                暂无动画片段
+              </div>
+            </div>
+
+            <div v-if="selectedAnimation" class="space-y-4 border-t border-border/70 pt-4">
+              <div class="flex items-center justify-between">
+                <Label class="text-xs font-semibold text-primary uppercase tracking-wider">动画配置</Label>
+                <div class="flex items-center gap-1">
+                  <button
+                    @click="backToClip"
+                    class="size-7 rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors inline-flex items-center justify-center"
+                    title="取消选中动画"
+                  >
+                    <ArrowLeft class="size-4" />
+                  </button>
+                  <button
+                    @click="removeAnimation"
+                    class="text-destructive hover:bg-destructive/10 size-7 rounded-sm inline-flex items-center justify-center transition-colors"
+                    title="删除动画"
+                  >
+                    <Trash2 class="size-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-1">
+                  <Label class="text-[10px] text-muted-foreground uppercase">类型</Label>
+                  <select
+                    :value="selectedAnimation.type"
+                    @change="(e: any) => updateAnimationField('type', e.target.value)"
+                    class="h-8 w-full rounded-sm border border-input bg-accent px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:border-primary"
+                  >
+                    <option value="then">串行 (Then Set)</option>
+                    <option value="set">并行 (Set)</option>
+                  </select>
+                </div>
+                <div class="space-y-1">
+                  <Label class="text-[10px] text-muted-foreground uppercase">时长 (ms)</Label>
+                  <Input type="number" step="100" :model-value="selectedAnimation.duration" @update:model-value="v => updateAnimationField('duration', Number(v))" class="h-8 text-xs font-mono" />
+                </div>
+              </div>
+
+              <div v-if="selectedAnimation.type === 'set'" class="space-y-1">
+                <Label class="text-[10px] text-muted-foreground uppercase">延迟 (Delay ms)</Label>
+                <Input type="number" step="100" :model-value="selectedAnimation.delay" @update:model-value="v => updateAnimationField('delay', Number(v))" class="h-8 text-xs font-mono" />
+              </div>
+
+              <div class="space-y-4">
+                <Label class="text-xs font-semibold text-primary uppercase tracking-wider block">属性变更</Label>
+
+                <div class="grid grid-cols-2 gap-4">
+                  <div class="space-y-1">
+                    <Label class="text-[10px] text-muted-foreground uppercase">X 坐标</Label>
+                    <Input :model-value="selectedAnimation.properties.x" @update:model-value="v => updateAnimationProperty('x', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
+                  </div>
+                  <div class="space-y-1">
+                    <Label class="text-[10px] text-muted-foreground uppercase">Y 坐标</Label>
+                    <Input :model-value="selectedAnimation.properties.y" @update:model-value="v => updateAnimationProperty('y', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
+                  </div>
+                  <div class="space-y-1">
+                    <Label class="text-[10px] text-muted-foreground uppercase">不透明度</Label>
+                    <Input type="number" step="0.1" :model-value="selectedAnimation.properties.opacity" @update:model-value="v => updateAnimationProperty('opacity', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
+                  </div>
+                  <div class="space-y-1">
+                    <Label class="text-[10px] text-muted-foreground uppercase">缩放</Label>
+                    <Input type="number" step="0.1" :model-value="selectedAnimation.properties.scale" @update:model-value="v => updateAnimationProperty('scale', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2 pt-1">
+                  <div class="space-y-1">
+                    <span class="text-[10px] text-muted-foreground uppercase">旋转 X</span>
+                    <Input type="number" :model-value="selectedAnimation.properties.rotateX" @update:model-value="(v) => updateAnimationProperty('rotateX', v)" class="h-7 text-xs font-mono" placeholder="-" />
+                  </div>
+                  <div class="space-y-1">
+                    <span class="text-[10px] text-muted-foreground uppercase">旋转 Y</span>
+                    <Input type="number" :model-value="selectedAnimation.properties.rotateY" @update:model-value="(v) => updateAnimationProperty('rotateY', v)" class="h-7 text-xs font-mono" placeholder="-" />
+                  </div>
+                  <div class="space-y-1">
+                    <span class="text-[10px] text-muted-foreground uppercase">旋转 Z</span>
+                    <Input type="number" :model-value="selectedAnimation.properties.rotateZ" @update:model-value="(v) => updateAnimationProperty('rotateZ', v)" class="h-7 text-xs font-mono" placeholder="-" />
+                  </div>
+                </div>
+
+                <div class="space-y-1 pt-1">
+                  <Label class="text-[10px] text-muted-foreground uppercase">颜色</Label>
+                  <Input
+                    type="text"
+                    :model-value="(selectedAnimation.properties as any).color || (selectedAnimation.properties as any).textColor"
+                    @update:model-value="v => updateAnimationProperty('color', v, false)"
+                    class="h-7 text-[10px] font-mono"
+                    placeholder="保持不变"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-else-if="clipAnimations.length > 0"
+              class="rounded-sm border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground"
+            >
+              选择一个关键帧片段进行编辑
+            </div>
+          </div>
+
+          <div
+            v-else
+            class="rounded-sm border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground"
+          >
+            将资源添加到时间轴后可以编辑动画
+          </div>
+        </div>
+      </div>
+
+      <div
+        class="w-14 shrink-0 border-l border-border bg-background/95 p-1.5 flex flex-col items-center gap-1"
+        role="tablist"
+        aria-label="属性分类"
+      >
+        <button
+          v-for="tab in propertyTabs"
+          :key="tab.id"
+          type="button"
+          role="tab"
+          :aria-selected="activeTab === tab.id"
+          :aria-controls="`properties-tab-${tab.id}`"
+          :title="tab.title"
+          class="group flex h-12 w-11 flex-col items-center justify-center gap-1 rounded-sm border text-[10px] leading-none transition-colors"
+          :class="activeTab === tab.id
+            ? 'border-primary/50 bg-primary/10 text-primary'
+            : 'border-transparent text-muted-foreground hover:bg-accent hover:text-foreground'"
+          @click="activeTab = tab.id"
+        >
+          <component :is="tab.icon" class="size-4 shrink-0" />
+          <span class="max-w-full truncate">{{ tab.label }}</span>
+        </button>
+      </div>
     </div>
 
     <!-- 空状态 -->
     <div v-else class="flex-1 flex flex-col items-center justify-center text-muted-foreground p-8 text-center">
-      <div class="size-12 rounded-full bg-sidebar-accent flex items-center justify-center mb-3">
+      <div class="size-12 rounded-sm bg-accent flex items-center justify-center mb-3">
         <Settings class="size-6 opacity-50" />
       </div>
       <span class="font-medium">未选中</span>
@@ -611,11 +755,11 @@ const getButtonAV = (item: any): number | undefined => {
 }
 
 .scrollbar-custom::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.2);
+  background: color-mix(in oklab, var(--muted-foreground) 25%, transparent);
   border-radius: 20px;
 }
 
 .scrollbar-custom::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.4);
+  background: color-mix(in oklab, var(--muted-foreground) 45%, transparent);
 }
 </style>

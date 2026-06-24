@@ -22,6 +22,8 @@ const MIN_SCALE = 0.1;
 const MAX_SCALE = 5.0;
 const DANMAKU_WIDTH = 800;
 const DANMAKU_HEIGHT = 450; // 16:9 aspect ratio
+const PLAYBACK_END_EPSILON_MS = 1000 / 60;
+const SKIP_FORWARD_MS = 5000;
 
 // Stores
 const timelineStore = useTimelineStore();
@@ -135,6 +137,13 @@ const stopAudioPlayback = () => {
   scheduledAudio = [];
 };
 
+const isAtTimelineEnd = (timeMs = timelineStore.currentTime) => {
+  return (
+    timelineStore.duration > 0 &&
+    timeMs >= timelineStore.duration - PLAYBACK_END_EPSILON_MS
+  );
+};
+
 const startAudioPlayback = (startTimeMs: number) => {
   stopAudioPlayback();
   const session = audioSession;
@@ -143,7 +152,7 @@ const startAudioPlayback = (startTimeMs: number) => {
   );
 
   for (const track of timelineStore.tracks) {
-    if (!track.visible) continue;
+    if (track.muted || (track.type !== "audio" && !track.visible)) continue;
     for (const clip of track.clips) {
       const resource = resourceById.get(clip.resourceId);
       if (!resource) continue;
@@ -209,7 +218,14 @@ const startSyncLoop = () => {
   if (animationFrameId) cancelAnimationFrame(animationFrameId);
   const loop = () => {
     if (timelineStore.isPlaying) {
-      timelineStore.setCurrentTime(basService.getCurrentTime());
+      const currentTime = basService.getCurrentTime();
+
+      if (isAtTimelineEnd(currentTime)) {
+        finishPlaybackAtEnd();
+        return;
+      }
+
+      timelineStore.setCurrentTime(currentTime);
       animationFrameId = requestAnimationFrame(loop);
     }
   };
@@ -223,6 +239,24 @@ const stopSyncLoop = () => {
   }
 };
 
+function stopPlayback(seekTimeMs?: number) {
+  stopAudioPlayback();
+  basService.pause();
+
+  if (seekTimeMs !== undefined) {
+    const clampedTime = Math.max(0, Math.min(seekTimeMs, timelineStore.duration));
+    timelineStore.setCurrentTime(clampedTime);
+    basService.seek(clampedTime / 1000, true);
+  }
+
+  timelineStore.isPlaying = false;
+  stopSyncLoop();
+}
+
+function finishPlaybackAtEnd() {
+  stopPlayback(timelineStore.duration);
+}
+
 // ... (handleWheel, startDrag, onDrag, stopDrag helpers remain same)
 
 
@@ -231,7 +265,7 @@ const stopSyncLoop = () => {
 const containerStyle = computed(() => ({
   backgroundPosition: `${position.value.x}px ${position.value.y}px`,
   backgroundSize: `${20 * scale.value}px ${20 * scale.value}px`,
-  backgroundImage: `radial-gradient(circle, var(--color-border) 1px, transparent 1px)`,
+  backgroundImage: `radial-gradient(circle, color-mix(in oklab, var(--border) 70%, transparent) 1px, transparent 1px)`,
 }));
 
 const contentStyle = computed(() => ({
@@ -330,6 +364,18 @@ watch(
 );
 
 watch(
+  () =>
+    timelineStore.tracks
+      .map((track) => `${track.id}:${track.type ?? "danmu"}:${track.visible ? 1 : 0}:${track.muted ? 1 : 0}`)
+      .join("|"),
+  () => {
+    if (timelineStore.isPlaying) {
+      startAudioPlayback(timelineStore.currentTime);
+    }
+  }
+);
+
+watch(
   () => timelineStore.isPlaying,
   (isPlayingNow) => {
     if (!isPlayingNow && needsRecompile.value) {
@@ -375,7 +421,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("mousemove", onDrag);
   window.removeEventListener("mouseup", stopDrag);
-  stopAudioPlayback();
+  stopPlayback();
 });
 
 const resetView = () => {
@@ -389,15 +435,23 @@ const togglePlay = () => {
   if (!basInitialized.value) return;
 
   if (timelineStore.isPlaying) {
-    stopAudioPlayback();
-    basService.pause();
-    timelineStore.isPlaying = false;
-    stopSyncLoop();
+    stopPlayback();
   } else {
+    if (timelineStore.duration <= 0) {
+      stopPlayback(0);
+      return;
+    }
+
+    if (isAtTimelineEnd()) {
+      timelineStore.setCurrentTime(0);
+      basService.seek(0);
+    }
+
     if (needsRecompile.value) {
       const compiled = compileAndLoad(true);
       if (!compiled) return;
     }
+
     basService.play();
     startAudioPlayback(timelineStore.currentTime);
     timelineStore.isPlaying = true;
@@ -407,6 +461,10 @@ const togglePlay = () => {
 
 const playFromStart = () => {
   if (!basInitialized.value) return;
+  if (timelineStore.duration <= 0) {
+    stopPlayback(0);
+    return;
+  }
 
   timelineStore.setCurrentTime(0);
 
@@ -419,56 +477,73 @@ const playFromStart = () => {
 
   startAudioPlayback(0);
 
-  if (!timelineStore.isPlaying) {
-    basService.play();
-    timelineStore.isPlaying = true;
-    startSyncLoop();
-  }
+  basService.play();
+  timelineStore.isPlaying = true;
+  startSyncLoop();
 };
 
 const seekToStart = () => {
   if (!basInitialized.value) return;
+  timelineStore.setCurrentTime(0);
   basService.seek(0);
+
+  if (timelineStore.isPlaying) {
+    startAudioPlayback(0);
+  }
 };
 
 const skipForward = () => {
   if (!basInitialized.value) return;
-  // 简单跳过 5 秒
-  basService.seek(5);
+  const targetTime = Math.min(
+    timelineStore.currentTime + SKIP_FORWARD_MS,
+    timelineStore.duration
+  );
+
+  if (isAtTimelineEnd(targetTime)) {
+    finishPlaybackAtEnd();
+    return;
+  }
+
+  timelineStore.setCurrentTime(targetTime);
+  basService.seek(targetTime / 1000);
+
+  if (timelineStore.isPlaying) {
+    startAudioPlayback(targetTime);
+  }
 };
 </script>
 
 <template>
-  <div class="h-full w-full bg-background flex flex-col">
+  <div class="panel h-full w-full bg-background border border-border rounded-sm overflow-hidden flex flex-col" data-ui="preview-panel">
     <!-- Canvas Area -->
     <div
       ref="containerRef"
-      class="flex-1 relative overflow-hidden bg-sidebar/5 cursor-grab active:cursor-grabbing"
+      class="flex-1 relative overflow-hidden bg-background cursor-grab active:cursor-grabbing"
       :style="containerStyle"
       @wheel="handleWheel"
       @mousedown="startDrag"
     >
       <!-- Controls Overlay -->
       <div
-        class="absolute top-4 right-4 flex flex-col gap-2 bg-card border border-border rounded-md shadow-sm z-10 p-1"
+        class="absolute top-3 right-3 flex flex-col gap-0.5 bg-background/95 border border-border rounded-sm z-10 p-1 shadow-sm"
       >
         <button
           @click="scale = Math.min(MAX_SCALE, scale + 0.1)"
-          class="p-1.5 hover:bg-accent hover:text-accent-foreground rounded"
+          class="size-7 inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground rounded-sm"
           title="Zoom In"
         >
           <Plus class="size-4" />
         </button>
         <button
           @click="scale = Math.max(MIN_SCALE, scale - 0.1)"
-          class="p-1.5 hover:bg-accent hover:text-accent-foreground rounded"
+          class="size-7 inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground rounded-sm"
           title="Zoom Out"
         >
           <Minus class="size-4" />
         </button>
         <button
           @click="resetView"
-          class="p-1.5 hover:bg-accent hover:text-accent-foreground rounded"
+          class="size-7 inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground rounded-sm"
           title="Reset View"
         >
           <RotateCcw class="size-3" />
@@ -488,7 +563,7 @@ const skipForward = () => {
         <div
           ref="danmakuRef"
           id="danmaku"
-          class="w-[800px] aspect-video bg-black rounded-lg shadow-2xl border border-border/10 flex items-center justify-center relative group select-none"
+          class="w-[800px] aspect-video bg-black rounded-sm border border-border flex items-center justify-center relative group select-none shadow-sm"
         >
           <!-- BAS renders danmaku items here -->
 
@@ -509,25 +584,27 @@ const skipForward = () => {
 
     <!-- Playback Controls -->
     <div
-      class="h-12 border-t border-border flex items-center justify-center gap-4 bg-card text-card-foreground shrink-0 z-20"
+      class="h-[3.25rem] border-t border-border grid grid-cols-[1fr_auto_1fr] items-center px-5 bg-background text-foreground shrink-0 z-20"
     >
+      <div></div>
+      <div class="flex items-center justify-center gap-2">
       <button
         @click="playFromStart"
-        class="p-2 rounded-full hover:bg-accent hover:text-accent-foreground transition-colors"
+        class="size-8 rounded-sm inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
         title="从头播放"
       >
         <RotateCcw class="size-4" />
       </button>
       <button
         @click="seekToStart"
-        class="p-2 rounded-full hover:bg-accent hover:text-accent-foreground transition-colors"
+        class="size-8 rounded-sm inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
         title="回到开头"
       >
         <SkipBack class="size-4" />
       </button>
       <button
         @click="togglePlay"
-        class="p-2 rounded-full hover:bg-accent hover:text-accent-foreground transition-colors text-primary"
+        class="size-8 rounded-sm inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors text-primary"
         :title="isPlaying ? '暂停' : '播放'"
       >
         <Pause v-if="isPlaying" class="size-5 fill-current" />
@@ -535,11 +612,15 @@ const skipForward = () => {
       </button>
       <button
         @click="skipForward"
-        class="p-2 rounded-full hover:bg-accent hover:text-accent-foreground transition-colors"
+        class="size-8 rounded-sm inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
         title="快进"
       >
         <SkipForward class="size-4" />
       </button>
+      </div>
+      <div class="justify-self-end text-xs text-muted-foreground tabular-nums">
+        {{ Math.round(scale * 100) }}%
+      </div>
     </div>
   </div>
 </template>

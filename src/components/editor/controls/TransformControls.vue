@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import Moveable from 'moveable'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { CSSProperties } from 'vue'
 import type { AnyDanmu } from '@/types/danmu'
 
 const MIN_SCALE = 0.1
-const MOVEABLE_CLASS = 'bas-transform-moveable'
-const RENDER_DIRECTIONS = ['nw', 'ne', 'sw', 'se']
+const HANDLE_SCREEN_SIZE = 10
+const HANDLE_HIT_SCREEN_SIZE = 20
+const ROTATION_HANDLE_SCREEN_OFFSET = 28
+const SNAP_SCREEN_THRESHOLD = 8
+const ROTATION_SNAP_STEP = 90
+const ROTATION_SNAP_THRESHOLD = 5
 
-type ActiveGesture = 'drag' | 'scale' | 'rotate' | 'origin' | null
+type Corner = 'nw' | 'ne' | 'se' | 'sw'
+type ActiveGesture = DragGesture | ScaleGesture | RotateGesture | AnchorGesture | null
 
 interface TransformOverlayItem {
   clipId: string
@@ -19,19 +24,62 @@ interface ElementRect {
   height: number
 }
 
+interface Point {
+  x: number
+  y: number
+}
+
 interface DraftTransform {
   x: number
   y: number
   width: number
   height: number
-  translateX: number
-  translateY: number
   scale: number
   rotateX: number
   rotateY: number
   rotateZ: number
   anchorX: number
   anchorY: number
+}
+
+interface GestureSnapshot extends DraftTransform {
+  clipId: string
+}
+
+interface CapturedGesture {
+  pointerId: number
+}
+
+interface DragGesture extends CapturedGesture {
+  type: 'drag'
+  startPoint: Point
+  snapshots: GestureSnapshot[]
+  moved: boolean
+}
+
+interface ScaleGesture extends CapturedGesture {
+  type: 'scale'
+  clipId: string
+  corner: Corner
+  startDraft: DraftTransform
+  center: Point
+  startDistance: number
+}
+
+interface RotateGesture extends CapturedGesture {
+  type: 'rotate'
+  clipId: string
+  startDraft: DraftTransform
+  center: Point
+  startAngle: number
+}
+
+interface AnchorGesture extends CapturedGesture {
+  type: 'anchor'
+  clipId: string
+  startDraft: DraftTransform
+  center: Point
+  pointerOffset: Point
 }
 
 interface TextEditorState {
@@ -49,6 +97,11 @@ interface MarqueeState {
   baseSelection: string[]
 }
 
+interface SnapLine {
+  type: 'vertical' | 'horizontal'
+  position: number
+}
+
 const props = defineProps<{
   items: TransformOverlayItem[]
   selectedClipId: string | null
@@ -64,12 +117,12 @@ const emit = defineEmits<{
 
 const overlayRootRef = ref<HTMLElement | null>(null)
 const textEditorRef = ref<HTMLTextAreaElement | null>(null)
-const moveableInstance = shallowRef<Moveable | null>(null)
 const activeGesture = ref<ActiveGesture>(null)
 const selectedClipIds = ref<string[]>([])
 const drafts = ref<Record<string, DraftTransform>>({})
 const marquee = ref<MarqueeState | null>(null)
 const textEditor = ref<TextEditorState | null>(null)
+const snapLines = ref<SnapLine[]>([])
 
 const overlayElements = new Map<string, HTMLElement>()
 const actualElements = new Map<string, HTMLElement>()
@@ -82,12 +135,20 @@ const clamp = (value: number, min: number, max: number) => Math.min(Math.max(val
 const round = (value: number, digits = 4) => Number(value.toFixed(digits))
 const clampScale = (value: number) => Math.max(MIN_SCALE, value)
 const getCanvasScale = () => props.canvasScale || 1
+const getInverseCanvasScale = () => 1 / getCanvasScale()
+const getLogicalSnapThreshold = () => SNAP_SCREEN_THRESHOLD * getInverseCanvasScale()
 
-const itemByClipId = computed(() => {
-  return new Map(props.items.map((item) => [item.clipId, item]))
+const itemByClipId = computed(() => new Map(props.items.map((item) => [item.clipId, item])))
+const selectedClipIdSet = computed(() => new Set(selectedClipIds.value))
+
+const primarySelectedClipId = computed(() => {
+  return selectedClipIds.value.length === 1 ? selectedClipIds.value[0] ?? null : null
 })
 
-const selectedClipIdSet = computed(() => new Set(selectedClipIds.value))
+const selectedDraft = computed(() => {
+  const clipId = primarySelectedClipId.value
+  return clipId ? getDraft(clipId) : null
+})
 
 const percentToPixels = (val: number | string | undefined, dimension: 'x' | 'y'): number => {
   const size = dimension === 'x' ? props.containerWidth : props.containerHeight
@@ -95,11 +156,12 @@ const percentToPixels = (val: number | string | undefined, dimension: 'x' | 'y')
   if (val == null) return 0
 
   if (typeof val === 'string') {
-    if (val.endsWith('%')) {
-      const percent = parseFloat(val)
+    const trimmed = val.trim()
+    if (trimmed.endsWith('%')) {
+      const percent = parseFloat(trimmed)
       return Number.isFinite(percent) ? (percent / 100) * size : 0
     }
-    const numericValue = parseFloat(val)
+    const numericValue = parseFloat(trimmed)
     return Number.isFinite(numericValue) ? numericValue : 0
   }
 
@@ -112,6 +174,8 @@ const pixelsToPercent = (px: number, dimension: 'x' | 'y'): number => {
 }
 
 const sanitizeClipId = (clipId: string) => clipId.replace(/[^a-zA-Z0-9]/g, '_')
+
+const cloneDraft = (draft: DraftTransform): DraftTransform => ({ ...draft })
 
 const resolveFontSizePx = (danmu: AnyDanmu): number => {
   const raw = danmu.type === 'text'
@@ -130,7 +194,8 @@ const resolveFontSizePx = (danmu: AnyDanmu): number => {
     const trimmed = raw.trim().toLowerCase()
 
     if (trimmed.endsWith('%')) {
-      return (parseFloat(trimmed) / 100) * props.containerHeight
+      const parsedPercent = parseFloat(trimmed)
+      return Number.isFinite(parsedPercent) ? (parsedPercent / 100) * props.containerHeight : fallbackPx
     }
 
     if (trimmed.endsWith('px')) {
@@ -145,6 +210,25 @@ const resolveFontSizePx = (danmu: AnyDanmu): number => {
   return fallbackPx
 }
 
+const parseDimension = (
+  value: number | string | undefined,
+  dimension: 'x' | 'y',
+  fallback: number
+) => {
+  if (typeof value === 'number') return value
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (trimmed.endsWith('%')) {
+      const parsedPercent = parseFloat(trimmed)
+      const size = dimension === 'x' ? props.containerWidth : props.containerHeight
+      return Number.isFinite(parsedPercent) ? (parsedPercent / 100) * size : fallback
+    }
+    const parsed = parseFloat(trimmed)
+    return Number.isFinite(parsed) ? parsed : fallback
+  }
+  return fallback
+}
+
 const estimateElementSize = (danmu: AnyDanmu): ElementRect => {
   if (danmu.type === 'text') {
     const content = danmu.content ?? ''
@@ -156,21 +240,9 @@ const estimateElementSize = (danmu: AnyDanmu): ElementRect => {
   }
 
   if (danmu.type === 'path') {
-    const width = typeof danmu.width === 'number'
-      ? danmu.width
-      : typeof danmu.width === 'string' && danmu.width.endsWith('%')
-        ? (parseFloat(danmu.width) / 100) * props.containerWidth
-        : 120
-
-    const height = typeof danmu.height === 'number'
-      ? danmu.height
-      : typeof danmu.height === 'string' && danmu.height.endsWith('%')
-        ? (parseFloat(danmu.height) / 100) * props.containerHeight
-        : 80
-
     return {
-      width: Math.max(24, width),
-      height: Math.max(24, height),
+      width: Math.max(24, parseDimension(danmu.width, 'x', 120)),
+      height: Math.max(24, parseDimension(danmu.height, 'y', 80)),
     }
   }
 
@@ -181,26 +253,106 @@ const estimateElementSize = (danmu: AnyDanmu): ElementRect => {
   }
 }
 
-const createDraft = (danmu: AnyDanmu, rect: ElementRect): DraftTransform => {
+const createDraft = (danmu: AnyDanmu, rect: ElementRect): DraftTransform => ({
+  x: percentToPixels(danmu.x, 'x'),
+  y: percentToPixels(danmu.y, 'y'),
+  width: rect.width,
+  height: rect.height,
+  scale: clampScale(danmu.scale ?? 1),
+  rotateX: danmu.rotateX ?? 0,
+  rotateY: danmu.rotateY ?? 0,
+  rotateZ: danmu.rotateZ ?? 0,
+  anchorX: clamp(danmu.anchorX ?? 0, 0, 1),
+  anchorY: clamp(danmu.anchorY ?? 0, 0, 1),
+})
+
+function getDraft(clipId: string) {
+  return drafts.value[clipId] ?? null
+}
+
+function rotatePoint(x: number, y: number, degrees: number): Point {
+  const radians = (degrees * Math.PI) / 180
+  const cos = Math.cos(radians)
+  const sin = Math.sin(radians)
   return {
-    x: percentToPixels(danmu.x, 'x'),
-    y: percentToPixels(danmu.y, 'y'),
-    width: rect.width,
-    height: rect.height,
-    translateX: 0,
-    translateY: 0,
-    scale: clampScale(danmu.scale ?? 1),
-    rotateX: danmu.rotateX ?? 0,
-    rotateY: danmu.rotateY ?? 0,
-    rotateZ: danmu.rotateZ ?? 0,
-    anchorX: clamp(danmu.anchorX ?? 0, 0, 1),
-    anchorY: clamp(danmu.anchorY ?? 0, 0, 1),
+    x: x * cos - y * sin,
+    y: x * sin + y * cos,
   }
 }
 
-const getDraft = (clipId: string) => drafts.value[clipId] ?? null
+function unrotatePoint(x: number, y: number, degrees: number): Point {
+  return rotatePoint(x, y, -degrees)
+}
 
-const getOverlayStyle = (clipId: string) => {
+function getDraftPoint(draft: DraftTransform, relX: number, relY: number): Point {
+  const localX = (relX - draft.anchorX) * draft.width * draft.scale
+  const localY = (relY - draft.anchorY) * draft.height * draft.scale
+  const rotated = rotatePoint(localX, localY, draft.rotateZ)
+  return {
+    x: draft.x + rotated.x,
+    y: draft.y + rotated.y,
+  }
+}
+
+function getDraftCenter(draft: DraftTransform): Point {
+  return getDraftPoint(draft, 0.5, 0.5)
+}
+
+function getAnchorPointForCenter(
+  center: Point,
+  draft: DraftTransform,
+  anchorX = draft.anchorX,
+  anchorY = draft.anchorY,
+  scale = draft.scale,
+  rotateZ = draft.rotateZ
+): Point {
+  const localX = (0.5 - anchorX) * draft.width * scale
+  const localY = (0.5 - anchorY) * draft.height * scale
+  const rotated = rotatePoint(localX, localY, rotateZ)
+  return {
+    x: center.x - rotated.x,
+    y: center.y - rotated.y,
+  }
+}
+
+function getDraftCorners(draft: DraftTransform) {
+  return {
+    nw: getDraftPoint(draft, 0, 0),
+    ne: getDraftPoint(draft, 1, 0),
+    se: getDraftPoint(draft, 1, 1),
+    sw: getDraftPoint(draft, 0, 1),
+  } satisfies Record<Corner, Point>
+}
+
+function getDraftAabb(draft: DraftTransform) {
+  const corners = Object.values(getDraftCorners(draft))
+  const xs = corners.map((point) => point.x)
+  const ys = corners.map((point) => point.y)
+  return {
+    left: Math.min(...xs),
+    top: Math.min(...ys),
+    right: Math.max(...xs),
+    bottom: Math.max(...ys),
+    centerX: (Math.min(...xs) + Math.max(...xs)) / 2,
+    centerY: (Math.min(...ys) + Math.max(...ys)) / 2,
+  }
+}
+
+function getBoundsStyle(draft: DraftTransform): CSSProperties {
+  const center = getDraftCenter(draft)
+  const width = Math.max(1, draft.width * draft.scale)
+  const height = Math.max(1, draft.height * draft.scale)
+
+  return {
+    left: `${center.x - width / 2}px`,
+    top: `${center.y - height / 2}px`,
+    width: `${width}px`,
+    height: `${height}px`,
+    transform: `rotate(${draft.rotateZ}deg)`,
+  }
+}
+
+function getOverlayStyle(clipId: string): CSSProperties {
   const draft = getDraft(clipId)
   if (!draft) return {}
 
@@ -210,9 +362,125 @@ const getOverlayStyle = (clipId: string) => {
     width: `${draft.width}px`,
     height: `${draft.height}px`,
     transformOrigin: `${draft.anchorX * 100}% ${draft.anchorY * 100}%`,
-    transform: `translate(${draft.translateX}px, ${draft.translateY}px) rotate(${draft.rotateZ}deg) scale(${draft.scale})`,
+    transform: `rotate(${draft.rotateZ}deg) scale(${draft.scale})`,
   }
 }
+
+function getHandleSizeStyle(size: number): CSSProperties {
+  const logicalSize = size * getInverseCanvasScale()
+  return {
+    width: `${logicalSize}px`,
+    height: `${logicalSize}px`,
+    marginLeft: `${-logicalSize / 2}px`,
+    marginTop: `${-logicalSize / 2}px`,
+  }
+}
+
+function getHandlePositionStyle(point: Point, size = HANDLE_HIT_SCREEN_SIZE): CSSProperties {
+  const logicalSize = size * getInverseCanvasScale()
+  return {
+    left: `${point.x}px`,
+    top: `${point.y}px`,
+    width: `${logicalSize}px`,
+    height: `${logicalSize}px`,
+    marginLeft: `${-logicalSize / 2}px`,
+    marginTop: `${-logicalSize / 2}px`,
+  }
+}
+
+function getCornerCursor(corner: Corner, rotateZ: number) {
+  const baseAngle = corner === 'ne' || corner === 'sw' ? 45 : -45
+  const normalized = ((baseAngle + rotateZ) % 180 + 180) % 180
+  if (normalized < 22.5 || normalized >= 157.5) return 'ew-resize'
+  if (normalized < 67.5) return 'nesw-resize'
+  if (normalized < 112.5) return 'ns-resize'
+  return 'nwse-resize'
+}
+
+const cornerEntries = computed(() => {
+  const draft = selectedDraft.value
+  if (!draft || textEditor.value) return []
+  const corners = getDraftCorners(draft)
+  return (Object.entries(corners) as Array<[Corner, Point]>).map(([corner, point]) => ({
+    corner,
+    point,
+    cursor: getCornerCursor(corner, draft.rotateZ),
+  }))
+})
+
+const selectedBoundsStyle = computed(() => {
+  const draft = selectedDraft.value
+  return draft && !textEditor.value ? getBoundsStyle(draft) : null
+})
+
+const anchorPoint = computed(() => {
+  const draft = selectedDraft.value
+  return draft && !textEditor.value ? { x: draft.x, y: draft.y } : null
+})
+
+const anchorHandlePoint = computed(() => {
+  const draft = selectedDraft.value
+  const point = anchorPoint.value
+  if (!draft || !point || textEditor.value) return null
+
+  const corners = Object.values(getDraftCorners(draft))
+  const overlapThreshold = HANDLE_HIT_SCREEN_SIZE * getInverseCanvasScale()
+  const overlapsCorner = corners.some((corner) => {
+    return Math.hypot(corner.x - point.x, corner.y - point.y) <= overlapThreshold
+  })
+
+  if (!overlapsCorner) return point
+
+  const center = getDraftCenter(draft)
+  const dx = center.x - point.x
+  const dy = center.y - point.y
+  const length = Math.hypot(dx, dy) || 1
+  const offset = HANDLE_HIT_SCREEN_SIZE * getInverseCanvasScale()
+
+  return {
+    x: point.x + (dx / length) * offset,
+    y: point.y + (dy / length) * offset,
+  }
+})
+
+const rotationHandlePoint = computed(() => {
+  const draft = selectedDraft.value
+  if (!draft || textEditor.value) return null
+
+  const center = getDraftCenter(draft)
+  const topCenter = getDraftPoint(draft, 0.5, 0)
+  const radians = (draft.rotateZ * Math.PI) / 180
+  const offset = ROTATION_HANDLE_SCREEN_OFFSET * getInverseCanvasScale()
+
+  return {
+    x: topCenter.x + Math.sin(radians) * offset,
+    y: topCenter.y - Math.cos(radians) * offset,
+    center,
+  }
+})
+
+const groupBoundsStyle = computed(() => {
+  if (selectedClipIds.value.length <= 1 || textEditor.value) return null
+
+  const boxes = selectedClipIds.value
+    .map((clipId) => getDraft(clipId))
+    .filter((draft): draft is DraftTransform => !!draft)
+    .map(getDraftAabb)
+
+  if (!boxes.length) return null
+
+  const left = Math.min(...boxes.map((box) => box.left))
+  const top = Math.min(...boxes.map((box) => box.top))
+  const right = Math.max(...boxes.map((box) => box.right))
+  const bottom = Math.max(...boxes.map((box) => box.bottom))
+
+  return {
+    left: `${left}px`,
+    top: `${top}px`,
+    width: `${Math.max(1, right - left)}px`,
+    height: `${Math.max(1, bottom - top)}px`,
+  } satisfies CSSProperties
+})
 
 const marqueeStyle = computed(() => {
   if (!marquee.value) return {}
@@ -227,14 +495,12 @@ const marqueeStyle = computed(() => {
     top: `${top}px`,
     width: `${width}px`,
     height: `${height}px`,
-  }
+  } satisfies CSSProperties
 })
 
 const textEditorStyle = computed(() => {
   if (!textEditor.value) return {}
-  return {
-    ...getOverlayStyle(textEditor.value.clipId),
-  }
+  return getOverlayStyle(textEditor.value.clipId)
 })
 
 const setOverlayElement = (clipId: string, element: unknown) => {
@@ -255,19 +521,18 @@ const findDanmakuElement = (clipId: string) => {
   return document.querySelector(`.bas-danmaku-item--obj_${sanitizeClipId(clipId)}`) as HTMLElement | null
 }
 
-const buildInnerTransform = (danmu: AnyDanmu, anchorX: number, anchorY: number) => {
+const buildInnerTransform = (anchorX: number, anchorY: number) => {
   return `translate(${round(-anchorX * 100)}%, ${round(-anchorY * 100)}%)`
 }
 
 const applyDraftToActualElement = (clipId: string) => {
-  const item = itemByClipId.value.get(clipId)
   const draft = getDraft(clipId)
   const actualElement = actualElements.get(clipId)
-  if (!item || !draft || !actualElement) return
+  if (!draft || !actualElement) return
 
   actualElement.style.transformOrigin = '0 0'
   actualElement.style.transform = [
-    `translate(${round(draft.x + draft.translateX)}px, ${round(draft.y + draft.translateY)}px)`,
+    `translate(${round(draft.x)}px, ${round(draft.y)}px)`,
     `rotateX(${round(draft.rotateX)}deg)`,
     `rotateY(${round(draft.rotateY)}deg)`,
     `rotate(${round(draft.rotateZ)}deg)`,
@@ -277,7 +542,7 @@ const applyDraftToActualElement = (clipId: string) => {
   const innerElement = actualInnerElements.get(clipId)
   if (innerElement) {
     innerElement.style.transformOrigin = '0 0'
-    innerElement.style.transform = buildInnerTransform(item.danmu, draft.anchorX, draft.anchorY)
+    innerElement.style.transform = buildInnerTransform(draft.anchorX, draft.anchorY)
   }
 }
 
@@ -336,8 +601,8 @@ const syncStageState = async () => {
       nextActualInnerElements.set(item.clipId, measurementTarget)
     }
 
-    const shouldPreserveDraft = !!activeGesture.value && selectedClipIdSet.value.has(item.clipId)
     const currentDraft = drafts.value[item.clipId]
+    const shouldPreserveDraft = !!activeGesture.value && selectedClipIdSet.value.has(item.clipId)
 
     nextDrafts[item.clipId] = shouldPreserveDraft && currentDraft
       ? {
@@ -352,7 +617,6 @@ const syncStageState = async () => {
 
   actualElements.clear()
   actualInnerElements.clear()
-
   nextActualElements.forEach((value, key) => actualElements.set(key, value))
   nextActualInnerElements.forEach((value, key) => actualInnerElements.set(key, value))
 
@@ -362,152 +626,105 @@ const syncStageState = async () => {
   if (filteredSelection.length !== selectedClipIds.value.length) {
     emitSelection(filteredSelection, filteredSelection[0] ?? null)
   }
-
-  nextTick(() => {
-    syncMoveableTargets()
-  })
 }
 
-const getSelectedOverlayElements = () => {
-  if (textEditor.value) return []
+function screenToCanvas(clientX: number, clientY: number, shouldClamp = false): Point | null {
+  const overlayRect = overlayRootRef.value?.getBoundingClientRect()
+  if (!overlayRect) return null
 
-  return selectedClipIds.value
-    .map((clipId) => overlayElements.get(clipId))
-    .filter((element): element is HTMLElement => !!element)
-}
-
-const getGuidelineElements = () => {
-  return props.items
-    .map((item) => item.clipId)
-    .filter((clipId) => !selectedClipIdSet.value.has(clipId))
-    .map((clipId) => overlayElements.get(clipId))
-    .filter((element): element is HTMLElement => !!element)
-}
-
-const syncMoveableTargets = () => {
-  const instance = moveableInstance.value
-  if (!instance || !overlayRootRef.value) return
-
-  const selectedTargets = getSelectedOverlayElements()
-  const instanceAny = instance as any
-  const currentManager = instance.getManager?.() as { props?: { groupable?: boolean } } | undefined
-  const isGroupSelection = selectedTargets.length > 1
-  const isCurrentlyGrouped = !!currentManager?.props?.groupable
-  const nextTarget = selectedTargets.length > 1
-    ? selectedTargets
-    : selectedTargets[0] ?? null
-  const needsModeSwitch = isGroupSelection !== isCurrentlyGrouped
-  const waitForTargetChange = needsModeSwitch
-    ? instance.waitToChangeTarget?.()
-    : null
-
-  instanceAny.target = nextTarget
-  instanceAny.targets = []
-  instanceAny.elementGuidelines = getGuidelineElements()
-  instanceAny.verticalGuidelines = [0, props.containerWidth / 2, props.containerWidth]
-  instanceAny.horizontalGuidelines = [0, props.containerHeight / 2, props.containerHeight]
-  instanceAny.bounds = {
-    left: 0,
-    top: 0,
-    right: props.containerWidth,
-    bottom: props.containerHeight,
-  }
-  instanceAny.zoom = props.canvasScale || 1
-
-  instance.updateSelectors?.()
-
-  if (waitForTargetChange) {
-    void waitForTargetChange.then(() => {
-      instance.updateRect()
-    })
-    return
+  const canvasScale = getCanvasScale()
+  const rawPoint = {
+    x: (clientX - overlayRect.left) / canvasScale,
+    y: (clientY - overlayRect.top) / canvasScale,
   }
 
-  instance.updateRect()
-}
-
-const getClipIdFromTarget = (target: EventTarget | null | undefined) => {
-  return target instanceof HTMLElement ? target.dataset.clipId ?? null : null
-}
-
-const getSingleSelectedClipId = () => {
-  return selectedClipIds.value.length === 1 ? selectedClipIds.value[0] ?? null : null
-}
-
-const resolveGestureClipId = (target: EventTarget | null | undefined) => {
-  return getClipIdFromTarget(target) ?? getSingleSelectedClipId()
-}
-
-const resolveGroupGestureClipId = (target: EventTarget | null | undefined, index: number) => {
-  return getClipIdFromTarget(target) ?? selectedClipIds.value[index] ?? null
-}
-
-const startMoveableDrag = (event: PointerEvent, clipId: string, waitForTargetChange = false) => {
-  const instance = moveableInstance.value as any
-  const targetElement = overlayElements.get(clipId)
-
-  if (!instance || !targetElement) return
-
-  if (waitForTargetChange) {
-    instance.waitToChangeTarget?.().then(() => {
-      instance.dragStart?.(event, targetElement)
-    })
-    return
-  }
-
-  instance.dragStart?.(event, targetElement)
-}
-
-const parseTransformOrigin = (value: string, state: DraftTransform) => {
-  const [rawX = '0%', rawY = '0%'] = value.split(' ')
-
-  const parsePart = (part: string, size: number) => {
-    if (part.endsWith('%')) {
-      return clamp(parseFloat(part) / 100, 0, 1)
-    }
-    return clamp((parseFloat(part) || 0) / size, 0, 1)
-  }
+  if (!shouldClamp) return rawPoint
 
   return {
-    anchorX: parsePart(rawX, state.width),
-    anchorY: parsePart(rawY, state.height),
+    x: clamp(rawPoint.x, 0, props.containerWidth),
+    y: clamp(rawPoint.y, 0, props.containerHeight),
   }
 }
 
-const applyDragTranslation = (clipId: string, dragEvent: { beforeTranslate?: number[] } | undefined) => {
-  const draft = getDraft(clipId)
-  if (!draft || !dragEvent?.beforeTranslate) return
+function snapRotation(proposedRotation: number, enabled: boolean) {
+  if (!enabled) return proposedRotation
 
-  draft.translateX = dragEvent.beforeTranslate[0] ?? draft.translateX
-  draft.translateY = dragEvent.beforeTranslate[1] ?? draft.translateY
+  const nearest = Math.round(proposedRotation / ROTATION_SNAP_STEP) * ROTATION_SNAP_STEP
+  const distance = Math.abs(proposedRotation - nearest)
+  return distance <= ROTATION_SNAP_THRESHOLD ? nearest : proposedRotation
 }
 
-const commitSelectedDrafts = () => {
+function snapDraftPosition(
+  draft: DraftTransform,
+  proposedX: number,
+  proposedY: number,
+  enabled: boolean
+) {
+  if (!enabled) {
+    snapLines.value = []
+    return { x: proposedX, y: proposedY }
+  }
+
+  const threshold = getLogicalSnapThreshold()
+  const proposedDraft = { ...draft, x: proposedX, y: proposedY }
+  const aabb = getDraftAabb(proposedDraft)
+  const verticalTargets = [0, props.containerWidth / 2, props.containerWidth]
+  const horizontalTargets = [0, props.containerHeight / 2, props.containerHeight]
+
+  const xCandidates = verticalTargets.flatMap((target) => [
+    { delta: target - aabb.left, distance: Math.abs(target - aabb.left), line: { type: 'vertical', position: target } as SnapLine },
+    { delta: target - aabb.centerX, distance: Math.abs(target - aabb.centerX), line: { type: 'vertical', position: target } as SnapLine },
+    { delta: target - aabb.right, distance: Math.abs(target - aabb.right), line: { type: 'vertical', position: target } as SnapLine },
+  ])
+
+  const yCandidates = horizontalTargets.flatMap((target) => [
+    { delta: target - aabb.top, distance: Math.abs(target - aabb.top), line: { type: 'horizontal', position: target } as SnapLine },
+    { delta: target - aabb.centerY, distance: Math.abs(target - aabb.centerY), line: { type: 'horizontal', position: target } as SnapLine },
+    { delta: target - aabb.bottom, distance: Math.abs(target - aabb.bottom), line: { type: 'horizontal', position: target } as SnapLine },
+  ])
+
+  const xSnap = xCandidates
+    .filter((candidate) => candidate.distance <= threshold)
+    .sort((left, right) => left.distance - right.distance)[0]
+  const ySnap = yCandidates
+    .filter((candidate) => candidate.distance <= threshold)
+    .sort((left, right) => left.distance - right.distance)[0]
+
+  snapLines.value = [
+    ...(xSnap ? [xSnap.line] : []),
+    ...(ySnap ? [ySnap.line] : []),
+  ]
+
+  return {
+    x: proposedX + (xSnap?.delta ?? 0),
+    y: proposedY + (ySnap?.delta ?? 0),
+  }
+}
+
+function applyGestureDraft(clipId: string, nextDraft: DraftTransform) {
+  drafts.value[clipId] = nextDraft
+  applyDraftToActualElement(clipId)
+}
+
+function commitDrafts(clipIds: string[]) {
   const updates = new Map<string, Partial<AnyDanmu>>()
 
-  for (const clipId of selectedClipIds.value) {
+  for (const clipId of clipIds) {
     const item = itemByClipId.value.get(clipId)
     const draft = getDraft(clipId)
     if (!item || !draft) continue
 
-    const committedX = draft.x + draft.translateX
-    const committedY = draft.y + draft.translateY
-
     updates.set(item.danmu.id, {
-      x: round(pixelsToPercent(committedX, 'x')),
-      y: round(pixelsToPercent(committedY, 'y')),
+      x: round(pixelsToPercent(draft.x, 'x')),
+      y: round(pixelsToPercent(draft.y, 'y')),
       scale: round(clampScale(draft.scale)),
       rotateZ: round(draft.rotateZ),
       anchorX: round(clamp(draft.anchorX, 0, 1)),
       anchorY: round(clamp(draft.anchorY, 0, 1)),
     })
-
-    draft.x = committedX
-    draft.y = committedY
-    draft.translateX = 0
-    draft.translateY = 0
-    applyDraftToActualElement(clipId)
   }
+
+  if (!updates.size) return
 
   emit(
     'commit',
@@ -515,242 +732,316 @@ const commitSelectedDrafts = () => {
   )
 }
 
-const finishGesture = (gesture: Exclude<ActiveGesture, null>, isDrag?: boolean) => {
-  if (activeGesture.value !== gesture) return
+function capturePointer(pointerId: number) {
+  try {
+    overlayRootRef.value?.setPointerCapture(pointerId)
+  } catch {
+    // Pointer capture can fail if the pointer is already gone.
+  }
+}
 
-  if (gesture === 'drag' ? !!isDrag : true) {
-    commitSelectedDrafts()
+function releasePointer(pointerId: number) {
+  const root = overlayRootRef.value
+  if (!root) return
+  try {
+    if (root.hasPointerCapture(pointerId)) {
+      root.releasePointerCapture(pointerId)
+    }
+  } catch {
+    // Ignore stale pointer captures.
+  }
+}
+
+function startDragGesture(event: PointerEvent, clipId: string) {
+  const startPoint = screenToCanvas(event.clientX, event.clientY)
+  if (!startPoint) return
+
+  const dragClipIds = selectedClipIdSet.value.has(clipId) ? selectedClipIds.value : [clipId]
+  const snapshots = dragClipIds
+    .map((selectedClipId) => {
+      const draft = getDraft(selectedClipId)
+      return draft ? { clipId: selectedClipId, ...cloneDraft(draft) } : null
+    })
+    .filter((snapshot): snapshot is GestureSnapshot => !!snapshot)
+
+  if (!snapshots.length) return
+
+  activeGesture.value = {
+    type: 'drag',
+    pointerId: event.pointerId,
+    startPoint,
+    snapshots,
+    moved: false,
+  }
+  capturePointer(event.pointerId)
+}
+
+function onCornerPointerDown(event: PointerEvent, corner: Corner) {
+  const clipId = primarySelectedClipId.value
+  const draft = clipId ? getDraft(clipId) : null
+  const pointer = screenToCanvas(event.clientX, event.clientY)
+  if (!clipId || !draft || !pointer) return
+
+  event.preventDefault()
+  event.stopPropagation()
+
+  const center = getDraftCenter(draft)
+  const startDistance = Math.max(
+    1,
+    Math.hypot(pointer.x - center.x, pointer.y - center.y)
+  )
+
+  activeGesture.value = {
+    type: 'scale',
+    pointerId: event.pointerId,
+    clipId,
+    corner,
+    center,
+    startDistance,
+    startDraft: cloneDraft(draft),
+  }
+  capturePointer(event.pointerId)
+}
+
+function onRotatePointerDown(event: PointerEvent) {
+  const clipId = primarySelectedClipId.value
+  const draft = clipId ? getDraft(clipId) : null
+  const pointer = screenToCanvas(event.clientX, event.clientY)
+  if (!clipId || !draft || !pointer) return
+
+  event.preventDefault()
+  event.stopPropagation()
+
+  const center = getDraftCenter(draft)
+  activeGesture.value = {
+    type: 'rotate',
+    pointerId: event.pointerId,
+    clipId,
+    center,
+    startDraft: cloneDraft(draft),
+    startAngle: Math.atan2(pointer.y - center.y, pointer.x - center.x) * (180 / Math.PI),
+  }
+  capturePointer(event.pointerId)
+}
+
+function onAnchorPointerDown(event: PointerEvent) {
+  const clipId = primarySelectedClipId.value
+  const draft = clipId ? getDraft(clipId) : null
+  const pointer = screenToCanvas(event.clientX, event.clientY)
+  if (!clipId || !draft || !pointer) return
+
+  event.preventDefault()
+  event.stopPropagation()
+
+  activeGesture.value = {
+    type: 'anchor',
+    pointerId: event.pointerId,
+    clipId,
+    startDraft: cloneDraft(draft),
+    center: getDraftCenter(draft),
+    pointerOffset: {
+      x: pointer.x - draft.x,
+      y: pointer.y - draft.y,
+    },
+  }
+  capturePointer(event.pointerId)
+}
+
+function updateDragGesture(gesture: DragGesture, point: Point, event: PointerEvent) {
+  const deltaX = point.x - gesture.startPoint.x
+  const deltaY = point.y - gesture.startPoint.y
+  gesture.moved = gesture.moved || Math.abs(deltaX) > 0.5 || Math.abs(deltaY) > 0.5
+
+  const primary = gesture.snapshots[0]
+  let snappedDelta = { x: deltaX, y: deltaY }
+
+  if (primary) {
+    const snapped = snapDraftPosition(
+      primary,
+      primary.x + deltaX,
+      primary.y + deltaY,
+      !event.shiftKey
+    )
+    snappedDelta = {
+      x: snapped.x - primary.x,
+      y: snapped.y - primary.y,
+    }
   }
 
+  for (const snapshot of gesture.snapshots) {
+    applyGestureDraft(snapshot.clipId, {
+      ...snapshot,
+      x: snapshot.x + snappedDelta.x,
+      y: snapshot.y + snappedDelta.y,
+    })
+  }
+}
+
+function updateScaleGesture(gesture: ScaleGesture, point: Point) {
+  const currentDistance = Math.max(
+    1,
+    Math.hypot(point.x - gesture.center.x, point.y - gesture.center.y)
+  )
+  const nextScale = clampScale(gesture.startDraft.scale * (currentDistance / gesture.startDistance))
+  const nextAnchorPoint = getAnchorPointForCenter(
+    gesture.center,
+    gesture.startDraft,
+    gesture.startDraft.anchorX,
+    gesture.startDraft.anchorY,
+    nextScale,
+    gesture.startDraft.rotateZ
+  )
+
+  applyGestureDraft(gesture.clipId, {
+    ...gesture.startDraft,
+    ...nextAnchorPoint,
+    scale: nextScale,
+  })
+}
+
+function updateRotateGesture(gesture: RotateGesture, point: Point, event: PointerEvent) {
+  const currentAngle = Math.atan2(point.y - gesture.center.y, point.x - gesture.center.x) * (180 / Math.PI)
+  let deltaAngle = currentAngle - gesture.startAngle
+  if (deltaAngle > 180) deltaAngle -= 360
+  if (deltaAngle < -180) deltaAngle += 360
+
+  const nextRotateZ = snapRotation(gesture.startDraft.rotateZ + deltaAngle, !event.shiftKey)
+  const nextAnchorPoint = getAnchorPointForCenter(
+    gesture.center,
+    gesture.startDraft,
+    gesture.startDraft.anchorX,
+    gesture.startDraft.anchorY,
+    gesture.startDraft.scale,
+    nextRotateZ
+  )
+
+  applyGestureDraft(gesture.clipId, {
+    ...gesture.startDraft,
+    ...nextAnchorPoint,
+    rotateZ: nextRotateZ,
+  })
+}
+
+function updateAnchorGesture(gesture: AnchorGesture, point: Point) {
+  const draft = gesture.startDraft
+  const effectivePoint = {
+    x: point.x - gesture.pointerOffset.x,
+    y: point.y - gesture.pointerOffset.y,
+  }
+  const vectorFromAnchor = {
+    x: effectivePoint.x - draft.x,
+    y: effectivePoint.y - draft.y,
+  }
+  const local = unrotatePoint(vectorFromAnchor.x, vectorFromAnchor.y, draft.rotateZ)
+  const nextAnchorX = clamp(draft.anchorX + local.x / (draft.width * draft.scale), 0, 1)
+  const nextAnchorY = clamp(draft.anchorY + local.y / (draft.height * draft.scale), 0, 1)
+  const nextAnchorPoint = getAnchorPointForCenter(
+    gesture.center,
+    draft,
+    nextAnchorX,
+    nextAnchorY,
+    draft.scale,
+    draft.rotateZ
+  )
+
+  applyGestureDraft(gesture.clipId, {
+    ...draft,
+    ...nextAnchorPoint,
+    anchorX: nextAnchorX,
+    anchorY: nextAnchorY,
+  })
+}
+
+function finishGesture(event?: PointerEvent) {
+  const gesture = activeGesture.value
+  if (!gesture) return
+
   activeGesture.value = null
-  nextTick(() => {
-    syncMoveableTargets()
-  })
-}
+  snapLines.value = []
+  releasePointer(gesture.pointerId)
 
-const bindMoveableEvents = (instance: Moveable) => {
-  instance.on('dragStart', (event: any) => {
-    const clipId = resolveGestureClipId(event.target)
-    const draft = clipId ? getDraft(clipId) : null
-    activeGesture.value = 'drag'
-    if (draft) {
-      event.set?.([draft.translateX, draft.translateY])
+  if (gesture.type === 'drag') {
+    if (gesture.moved) {
+      commitDrafts(gesture.snapshots.map((snapshot) => snapshot.clipId))
     }
-  })
+    return
+  }
 
-  instance.on('drag', (event: any) => {
-    const clipId = resolveGestureClipId(event.target)
-    if (!clipId) return
-    applyDragTranslation(clipId, event)
-    applyDraftToActualElement(clipId)
-  })
+  if (event?.type === 'pointercancel') {
+    applyGestureDraft(gesture.clipId, cloneDraft(gesture.startDraft))
+    return
+  }
 
-  instance.on('dragEnd', (event: any) => {
-    finishGesture('drag', event?.isDrag)
-  })
-
-  instance.on('dragGroupStart', ({ events }: any) => {
-    activeGesture.value = 'drag'
-    events.forEach((childEvent: any, index: number) => {
-      const clipId = resolveGroupGestureClipId(childEvent.target, index)
-      const draft = clipId ? getDraft(clipId) : null
-      if (draft) {
-        childEvent.set?.([draft.translateX, draft.translateY])
-      }
-    })
-  })
-
-  instance.on('dragGroup', ({ events }: any) => {
-    events.forEach((childEvent: any, index: number) => {
-      const clipId = resolveGroupGestureClipId(childEvent.target, index)
-      if (!clipId) return
-      applyDragTranslation(clipId, childEvent)
-      applyDraftToActualElement(clipId)
-    })
-  })
-
-  instance.on('dragGroupEnd', (event: any) => {
-    finishGesture('drag', event?.isDrag)
-  })
-
-  instance.on('scaleStart', (event: any) => {
-    const clipId = resolveGestureClipId(event.target)
-    const draft = clipId ? getDraft(clipId) : null
-    activeGesture.value = 'scale'
-    if (!draft) return
-
-    event.set?.([draft.scale, draft.scale])
-    event.dragStart?.set?.([draft.translateX, draft.translateY])
-  })
-
-  instance.on('scale', (event: any) => {
-    const clipId = resolveGestureClipId(event.target)
-    const draft = clipId ? getDraft(clipId) : null
-    if (!clipId || !draft) return
-
-    applyDragTranslation(clipId, event.drag)
-    draft.scale = clampScale(event.scale?.[0] ?? draft.scale)
-    applyDraftToActualElement(clipId)
-  })
-
-  instance.on('scaleEnd', (event: any) => {
-    finishGesture('scale', event?.isDrag)
-  })
-
-  instance.on('scaleGroupStart', ({ events }: any) => {
-    activeGesture.value = 'scale'
-    events.forEach((childEvent: any, index: number) => {
-      const clipId = resolveGroupGestureClipId(childEvent.target, index)
-      const draft = clipId ? getDraft(clipId) : null
-      if (!draft) return
-
-      childEvent.set?.([draft.scale, draft.scale])
-      childEvent.dragStart?.set?.([draft.translateX, draft.translateY])
-    })
-  })
-
-  instance.on('scaleGroup', ({ events }: any) => {
-    events.forEach((childEvent: any, index: number) => {
-      const clipId = resolveGroupGestureClipId(childEvent.target, index)
-      const draft = clipId ? getDraft(clipId) : null
-      if (!clipId || !draft) return
-
-      applyDragTranslation(clipId, childEvent.drag)
-      draft.scale = clampScale(childEvent.scale?.[0] ?? draft.scale)
-      applyDraftToActualElement(clipId)
-    })
-  })
-
-  instance.on('scaleGroupEnd', (event: any) => {
-    finishGesture('scale', event?.isDrag)
-  })
-
-  instance.on('rotateStart', (event: any) => {
-    const clipId = resolveGestureClipId(event.target)
-    const draft = clipId ? getDraft(clipId) : null
-    activeGesture.value = 'rotate'
-    if (!draft) return
-
-    event.set?.(draft.rotateZ)
-    event.dragStart?.set?.([draft.translateX, draft.translateY])
-  })
-
-  instance.on('rotate', (event: any) => {
-    const clipId = resolveGestureClipId(event.target)
-    const draft = clipId ? getDraft(clipId) : null
-    if (!clipId || !draft) return
-
-    applyDragTranslation(clipId, event.drag)
-    draft.rotateZ = event.beforeRotate ?? event.rotation ?? event.rotate ?? draft.rotateZ
-    applyDraftToActualElement(clipId)
-  })
-
-  instance.on('rotateEnd', (event: any) => {
-    finishGesture('rotate', event?.isDrag)
-  })
-
-  instance.on('rotateGroupStart', ({ events }: any) => {
-    activeGesture.value = 'rotate'
-    events.forEach((childEvent: any, index: number) => {
-      const clipId = resolveGroupGestureClipId(childEvent.target, index)
-      const draft = clipId ? getDraft(clipId) : null
-      if (!draft) return
-
-      childEvent.set?.(draft.rotateZ)
-      childEvent.dragStart?.set?.([draft.translateX, draft.translateY])
-    })
-  })
-
-  instance.on('rotateGroup', ({ events }: any) => {
-    events.forEach((childEvent: any, index: number) => {
-      const clipId = resolveGroupGestureClipId(childEvent.target, index)
-      const draft = clipId ? getDraft(clipId) : null
-      if (!clipId || !draft) return
-
-      applyDragTranslation(clipId, childEvent.drag)
-      draft.rotateZ = childEvent.beforeRotate ?? childEvent.rotation ?? childEvent.rotate ?? draft.rotateZ
-      applyDraftToActualElement(clipId)
-    })
-  })
-
-  instance.on('rotateGroupEnd', (event: any) => {
-    finishGesture('rotate', event?.isDrag)
-  })
-
-  instance.on('dragOriginStart', (event: any) => {
-    const clipId = resolveGestureClipId(event.target)
-    const draft = clipId ? getDraft(clipId) : null
-    activeGesture.value = 'origin'
-    if (!draft) return
-
-    event.dragStart?.set?.([draft.translateX, draft.translateY])
-  })
-
-  instance.on('dragOrigin', (event: any) => {
-    const clipId = resolveGestureClipId(event.target)
-    const draft = clipId ? getDraft(clipId) : null
-    if (!clipId || !draft) return
-
-    const { anchorX, anchorY } = parseTransformOrigin(event.transformOrigin ?? '', draft)
-    draft.anchorX = anchorX
-    draft.anchorY = anchorY
-    applyDragTranslation(clipId, event.drag)
-    applyDraftToActualElement(clipId)
-  })
-
-  instance.on('dragOriginEnd', (event: any) => {
-    finishGesture('origin', event?.isDrag)
-  })
+  commitDrafts([gesture.clipId])
 }
 
-const createMoveableInstance = () => {
-  if (!overlayRootRef.value || moveableInstance.value) return
+function onTargetPointerDown(event: PointerEvent, clipId: string) {
+  if (event.button !== 0 || event.altKey) return
 
-  const instance = new Moveable(overlayRootRef.value, {
-    draggable: true,
-    scalable: true,
-    rotatable: true,
-    pinchable: ['scalable', 'rotatable'],
-    origin: true,
-    originDraggable: true,
-    originRelative: true,
-    keepRatio: true,
-    snappable: true,
-    snapGap: true,
-    isDisplaySnapDigit: true,
-    isDisplayInnerSnapDigit: true,
-    useResizeObserver: true,
-    zoom: props.canvasScale || 1,
-    rotationPosition: 'top',
-    renderDirections: [...RENDER_DIRECTIONS],
-    controlPadding: 8,
-    linePadding: 4,
-    className: MOVEABLE_CLASS,
-    checkInput: true,
-  })
+  event.preventDefault()
+  event.stopPropagation()
 
-  bindMoveableEvents(instance)
-  moveableInstance.value = instance
+  if (textEditor.value && textEditor.value.clipId !== clipId) {
+    commitTextEdit()
+  }
+
+  const additive = event.shiftKey || event.ctrlKey || event.metaKey
+  const isSelected = selectedClipIdSet.value.has(clipId)
+
+  if (additive) {
+    const nextSelection = isSelected
+      ? selectedClipIds.value.filter((selectedClipId) => selectedClipId !== clipId)
+      : [...selectedClipIds.value, clipId]
+    emitSelection(nextSelection, isSelected ? nextSelection[0] ?? null : clipId)
+    return
+  }
+
+  if (!isSelected) {
+    emitSelection([clipId], clipId)
+  } else {
+    emitSelection(selectedClipIds.value, clipId)
+  }
+
+  startDragGesture(event, clipId)
 }
 
-const observeStageMutations = () => {
-  mutationObserver?.disconnect()
-  mutationObserver = null
-
-  const stageElement = overlayRootRef.value?.parentElement
-  if (!stageElement || typeof MutationObserver === 'undefined') return
-
-  mutationObserver = new MutationObserver(() => {
-    scheduleStageSync()
-  })
-
-  mutationObserver.observe(stageElement, {
-    childList: true,
-    subtree: true,
-  })
+function onTargetDoubleClick(clipId: string) {
+  startTextEdit(clipId)
 }
 
-const getMarqueeBox = () => {
+function onStagePointerDown(event: PointerEvent) {
+  if (event.button !== 0 || event.altKey) return
+  if (!overlayRootRef.value) return
+
+  const target = event.target as HTMLElement | null
+  if (
+    target?.closest('.transform-handle') ||
+    target?.closest('.transform-target') ||
+    target?.closest('.transform-text-editor')
+  ) {
+    return
+  }
+
+  if (textEditor.value) {
+    commitTextEdit()
+  }
+
+  const point = screenToCanvas(event.clientX, event.clientY, true)
+  if (!point) return
+
+  marquee.value = {
+    startX: point.x,
+    startY: point.y,
+    currentX: point.x,
+    currentY: point.y,
+    additive: event.shiftKey || event.ctrlKey || event.metaKey,
+    baseSelection: event.shiftKey || event.ctrlKey || event.metaKey ? [...selectedClipIds.value] : [],
+  }
+
+  updateMarqueeSelection()
+}
+
+function getMarqueeBox() {
   if (!marquee.value) return null
 
   const left = Math.min(marquee.value.startX, marquee.value.currentX)
@@ -761,42 +1052,20 @@ const getMarqueeBox = () => {
   return { left, top, right, bottom }
 }
 
-const getPointerCanvasPosition = (clientX: number, clientY: number) => {
-  const overlayRect = overlayRootRef.value?.getBoundingClientRect()
-  if (!overlayRect) return null
-
-  const canvasScale = getCanvasScale()
-  const width = overlayRect.width / canvasScale
-  const height = overlayRect.height / canvasScale
-
-  return {
-    x: clamp((clientX - overlayRect.left) / canvasScale, 0, width),
-    y: clamp((clientY - overlayRect.top) / canvasScale, 0, height),
-  }
-}
-
-const updateMarqueeSelection = () => {
-  const overlayRect = overlayRootRef.value?.getBoundingClientRect()
+function updateMarqueeSelection() {
   const marqueeBox = getMarqueeBox()
-  if (!overlayRect || !marqueeBox || !marquee.value) return
-
-  const canvasScale = getCanvasScale()
+  if (!marqueeBox || !marquee.value) return
 
   const hitIds = props.items
     .filter((item) => {
-      const element = overlayElements.get(item.clipId)
-      if (!element) return false
-      const rect = element.getBoundingClientRect()
-      const left = (rect.left - overlayRect.left) / canvasScale
-      const top = (rect.top - overlayRect.top) / canvasScale
-      const right = left + rect.width / canvasScale
-      const bottom = top + rect.height / canvasScale
-
+      const draft = getDraft(item.clipId)
+      if (!draft) return false
+      const bounds = getDraftAabb(draft)
       return !(
-        right < marqueeBox.left ||
-        left > marqueeBox.right ||
-        bottom < marqueeBox.top ||
-        top > marqueeBox.bottom
+        bounds.right < marqueeBox.left ||
+        bounds.left > marqueeBox.right ||
+        bounds.bottom < marqueeBox.top ||
+        bounds.top > marqueeBox.bottom
       )
     })
     .map((item) => item.clipId)
@@ -808,7 +1077,42 @@ const updateMarqueeSelection = () => {
   emitSelection(nextSelection, hitIds[0] ?? marquee.value.baseSelection[0] ?? null)
 }
 
-const commitTextEdit = () => {
+function onWindowPointerMove(event: PointerEvent) {
+  const gesture = activeGesture.value
+  if (gesture) {
+    const point = screenToCanvas(event.clientX, event.clientY)
+    if (!point) return
+
+    if (gesture.type === 'drag') {
+      updateDragGesture(gesture, point, event)
+    } else if (gesture.type === 'scale') {
+      updateScaleGesture(gesture, point)
+    } else if (gesture.type === 'rotate') {
+      updateRotateGesture(gesture, point, event)
+    } else {
+      updateAnchorGesture(gesture, point)
+    }
+    return
+  }
+
+  if (!marquee.value) return
+  const point = screenToCanvas(event.clientX, event.clientY, true)
+  if (!point) return
+
+  marquee.value.currentX = point.x
+  marquee.value.currentY = point.y
+  updateMarqueeSelection()
+}
+
+function onWindowPointerUp(event: PointerEvent) {
+  if (activeGesture.value) {
+    finishGesture(event)
+    return
+  }
+  marquee.value = null
+}
+
+function commitTextEdit() {
   if (!textEditor.value) return
 
   const currentEditor = textEditor.value
@@ -828,21 +1132,16 @@ const commitTextEdit = () => {
 
   nextTick(() => {
     scheduleStageSync()
-    syncMoveableTargets()
   })
 }
 
-const cancelTextEdit = () => {
+function cancelTextEdit() {
   textEditor.value = null
-  nextTick(() => {
-    syncMoveableTargets()
-  })
 }
 
-const startTextEdit = (clipId: string) => {
+function startTextEdit(clipId: string) {
   const item = itemByClipId.value.get(clipId)
   if (!item) return
-
   if (item.danmu.type !== 'text' && item.danmu.type !== 'button') return
 
   emitSelection([clipId], clipId)
@@ -856,11 +1155,10 @@ const startTextEdit = (clipId: string) => {
   nextTick(() => {
     textEditorRef.value?.focus()
     textEditorRef.value?.select()
-    syncMoveableTargets()
   })
 }
 
-const onTextEditorKeydown = (event: KeyboardEvent) => {
+function onTextEditorKeydown(event: KeyboardEvent) {
   const currentEditor = textEditor.value
   if (!currentEditor) return
 
@@ -876,88 +1174,29 @@ const onTextEditorKeydown = (event: KeyboardEvent) => {
   }
 }
 
-const onTargetPointerDown = (event: PointerEvent, clipId: string) => {
-  if (event.button !== 0 || event.altKey) return
+function observeStageMutations() {
+  mutationObserver?.disconnect()
+  mutationObserver = null
 
-  if (textEditor.value && textEditor.value.clipId !== clipId) {
-    commitTextEdit()
-  }
+  const stageElement = overlayRootRef.value?.parentElement
+  if (!stageElement || typeof MutationObserver === 'undefined') return
 
-  const additive = event.shiftKey || event.ctrlKey || event.metaKey
-  const isSelected = selectedClipIdSet.value.has(clipId)
+  mutationObserver = new MutationObserver(() => {
+    scheduleStageSync()
+  })
 
-  if (additive) {
-    emitSelection([...selectedClipIds.value, clipId], clipId)
-    return
-  }
-
-  if (!isSelected) {
-    emitSelection([clipId], clipId)
-    startMoveableDrag(event, clipId, true)
-    return
-  }
-
-  emitSelection(selectedClipIds.value, clipId)
-  startMoveableDrag(event, clipId)
-}
-
-const onTargetDoubleClick = (clipId: string) => {
-  startTextEdit(clipId)
-}
-
-const onStagePointerDown = (event: PointerEvent) => {
-  if (event.button !== 0 || event.altKey) return
-  if (!overlayRootRef.value) return
-
-  const target = event.target as HTMLElement | null
-  if (
-    target?.closest('.moveable-control-box') ||
-    target?.closest('.transform-target') ||
-    target?.closest('.transform-text-editor')
-  ) {
-    return
-  }
-
-  if (textEditor.value) {
-    commitTextEdit()
-  }
-
-  const point = getPointerCanvasPosition(event.clientX, event.clientY)
-  if (!point) return
-
-  marquee.value = {
-    startX: point.x,
-    startY: point.y,
-    currentX: point.x,
-    currentY: point.y,
-    additive: event.shiftKey || event.ctrlKey || event.metaKey,
-    baseSelection: event.shiftKey || event.ctrlKey || event.metaKey ? [...selectedClipIds.value] : [],
-  }
-
-  updateMarqueeSelection()
-}
-
-const onWindowPointerMove = (event: PointerEvent) => {
-  if (!overlayRootRef.value || !marquee.value) return
-
-  const point = getPointerCanvasPosition(event.clientX, event.clientY)
-  if (!point) return
-
-  marquee.value.currentX = point.x
-  marquee.value.currentY = point.y
-  updateMarqueeSelection()
-}
-
-const onWindowPointerUp = () => {
-  marquee.value = null
+  mutationObserver.observe(stageElement, {
+    childList: true,
+    subtree: true,
+  })
 }
 
 onMounted(() => {
-  createMoveableInstance()
   observeStageMutations()
   scheduleStageSync()
   window.addEventListener('pointermove', onWindowPointerMove)
   window.addEventListener('pointerup', onWindowPointerUp)
+  window.addEventListener('pointercancel', onWindowPointerUp)
 })
 
 onBeforeUnmount(() => {
@@ -968,8 +1207,7 @@ onBeforeUnmount(() => {
   mutationObserver = null
   window.removeEventListener('pointermove', onWindowPointerMove)
   window.removeEventListener('pointerup', onWindowPointerUp)
-  moveableInstance.value?.destroy()
-  moveableInstance.value = null
+  window.removeEventListener('pointercancel', onWindowPointerUp)
 })
 
 watch(
@@ -996,27 +1234,6 @@ watch(
   },
   { deep: true, immediate: true }
 )
-
-watch(
-  () => props.canvasScale,
-  () => {
-    nextTick(() => {
-      syncMoveableTargets()
-    })
-  }
-)
-
-watch(selectedClipIds, () => {
-  nextTick(() => {
-    syncMoveableTargets()
-  })
-})
-
-watch(textEditor, () => {
-  nextTick(() => {
-    syncMoveableTargets()
-  })
-})
 </script>
 
 <template>
@@ -1041,6 +1258,63 @@ watch(textEditor, () => {
     >
       <div class="transform-target__chrome" />
     </div>
+
+    <div
+      v-if="groupBoundsStyle"
+      class="transform-group-bounds absolute"
+      :style="groupBoundsStyle"
+    />
+
+    <div
+      v-if="selectedBoundsStyle"
+      class="transform-selection-bounds absolute"
+      :style="selectedBoundsStyle"
+    />
+
+    <button
+      v-for="entry in cornerEntries"
+      :key="entry.corner"
+      type="button"
+      class="transform-handle transform-handle--corner absolute"
+      :class="`transform-handle--${entry.corner}`"
+      :style="{ ...getHandlePositionStyle(entry.point), cursor: entry.cursor }"
+      :aria-label="`Scale ${entry.corner}`"
+      @pointerdown="(event) => onCornerPointerDown(event, entry.corner)"
+    >
+      <span :style="getHandleSizeStyle(HANDLE_SCREEN_SIZE)" />
+    </button>
+
+    <button
+      v-if="rotationHandlePoint"
+      type="button"
+      class="transform-handle transform-handle--rotate absolute"
+      :style="getHandlePositionStyle(rotationHandlePoint)"
+      aria-label="Rotate"
+      @pointerdown="onRotatePointerDown"
+    >
+      <span :style="getHandleSizeStyle(18)" />
+    </button>
+
+    <button
+      v-if="anchorHandlePoint"
+      type="button"
+      class="transform-handle transform-handle--anchor absolute"
+      :style="getHandlePositionStyle(anchorHandlePoint, 18)"
+      aria-label="Move transform anchor"
+      @pointerdown="onAnchorPointerDown"
+    >
+      <span :style="getHandleSizeStyle(8)" />
+    </button>
+
+    <div
+      v-for="line in snapLines"
+      :key="`${line.type}-${line.position}`"
+      class="transform-snap-line absolute"
+      :class="`transform-snap-line--${line.type}`"
+      :style="line.type === 'vertical'
+        ? { left: `${line.position}px`, width: `${getInverseCanvasScale()}px` }
+        : { top: `${line.position}px`, height: `${getInverseCanvasScale()}px` }"
+    />
 
     <textarea
       v-if="textEditor"
@@ -1070,21 +1344,22 @@ watch(textEditor, () => {
 .transform-target {
   box-sizing: border-box;
   border: 1px solid transparent;
-  border-radius: 3px;
+  border-radius: 2px;
   background: transparent;
   pointer-events: auto;
+  transform-box: border-box;
   will-change: transform;
   z-index: 1;
 }
 
 .transform-target:hover {
-  border-color: color-mix(in oklab, var(--primary) 35%, transparent);
-  background: color-mix(in oklab, var(--primary) 6%, transparent);
+  border-color: color-mix(in oklab, var(--primary) 42%, transparent);
+  background: color-mix(in oklab, var(--primary) 5%, transparent);
 }
 
 .transform-target--selected {
-  border-color: color-mix(in oklab, var(--primary) 55%, transparent);
-  background: color-mix(in oklab, var(--primary) 10%, transparent);
+  border-color: transparent;
+  background: transparent;
   z-index: 2;
 }
 
@@ -1097,7 +1372,7 @@ watch(textEditor, () => {
 .transform-target__chrome {
   position: absolute;
   inset: 0;
-  border: 1px dashed color-mix(in oklab, var(--primary) 25%, transparent);
+  border: 1px dashed color-mix(in oklab, var(--primary) 32%, transparent);
   border-radius: 2px;
   pointer-events: none;
   opacity: 0;
@@ -1107,6 +1382,108 @@ watch(textEditor, () => {
 .transform-target:hover .transform-target__chrome,
 .transform-target--selected .transform-target__chrome {
   opacity: 1;
+}
+
+.transform-selection-bounds,
+.transform-group-bounds {
+  box-sizing: border-box;
+  z-index: 18;
+  pointer-events: none;
+  transform-origin: center center;
+}
+
+.transform-selection-bounds {
+  border: 1px solid rgb(255 255 255 / 0.76);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.4),
+    0 0 0 2px color-mix(in oklab, var(--primary) 45%, transparent);
+}
+
+.transform-group-bounds {
+  border: 1px dashed color-mix(in oklab, var(--primary) 75%, white 15%);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.38);
+}
+
+.transform-handle {
+  z-index: 24;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.transform-handle > span {
+  display: block;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.transform-handle--corner > span {
+  border-radius: 2px;
+  background: white;
+  border: 1px solid rgb(0 0 0 / 0.42);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--primary) 68%, transparent),
+    0 1px 3px rgb(0 0 0 / 0.32);
+}
+
+.transform-handle--corner {
+  z-index: 27;
+}
+
+.transform-handle--rotate {
+  z-index: 28;
+  cursor: grab;
+}
+
+.transform-handle--rotate:active {
+  cursor: grabbing;
+}
+
+.transform-handle--rotate > span {
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 50%, transparent 0 34%, rgb(18 18 18) 36% 46%, transparent 48%),
+    white;
+  border: 1px solid rgb(0 0 0 / 0.42);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--primary) 62%, transparent),
+    0 2px 5px rgb(0 0 0 / 0.35);
+}
+
+.transform-handle--anchor {
+  z-index: 26;
+  cursor: crosshair;
+}
+
+.transform-handle--anchor > span {
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--primary) 82%, white 18%);
+  border: 2px solid white;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.42),
+    0 1px 3px rgb(0 0 0 / 0.3);
+}
+
+.transform-snap-line {
+  z-index: 16;
+  pointer-events: none;
+  background: rgb(255 255 255 / 0.72);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary) 40%, transparent);
+}
+
+.transform-snap-line--vertical {
+  top: 0;
+  bottom: 0;
+}
+
+.transform-snap-line--horizontal {
+  left: 0;
+  right: 0;
 }
 
 .transform-text-editor {
@@ -1146,37 +1523,4 @@ watch(textEditor, () => {
     0 0 0 1px color-mix(in oklab, var(--background) 75%, transparent),
     inset 0 0 0 1px color-mix(in oklab, var(--primary) 22%, transparent);
 }
-
-:deep(.bas-transform-moveable .moveable-line),
-:deep(.bas-transform-moveable .moveable-rotation-line) {
-  background: color-mix(in oklab, var(--primary) 65%, transparent);
-}
-
-:deep(.bas-transform-moveable .moveable-control) {
-  width: 10px;
-  height: 10px;
-  margin-left: -5px;
-  margin-top: -5px;
-  background: var(--primary);
-  border: 2px solid white;
-  border-radius: 2px;
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
-}
-
-:deep(.bas-transform-moveable .moveable-rotation-control) {
-  width: 20px;
-  height: 20px;
-  margin-left: -10px;
-  margin-top: -10px;
-  background: var(--primary);
-  border: 2px solid white;
-  box-shadow: 0 2px 4px rgb(0 0 0 / 0.3);
-}
-
-:deep(.bas-transform-moveable .moveable-origin) {
-  background: white;
-  border: 2px solid var(--destructive);
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
-}
 </style>
-
