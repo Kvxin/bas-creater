@@ -16,6 +16,15 @@ import { useAudioStore } from "@/stores/audio";
 import { compileTimelineToBas } from "@/utils/compiler";
 import TransformControls from "./controls/TransformControls.vue";
 import type { AnyDanmu } from "@/types/danmu";
+import type { TimelineClip } from "@/types/timeline";
+import {
+  BASE_KEYFRAME_ID,
+  clampKeyframeTime,
+  createKeyframeSnapshot,
+  getEffectiveDanmuAtTime,
+  pickKeyframeProperties,
+  resolveKeyframeProperties,
+} from "@/utils/keyframes";
 
 const ZOOM_SENSITIVITY = 0.001;
 const MIN_SCALE = 0.1;
@@ -48,9 +57,17 @@ const previewTransformItems = computed(() => {
       const danmu = danmuStore.danmus.find((item) => item.id === clip.resourceId);
       if (!danmu) continue;
 
+      const selectedKeyframeId =
+        clip.id === timelineStore.selectedClipId ? timelineStore.selectedKeyframeId : null;
+
       items.push({
         clipId: clip.id,
-        danmu,
+        danmu: getEffectiveDanmuAtTime(
+          danmu,
+          clip,
+          timelineStore.currentTime,
+          selectedKeyframeId
+        ),
       });
     }
   }
@@ -67,15 +84,74 @@ const handleTransformSelection = (payload: {
 
   if (!payload.primaryClipId) {
     timelineStore.setSelectedAnimation(null);
+    timelineStore.setSelectedKeyframe(null);
   }
 
   danmuStore.select(payload.primaryDanmuId);
+};
+
+const findClipByResourceId = (resourceId: string): TimelineClip | null => {
+  if (timelineStore.selectedClipId) {
+    for (const track of timelineStore.tracks) {
+      const selectedClip = track.clips.find(
+        (clip) =>
+          clip.id === timelineStore.selectedClipId && clip.resourceId === resourceId
+      );
+      if (selectedClip) return selectedClip;
+    }
+  }
+
+  for (const track of timelineStore.tracks) {
+    const clip = track.clips.find((item) => item.resourceId === resourceId);
+    if (clip) return clip;
+  }
+
+  return null;
 };
 
 const handleTransformCommit = (
   updates: Array<{ id: string; changes: Partial<AnyDanmu> }>
 ) => {
   for (const update of updates) {
+    const resource = danmuStore.danmus.find((item) => item.id === update.id);
+    const clip = findClipByResourceId(update.id);
+    const keyframeProperties = pickKeyframeProperties(update.changes);
+    const hasAnimatableChanges = Object.keys(keyframeProperties).length > 0;
+
+    if (!resource || !clip || !hasAnimatableChanges) {
+      danmuStore.updateDanmu(update.id, update.changes);
+      continue;
+    }
+
+    const selectedKeyframeId =
+      clip.id === timelineStore.selectedClipId ? timelineStore.selectedKeyframeId : null;
+
+    if (selectedKeyframeId && selectedKeyframeId !== BASE_KEYFRAME_ID) {
+      timelineStore.updateClipKeyframe(clip.id, selectedKeyframeId, {
+        properties: {
+          ...resolveKeyframeProperties(resource, clip, selectedKeyframeId),
+          ...keyframeProperties,
+        },
+      });
+      continue;
+    }
+
+    if (selectedKeyframeId === BASE_KEYFRAME_ID) {
+      danmuStore.updateDanmu(update.id, update.changes);
+      continue;
+    }
+
+    const localTimeMs = clampKeyframeTime(
+      timelineStore.currentTime - clip.startTime,
+      clip.duration
+    );
+
+    if (timelineStore.autoKeyframe && localTimeMs > 0 && localTimeMs < clip.duration) {
+      const snapshot = createKeyframeSnapshot(resource, clip, localTimeMs, update.changes);
+      timelineStore.upsertClipKeyframeAtTime(clip.id, snapshot.timeMs, snapshot.properties);
+      continue;
+    }
+
     danmuStore.updateDanmu(update.id, update.changes);
   }
 };

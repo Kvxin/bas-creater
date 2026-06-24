@@ -1,9 +1,24 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
-import type { TimelineTrack, TimelineClip, AnimationSegment, TimelineTrackType } from "@/types/timeline";
+import type {
+  TimelineTrack,
+  TimelineClip,
+  AnimationSegment,
+  TimelineTrackType,
+  TimelineKeyframe,
+  TimelineKeyframeProperties,
+} from "@/types/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 import { getItemName } from "@/utils/resourceUtils";
+import {
+  BASE_KEYFRAME_ID,
+  KEYFRAME_TOLERANCE_MS,
+  clampKeyframeTime,
+  createKeyframeId,
+  normalizeKeyframes,
+  pickKeyframeProperties,
+} from "@/utils/keyframes";
 
 export const useTimelineStore = defineStore("timeline", () => {
   const tracks = ref<TimelineTrack[]>([
@@ -23,6 +38,8 @@ export const useTimelineStore = defineStore("timeline", () => {
   const zoomScale = ref(50);
   const selectedClipId = ref<string | null>(null);
   const selectedAnimationId = ref<string | null>(null);
+  const selectedKeyframeId = ref<string | null>(null);
+  const autoKeyframe = ref(true);
 
   const getResourceTrackType = (resource: AnyDanmu | AudioResource): TimelineTrackType => {
     return resource.type === "audio-file" ? "audio" : "danmu";
@@ -79,6 +96,7 @@ export const useTimelineStore = defineStore("timeline", () => {
 
     if (clipDuration !== undefined) {
       clip.duration = Math.max(0, clipDuration);
+      clip.keyframes = normalizeKeyframes(clip.keyframes, clip.duration);
     }
   };
 
@@ -123,6 +141,7 @@ export const useTimelineStore = defineStore("timeline", () => {
       if (removedTrack?.clips.some((clip) => clip.id === selectedClipId.value)) {
         selectedClipId.value = null;
         selectedAnimationId.value = null;
+        selectedKeyframeId.value = null;
       }
       tracks.value.splice(index, 1);
       recalculateDuration();
@@ -166,6 +185,7 @@ export const useTimelineStore = defineStore("timeline", () => {
       duration: clipDuration,
       trackId: trackId,
       animations: [],
+      keyframes: [],
     };
 
     track.clips.push(newClip);
@@ -174,6 +194,10 @@ export const useTimelineStore = defineStore("timeline", () => {
     recalculateDuration();
 
     console.log("[TimelineStore] Added clip:", newClip);
+    selectedClipId.value = newClip.id;
+    selectedAnimationId.value = null;
+    selectedKeyframeId.value = BASE_KEYFRAME_ID;
+    return newClip;
   };
 
   // 移除片段
@@ -183,6 +207,8 @@ export const useTimelineStore = defineStore("timeline", () => {
       if (index !== -1) {
         if (selectedClipId.value === clipId) {
           selectedClipId.value = null;
+          selectedAnimationId.value = null;
+          selectedKeyframeId.value = null;
         }
         track.clips.splice(index, 1);
         clearTrackTypeIfEmpty(track);
@@ -202,6 +228,7 @@ export const useTimelineStore = defineStore("timeline", () => {
           if (selectedClipId.value === clip.id) {
             selectedClipId.value = null;
             selectedAnimationId.value = null;
+            selectedKeyframeId.value = null;
           }
           track.clips.splice(i, 1);
           changed = true;
@@ -217,7 +244,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     for (const track of tracks.value) {
       const clip = track.clips.find((c) => c.id === clipId);
       if (clip) {
-        Object.assign(clip, updates);
+        applyClipUpdates(clip, updates);
         
         // 如果更新了时间，重新排序
         if (updates.startTime !== undefined || updates.duration !== undefined) {
@@ -302,14 +329,33 @@ export const useTimelineStore = defineStore("timeline", () => {
   };
 
   const setSelectedClip = (id: string | null) => {
+      if (selectedClipId.value !== id) {
+          selectedAnimationId.value = null;
+          selectedKeyframeId.value = null;
+      }
       selectedClipId.value = id;
       if (id === null) {
           selectedAnimationId.value = null;
+          selectedKeyframeId.value = null;
       }
   }
 
   const setSelectedAnimation = (id: string | null) => {
     selectedAnimationId.value = id;
+    if (id) {
+      selectedKeyframeId.value = null;
+    }
+  }
+
+  const setSelectedKeyframe = (id: string | null) => {
+    selectedKeyframeId.value = id;
+    if (id) {
+      selectedAnimationId.value = null;
+    }
+  }
+
+  const setAutoKeyframe = (enabled: boolean) => {
+    autoKeyframe.value = enabled;
   }
 
   const toggleTrackExpand = (trackId: string) => {
@@ -389,6 +435,136 @@ export const useTimelineStore = defineStore("timeline", () => {
     }
   }
 
+  const addClipKeyframe = (
+    clipId: string,
+    keyframe: Omit<TimelineKeyframe, "id"> & { id?: string },
+    options: { select?: boolean } = {}
+  ) => {
+    const location = findClipLocation(clipId);
+    if (!location) return null;
+
+    const nextKeyframe: TimelineKeyframe = {
+      ...keyframe,
+      id: keyframe.id ?? createKeyframeId(),
+      timeMs: clampKeyframeTime(keyframe.timeMs, location.clip.duration),
+      interpolation: keyframe.interpolation ?? "linear",
+      properties: pickKeyframeProperties(keyframe.properties),
+    };
+
+    if (nextKeyframe.timeMs <= 0) {
+      selectedClipId.value = clipId;
+      selectedKeyframeId.value = BASE_KEYFRAME_ID;
+      selectedAnimationId.value = null;
+      return null;
+    }
+
+    if (!location.clip.keyframes) location.clip.keyframes = [];
+    location.clip.keyframes.push(nextKeyframe);
+    location.clip.keyframes = normalizeKeyframes(location.clip.keyframes, location.clip.duration);
+
+    if (options.select !== false) {
+      selectedClipId.value = clipId;
+      selectedKeyframeId.value = nextKeyframe.id;
+      selectedAnimationId.value = null;
+    }
+
+    return nextKeyframe;
+  }
+
+  const upsertClipKeyframeAtTime = (
+    clipId: string,
+    timeMs: number,
+    properties: TimelineKeyframeProperties,
+    options: { select?: boolean; toleranceMs?: number } = {}
+  ) => {
+    const location = findClipLocation(clipId);
+    if (!location) return null;
+
+    const clampedTime = clampKeyframeTime(timeMs, location.clip.duration);
+    if (clampedTime <= 0) {
+      selectedClipId.value = clipId;
+      selectedKeyframeId.value = BASE_KEYFRAME_ID;
+      selectedAnimationId.value = null;
+      return null;
+    }
+
+    if (!location.clip.keyframes) location.clip.keyframes = [];
+
+    const toleranceMs = options.toleranceMs ?? KEYFRAME_TOLERANCE_MS;
+    const existing = location.clip.keyframes.find((keyframe) => {
+      const existingTime = clampKeyframeTime(keyframe.timeMs, location.clip.duration);
+      return Math.abs(existingTime - clampedTime) <= toleranceMs;
+    });
+
+    if (existing) {
+      existing.timeMs = clampedTime;
+      existing.properties = pickKeyframeProperties({
+        ...existing.properties,
+        ...properties,
+      });
+      location.clip.keyframes = normalizeKeyframes(location.clip.keyframes, location.clip.duration);
+
+      if (options.select !== false) {
+        selectedClipId.value = clipId;
+        selectedKeyframeId.value = existing.id;
+        selectedAnimationId.value = null;
+      }
+
+      return existing;
+    }
+
+    return addClipKeyframe(
+      clipId,
+      {
+        timeMs: clampedTime,
+        properties,
+        interpolation: "linear",
+      },
+      options
+    );
+  }
+
+  const updateClipKeyframe = (
+    clipId: string,
+    keyframeId: string,
+    updates: Partial<TimelineKeyframe>
+  ) => {
+    const location = findClipLocation(clipId);
+    if (!location?.clip.keyframes || keyframeId === BASE_KEYFRAME_ID) return;
+
+    const keyframe = location.clip.keyframes.find((item) => item.id === keyframeId);
+    if (!keyframe) return;
+
+    if (updates.timeMs !== undefined) {
+      const clampedTime = clampKeyframeTime(updates.timeMs, location.clip.duration);
+      keyframe.timeMs = location.clip.duration > 0 ? Math.max(1, clampedTime) : 0;
+    }
+    if (updates.properties !== undefined) {
+      keyframe.properties = pickKeyframeProperties(updates.properties);
+    }
+    if (updates.interpolation !== undefined) {
+      keyframe.interpolation = updates.interpolation;
+    }
+    if (updates.easing !== undefined) {
+      keyframe.easing = updates.easing;
+    }
+
+    location.clip.keyframes = normalizeKeyframes(location.clip.keyframes, location.clip.duration);
+  }
+
+  const removeClipKeyframe = (clipId: string, keyframeId: string) => {
+    const location = findClipLocation(clipId);
+    if (!location?.clip.keyframes || keyframeId === BASE_KEYFRAME_ID) return;
+
+    const index = location.clip.keyframes.findIndex((item) => item.id === keyframeId);
+    if (index === -1) return;
+
+    location.clip.keyframes.splice(index, 1);
+    if (selectedKeyframeId.value === keyframeId) {
+      selectedKeyframeId.value = BASE_KEYFRAME_ID;
+    }
+  }
+
   return {
     tracks,
     currentTime,
@@ -397,6 +573,8 @@ export const useTimelineStore = defineStore("timeline", () => {
     zoomScale,
     selectedClipId,
     selectedAnimationId,
+    selectedKeyframeId,
+    autoKeyframe,
     addTrack,
     removeTrack,
     addClip,
@@ -407,12 +585,18 @@ export const useTimelineStore = defineStore("timeline", () => {
     setCurrentTime,
     setSelectedClip,
     setSelectedAnimation,
+    setSelectedKeyframe,
+    setAutoKeyframe,
     toggleTrackExpand,
     toggleTrackVisibility,
     toggleTrackMute,
     addClipAnimation,
     insertClipAnimation,
     removeClipAnimation,
-    updateClipAnimation
+    updateClipAnimation,
+    addClipKeyframe,
+    upsertClipKeyframeAtTime,
+    updateClipKeyframe,
+    removeClipKeyframe
   };
 });

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Settings, Plus, Trash2, ArrowLeft, FileText, Move, Palette, Sparkles } from "lucide-vue-next";
+import { Settings, Plus, Trash2, FileText, Move, Palette, Sparkles } from "lucide-vue-next";
 import { useDanmuStore } from "@/stores/danmu";
 import { useTimelineStore } from "@/stores/timeline";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import type { AnyDanmu } from "@/types/danmu";
-import type { AnimationSegment } from "@/types/timeline";
+import type { TimelineKeyframeProperties } from "@/types/timeline";
+import {
+  BASE_KEYFRAME_ID,
+  clampKeyframeTime,
+  createKeyframeSnapshot,
+  getBaseKeyframeProperties,
+  normalizeKeyframes,
+  resolveKeyframeProperties,
+} from "@/utils/keyframes";
 
 const danmuStore = useDanmuStore();
 const timelineStore = useTimelineStore();
@@ -23,54 +31,6 @@ const selectedClip = computed(() => {
     return null;
 });
 
-const selectedAnimation = computed(() => {
-    if (!selectedClip.value || !timelineStore.selectedAnimationId) return null;
-    return selectedClip.value.animations?.find(a => a.id === timelineStore.selectedAnimationId);
-});
-
-const clipAnimations = computed(() => selectedClip.value?.animations ?? []);
-
-// 动画属性更新
-const updateAnimationField = (key: keyof AnimationSegment, value: any) => {
-    if (!selectedClip.value || !selectedAnimation.value) return;
-    timelineStore.updateClipAnimation(selectedClip.value.id, selectedAnimation.value.id, { [key]: value });
-};
-
-const updateAnimationProperty = (key: string, value: any, asNumber = true) => {
-    if (!selectedClip.value || !selectedAnimation.value) return;
-    const props = { ...selectedAnimation.value.properties };
-    
-    if (value === '' || value === undefined) {
-        delete (props as any)[key];
-    } else {
-        (props as any)[key] = asNumber ? Number(value) : value;
-    }
-    
-    timelineStore.updateClipAnimation(selectedClip.value.id, selectedAnimation.value.id, { properties: props });
-};
-
-const addAnimation = () => {
-    if (!selectedClip.value) return;
-    const newAnim: AnimationSegment = {
-        id: `anim_${Date.now()}`,
-        type: 'then',
-        duration: 1000,
-        properties: {}
-    };
-    timelineStore.addClipAnimation(selectedClip.value.id, newAnim);
-    timelineStore.setSelectedAnimation(newAnim.id);
-    activeTab.value = "animation";
-};
-
-const removeAnimation = () => {
-    if (!selectedClip.value || !selectedAnimation.value) return;
-    timelineStore.removeClipAnimation(selectedClip.value.id, selectedAnimation.value.id);
-};
-
-const backToClip = () => {
-    timelineStore.setSelectedAnimation(null);
-}
-
 type PropertyTabId = "identity" | "transform" | "style" | "animation";
 
 const activeTab = ref<PropertyTabId>("identity");
@@ -82,33 +42,131 @@ const propertyTabs = [
   { id: "animation", label: "动画", title: "动画与关键帧", icon: Sparkles },
 ] as const;
 
-watch(selectedAnimation, (animation) => {
-  if (animation) {
-    activeTab.value = "animation";
-  }
+const clipKeyframes = computed(() =>
+  selectedClip.value ? normalizeKeyframes(selectedClip.value.keyframes, selectedClip.value.duration) : []
+);
+
+const activeKeyframeId = computed(() => timelineStore.selectedKeyframeId ?? BASE_KEYFRAME_ID);
+
+const activeKeyframeProperties = computed<TimelineKeyframeProperties>(() => {
+  if (!selected.value || !selectedClip.value) return {};
+  return resolveKeyframeProperties(selected.value, selectedClip.value, activeKeyframeId.value);
 });
 
-const selectAnimation = (animationId: string | null) => {
-  timelineStore.setSelectedAnimation(animationId);
-  activeTab.value = "animation";
-};
+const currentClipLocalTime = computed(() => {
+  if (!selectedClip.value) return 0;
+  return clampKeyframeTime(
+    timelineStore.currentTime - selectedClip.value.startTime,
+    selectedClip.value.duration
+  );
+});
 
-const getAnimationStartOffset = (animation: AnimationSegment, index: number) => {
-  if (animation.type === "set") {
-    return Math.max(0, animation.delay ?? 0);
+const keyframeRows = computed(() => {
+  if (!selected.value || !selectedClip.value) return [];
+
+  return [
+    {
+      id: BASE_KEYFRAME_ID,
+      index: 1,
+      label: "基态",
+      timeMs: 0,
+      isBase: true,
+      properties: getBaseKeyframeProperties(selected.value),
+    },
+    ...clipKeyframes.value.map((keyframe, index) => ({
+      id: keyframe.id,
+      index: index + 2,
+      label: `关键帧 ${index + 2}`,
+      timeMs: keyframe.timeMs,
+      isBase: false,
+      properties: keyframe.properties,
+    })),
+  ];
+});
+
+watch(
+  () => timelineStore.selectedKeyframeId,
+  (keyframeId) => {
+    if (keyframeId) {
+      activeTab.value = "animation";
+    }
   }
+);
 
-  return clipAnimations.value.slice(0, index).reduce((offset, item) => {
-    return offset + Math.max(0, item.duration) + Math.max(0, item.delay ?? 0);
-  }, 0);
+const selectKeyframe = (keyframeId: string) => {
+  if (selectedClip.value) {
+    timelineStore.setSelectedClip(selectedClip.value.id);
+  }
+  timelineStore.setSelectedKeyframe(keyframeId);
+  activeTab.value = "animation";
 };
 
 const formatAnimationTime = (ms: number) => `${(Math.max(0, ms) / 1000).toFixed(2)}s`;
 
-const getAnimationSummary = (animation: AnimationSegment) => {
-  const keys = Object.keys(animation.properties ?? {});
-  return keys.length > 0 ? keys.join(", ") : "保持当前状态";
+const getNextKeyframeTime = () => {
+  if (!selectedClip.value) return 0;
+  const lastKeyframe = clipKeyframes.value[clipKeyframes.value.length - 1];
+  const lastTime = lastKeyframe?.timeMs ?? 0;
+  const current = currentClipLocalTime.value > 0 ? currentClipLocalTime.value : lastTime + 1000;
+  return clampKeyframeTime(current, selectedClip.value.duration);
 };
+
+const addKeyframe = () => {
+  if (!selected.value || !selectedClip.value) return;
+  const timeMs = getNextKeyframeTime();
+  const snapshot = createKeyframeSnapshot(selected.value, selectedClip.value, timeMs);
+  const keyframe = timelineStore.addClipKeyframe(selectedClip.value.id, snapshot);
+  if (keyframe) {
+    activeTab.value = "animation";
+  }
+};
+
+const removeSelectedKeyframe = () => {
+  if (!selectedClip.value || activeKeyframeId.value === BASE_KEYFRAME_ID) return;
+  timelineStore.removeClipKeyframe(selectedClip.value.id, activeKeyframeId.value);
+};
+
+const updateKeyframeTime = (value: string | number) => {
+  if (!selectedClip.value || activeKeyframeId.value === BASE_KEYFRAME_ID) return;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return;
+  timelineStore.updateClipKeyframe(selectedClip.value.id, activeKeyframeId.value, {
+    timeMs: parsed,
+  });
+};
+
+const updateKeyframeProperty = (
+  key: keyof TimelineKeyframeProperties,
+  value: string | number,
+  asNumber = true
+) => {
+  if (!selected.value || !selectedClip.value) return;
+
+  const parsedValue = asNumber ? Number(value) : value;
+  if (asNumber && !Number.isFinite(parsedValue as number)) return;
+
+  if (activeKeyframeId.value === BASE_KEYFRAME_ID) {
+    updateField(key, parsedValue, false);
+    return;
+  }
+
+  timelineStore.updateClipKeyframe(selectedClip.value.id, activeKeyframeId.value, {
+    properties: {
+      ...activeKeyframeProperties.value,
+      [key]: parsedValue,
+    },
+  });
+};
+
+const updateKeyframeColor = (key: keyof TimelineKeyframeProperties, htmlHex: string) => {
+  updateKeyframeProperty(key, "0x" + htmlHex.replace("#", ""), false);
+};
+
+watch(selectedClip, (clip) => {
+  if (clip && activeTab.value === "animation" && !timelineStore.selectedKeyframeId) {
+    timelineStore.setSelectedKeyframe(BASE_KEYFRAME_ID);
+  }
+});
 
 // ... (Existing helpers remain the same) ...
 // 类型名称映射
@@ -188,10 +246,7 @@ const getButtonAV = (item: any): number | undefined => {
       class="h-11 border-b border-border flex items-center px-3 font-medium text-foreground justify-between shrink-0 bg-background"
     >
       <div class="flex items-center gap-2">
-          <button v-if="selectedAnimation" @click="backToClip" class="size-7 hover:bg-accent rounded-sm transition-colors inline-flex items-center justify-center">
-              <ArrowLeft class="size-4" />
-          </button>
-          <span>{{ selectedAnimation ? '动画设置' : '属性设置' }}</span>
+          <span>属性设置</span>
       </div>
       <Settings class="size-4 text-muted-foreground" />
     </div>
@@ -539,164 +594,189 @@ const getButtonAV = (item: any): number | undefined => {
           class="space-y-4 pb-10"
         >
           <div class="flex items-center justify-between select-none">
-            <Label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 cursor-pointer">
-              <span class="w-1 h-3 bg-muted-foreground/50 rounded-full"></span>
+            <Label class="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2 cursor-pointer">
+              <span class="w-1 h-3 bg-primary rounded-full"></span>
               动画与关键帧
             </Label>
+            <label class="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <input
+                type="checkbox"
+                class="size-3 accent-primary"
+                :checked="timelineStore.autoKeyframe"
+                @change="timelineStore.setAutoKeyframe(($event.target as HTMLInputElement).checked)"
+              />
+              自动
+            </label>
           </div>
 
           <div v-if="selectedClip" class="space-y-4 pt-1">
-            <button
-              @click="addAnimation"
-              class="w-full flex items-center justify-center gap-2 h-9 rounded-sm border border-dashed border-border hover:bg-accent hover:text-primary transition-colors text-xs text-muted-foreground"
-            >
-              <Plus class="size-3.5" />
-              添加动画片段
-            </button>
+            <div class="grid grid-cols-[1fr_auto] gap-2">
+              <div class="rounded-sm border border-border bg-accent/40 px-2.5 py-2">
+                <div class="text-[10px] text-muted-foreground uppercase">播放头局部时间</div>
+                <div class="mt-1 font-mono text-xs text-foreground">
+                  {{ formatAnimationTime(currentClipLocalTime) }}
+                </div>
+              </div>
+              <button
+                @click="addKeyframe"
+                class="h-full min-w-9 rounded-sm border border-border bg-accent hover:bg-primary/10 hover:text-primary transition-colors inline-flex items-center justify-center"
+                title="在播放头添加关键帧"
+                aria-label="在播放头添加关键帧"
+              >
+                <Plus class="size-4" />
+              </button>
+            </div>
 
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <span class="text-[10px] text-muted-foreground uppercase font-medium">关键帧片段</span>
-                <span class="text-[10px] text-muted-foreground font-mono">{{ clipAnimations.length }}</span>
+                <span class="text-[10px] text-muted-foreground uppercase font-medium">关键帧</span>
+                <span class="text-[10px] text-muted-foreground font-mono">{{ keyframeRows.length }}</span>
               </div>
 
               <button
-                v-for="(animation, index) in clipAnimations"
-                :key="animation.id"
+                v-for="keyframe in keyframeRows"
+                :key="keyframe.id"
                 type="button"
                 class="w-full rounded-sm border px-2.5 py-2 text-left transition-colors"
-                :class="selectedAnimation?.id === animation.id
+                :class="activeKeyframeId === keyframe.id
                   ? 'border-primary/50 bg-primary/10 text-foreground'
                   : 'border-border bg-accent/40 hover:border-border/80 hover:bg-accent text-muted-foreground'"
-                @click="selectAnimation(animation.id)"
+                @click="selectKeyframe(keyframe.id)"
               >
                 <div class="flex min-w-0 items-center justify-between gap-2">
                   <div class="flex min-w-0 items-center gap-2">
                     <span
-                      class="h-2 w-2 rounded-full shrink-0"
-                      :class="animation.type === 'set' ? 'bg-[#5DBAA0]' : 'bg-[#5d93ba]'"
+                      class="size-2 rotate-45 rounded-[1px] shrink-0"
+                      :class="keyframe.isBase ? 'bg-muted-foreground' : 'bg-primary'"
                     ></span>
                     <span class="truncate text-xs font-medium text-foreground">
-                      {{ animation.type === 'set' ? '并行动画' : '串行动画' }} {{ index + 1 }}
+                      {{ keyframe.label }}
                     </span>
                   </div>
                   <span class="shrink-0 text-[10px] font-mono text-muted-foreground">
-                    {{ formatAnimationTime(getAnimationStartOffset(animation, index)) }}
+                    {{ formatAnimationTime(keyframe.timeMs) }}
                   </span>
                 </div>
-                <div class="mt-1 flex items-center justify-between gap-2 text-[10px]">
-                  <span class="min-w-0 truncate">{{ getAnimationSummary(animation) }}</span>
-                  <span class="shrink-0 font-mono">{{ formatAnimationTime(animation.duration) }}</span>
+                <div class="mt-1 truncate text-[10px] text-muted-foreground">
+                  {{ Object.keys(keyframe.properties).join(', ') || '基础状态' }}
                 </div>
               </button>
-
-              <div
-                v-if="clipAnimations.length === 0"
-                class="rounded-sm border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground"
-              >
-                暂无动画片段
-              </div>
             </div>
 
-            <div v-if="selectedAnimation" class="space-y-4 border-t border-border/70 pt-4">
+            <div class="space-y-4 border-t border-border/70 pt-4">
               <div class="flex items-center justify-between">
-                <Label class="text-xs font-semibold text-primary uppercase tracking-wider">动画配置</Label>
-                <div class="flex items-center gap-1">
-                  <button
-                    @click="backToClip"
-                    class="size-7 rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors inline-flex items-center justify-center"
-                    title="取消选中动画"
-                  >
-                    <ArrowLeft class="size-4" />
-                  </button>
-                  <button
-                    @click="removeAnimation"
-                    class="text-destructive hover:bg-destructive/10 size-7 rounded-sm inline-flex items-center justify-center transition-colors"
-                    title="删除动画"
-                  >
-                    <Trash2 class="size-4" />
-                  </button>
-                </div>
+                <Label class="text-xs font-semibold text-primary uppercase tracking-wider">
+                  {{ activeKeyframeId === BASE_KEYFRAME_ID ? '基态属性' : '关键帧属性' }}
+                </Label>
+                <button
+                  v-if="activeKeyframeId !== BASE_KEYFRAME_ID"
+                  @click="removeSelectedKeyframe"
+                  class="text-destructive hover:bg-destructive/10 size-7 rounded-sm inline-flex items-center justify-center transition-colors"
+                  title="删除关键帧"
+                >
+                  <Trash2 class="size-4" />
+                </button>
               </div>
 
-              <div class="grid grid-cols-2 gap-4">
+              <div class="grid grid-cols-2 gap-3">
                 <div class="space-y-1">
-                  <Label class="text-[10px] text-muted-foreground uppercase">类型</Label>
-                  <select
-                    :value="selectedAnimation.type"
-                    @change="(e: any) => updateAnimationField('type', e.target.value)"
-                    class="h-8 w-full rounded-sm border border-input bg-accent px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:border-primary"
-                  >
-                    <option value="then">串行 (Then Set)</option>
-                    <option value="set">并行 (Set)</option>
-                  </select>
-                </div>
-                <div class="space-y-1">
-                  <Label class="text-[10px] text-muted-foreground uppercase">时长 (ms)</Label>
-                  <Input type="number" step="100" :model-value="selectedAnimation.duration" @update:model-value="v => updateAnimationField('duration', Number(v))" class="h-8 text-xs font-mono" />
-                </div>
-              </div>
-
-              <div v-if="selectedAnimation.type === 'set'" class="space-y-1">
-                <Label class="text-[10px] text-muted-foreground uppercase">延迟 (Delay ms)</Label>
-                <Input type="number" step="100" :model-value="selectedAnimation.delay" @update:model-value="v => updateAnimationField('delay', Number(v))" class="h-8 text-xs font-mono" />
-              </div>
-
-              <div class="space-y-4">
-                <Label class="text-xs font-semibold text-primary uppercase tracking-wider block">属性变更</Label>
-
-                <div class="grid grid-cols-2 gap-4">
-                  <div class="space-y-1">
-                    <Label class="text-[10px] text-muted-foreground uppercase">X 坐标</Label>
-                    <Input :model-value="selectedAnimation.properties.x" @update:model-value="v => updateAnimationProperty('x', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
-                  </div>
-                  <div class="space-y-1">
-                    <Label class="text-[10px] text-muted-foreground uppercase">Y 坐标</Label>
-                    <Input :model-value="selectedAnimation.properties.y" @update:model-value="v => updateAnimationProperty('y', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
-                  </div>
-                  <div class="space-y-1">
-                    <Label class="text-[10px] text-muted-foreground uppercase">不透明度</Label>
-                    <Input type="number" step="0.1" :model-value="selectedAnimation.properties.opacity" @update:model-value="v => updateAnimationProperty('opacity', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
-                  </div>
-                  <div class="space-y-1">
-                    <Label class="text-[10px] text-muted-foreground uppercase">缩放</Label>
-                    <Input type="number" step="0.1" :model-value="selectedAnimation.properties.scale" @update:model-value="v => updateAnimationProperty('scale', v)" class="h-7 text-xs font-mono" placeholder="保持不变" />
-                  </div>
-                </div>
-
-                <div class="grid grid-cols-3 gap-2 pt-1">
-                  <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">旋转 X</span>
-                    <Input type="number" :model-value="selectedAnimation.properties.rotateX" @update:model-value="(v) => updateAnimationProperty('rotateX', v)" class="h-7 text-xs font-mono" placeholder="-" />
-                  </div>
-                  <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">旋转 Y</span>
-                    <Input type="number" :model-value="selectedAnimation.properties.rotateY" @update:model-value="(v) => updateAnimationProperty('rotateY', v)" class="h-7 text-xs font-mono" placeholder="-" />
-                  </div>
-                  <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">旋转 Z</span>
-                    <Input type="number" :model-value="selectedAnimation.properties.rotateZ" @update:model-value="(v) => updateAnimationProperty('rotateZ', v)" class="h-7 text-xs font-mono" placeholder="-" />
-                  </div>
-                </div>
-
-                <div class="space-y-1 pt-1">
-                  <Label class="text-[10px] text-muted-foreground uppercase">颜色</Label>
+                  <Label class="text-[10px] text-muted-foreground uppercase">时间 (ms)</Label>
                   <Input
-                    type="text"
-                    :model-value="(selectedAnimation.properties as any).color || (selectedAnimation.properties as any).textColor"
-                    @update:model-value="v => updateAnimationProperty('color', v, false)"
-                    class="h-7 text-[10px] font-mono"
-                    placeholder="保持不变"
+                    type="number"
+                    step="100"
+                    :disabled="activeKeyframeId === BASE_KEYFRAME_ID"
+                    :model-value="activeKeyframeId === BASE_KEYFRAME_ID ? 0 : keyframeRows.find((item) => item.id === activeKeyframeId)?.timeMs"
+                    @update:model-value="updateKeyframeTime"
+                    class="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <Label class="text-[10px] text-muted-foreground uppercase">不透明度</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    :min="0"
+                    :max="1"
+                    :model-value="activeKeyframeProperties.opacity"
+                    @update:model-value="(v) => updateKeyframeProperty('opacity', v)"
+                    class="h-8 text-xs font-mono"
                   />
                 </div>
               </div>
-            </div>
 
-            <div
-              v-else-if="clipAnimations.length > 0"
-              class="rounded-sm border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground"
-            >
-              选择一个关键帧片段进行编辑
+              <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <Label class="text-[10px] text-muted-foreground uppercase">X 坐标</Label>
+                  <Input
+                    :model-value="activeKeyframeProperties.x"
+                    @update:model-value="(v) => updateKeyframeProperty('x', v)"
+                    class="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <Label class="text-[10px] text-muted-foreground uppercase">Y 坐标</Label>
+                  <Input
+                    :model-value="activeKeyframeProperties.y"
+                    @update:model-value="(v) => updateKeyframeProperty('y', v)"
+                    class="h-8 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <Label class="text-[10px] text-muted-foreground uppercase">缩放</Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    :model-value="activeKeyframeProperties.scale"
+                    @update:model-value="(v) => updateKeyframeProperty('scale', v)"
+                    class="h-8 text-xs font-mono"
+                  />
+                </div>
+                <div class="space-y-1">
+                  <Label class="text-[10px] text-muted-foreground uppercase">层级</Label>
+                  <Input
+                    type="number"
+                    step="1"
+                    :model-value="activeKeyframeProperties.zIndex"
+                    @update:model-value="(v) => updateKeyframeProperty('zIndex', v)"
+                    class="h-8 text-xs font-mono"
+                  />
+                </div>
+              </div>
+
+              <div class="grid grid-cols-3 gap-2">
+                <div class="space-y-1">
+                  <span class="text-[10px] text-muted-foreground uppercase">旋转 X</span>
+                  <Input type="number" :model-value="activeKeyframeProperties.rotateX" @update:model-value="(v) => updateKeyframeProperty('rotateX', v)" class="h-8 text-xs font-mono" />
+                </div>
+                <div class="space-y-1">
+                  <span class="text-[10px] text-muted-foreground uppercase">旋转 Y</span>
+                  <Input type="number" :model-value="activeKeyframeProperties.rotateY" @update:model-value="(v) => updateKeyframeProperty('rotateY', v)" class="h-8 text-xs font-mono" />
+                </div>
+                <div class="space-y-1">
+                  <span class="text-[10px] text-muted-foreground uppercase">旋转 Z</span>
+                  <Input type="number" :model-value="activeKeyframeProperties.rotateZ" @update:model-value="(v) => updateKeyframeProperty('rotateZ', v)" class="h-8 text-xs font-mono" />
+                </div>
+              </div>
+
+              <div v-if="selected.type === 'text'" class="space-y-1">
+                <Label class="text-[10px] text-muted-foreground uppercase">文本颜色</Label>
+                <div class="flex items-center gap-2">
+                  <Input
+                    type="color"
+                    :model-value="toHtmlColor(activeKeyframeProperties.color)"
+                    @input="(e: Event) => updateKeyframeColor('color', (e.target as HTMLInputElement).value)"
+                    class="h-8 w-9 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                  />
+                  <Input
+                    :model-value="activeKeyframeProperties.color"
+                    @update:model-value="(v) => updateKeyframeProperty('color', v, false)"
+                    class="h-8 text-[10px] font-mono"
+                  />
+                </div>
+              </div>
             </div>
           </div>
 

@@ -26,6 +26,11 @@ import { useAudioStore } from "@/stores/audio";
 import { compileTimelineToBas } from "@/utils/compiler";
 import basService from "@/utils/bas";
 import { useContextMenuStore } from "@/stores/contextMenu";
+import {
+  BASE_KEYFRAME_ID,
+  clampKeyframeTime,
+  normalizeKeyframes,
+} from "@/utils/keyframes";
 
 import type { AnimationSegment, TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
 
@@ -331,6 +336,52 @@ const getClipName = (clip: any) => {
     return clip.name || 'Unknown Clip';
 }
 
+const getClipKeyframeMarkers = (clip: TimelineClip) => [
+  {
+    id: BASE_KEYFRAME_ID,
+    timeMs: 0,
+    isBase: true,
+    label: "基态",
+  },
+  ...normalizeKeyframes(clip.keyframes, clip.duration).map((keyframe, index) => ({
+    id: keyframe.id,
+    timeMs: keyframe.timeMs,
+    isBase: false,
+    label: `关键帧 ${index + 2}`,
+  })),
+];
+
+const isKeyframeSelected = (clip: TimelineClip, keyframeId: string) =>
+  timelineStore.selectedClipId === clip.id && timelineStore.selectedKeyframeId === keyframeId;
+
+const getKeyframeMarkerStyle = (
+  clip: TimelineClip,
+  marker: { id: string; timeMs: number }
+) => {
+  const timeMs =
+    isDraggingKeyframe.value &&
+    draggedKeyframeClipId.value === clip.id &&
+    draggedKeyframeId.value === marker.id
+      ? tempKeyframeTime.value
+      : marker.timeMs;
+  const leftPercent = (clampKeyframeTime(timeMs, clip.duration) / Math.max(1, clip.duration)) * 100;
+
+  return {
+    left: `${leftPercent}%`,
+  };
+};
+
+const selectKeyframeMarker = (
+  clip: TimelineClip,
+  marker: { id: string; isBase: boolean },
+  event?: MouseEvent
+) => {
+  event?.stopPropagation();
+  timelineStore.setSelectedClip(clip.id);
+  timelineStore.setSelectedKeyframe(marker.id);
+  danmuStore.select(clip.resourceId);
+};
+
 // 游标位置 (相对于内容区域)
 const playheadStyle = computed(() => {
   const left = (timelineStore.currentTime / 1000) * pixelsPerSecond.value;
@@ -630,6 +681,61 @@ const stopResizeClip = () => {
     window.removeEventListener('mouseup', stopResizeClip);
 };
 
+const isDraggingKeyframe = ref(false);
+const draggedKeyframeId = ref<string | null>(null);
+const draggedKeyframeClipId = ref<string | null>(null);
+const initialKeyframeTime = ref(0);
+const dragKeyframeStartX = ref(0);
+const tempKeyframeTime = ref(0);
+
+const startDragKeyframe = (
+  event: MouseEvent,
+  clip: TimelineClip,
+  marker: { id: string; timeMs: number; isBase: boolean }
+) => {
+  if (event.button !== 0) return;
+
+  selectKeyframeMarker(clip, marker, event);
+  if (marker.isBase) return;
+
+  event.preventDefault();
+  isDraggingKeyframe.value = true;
+  draggedKeyframeId.value = marker.id;
+  draggedKeyframeClipId.value = clip.id;
+  initialKeyframeTime.value = marker.timeMs;
+  tempKeyframeTime.value = marker.timeMs;
+  dragKeyframeStartX.value = event.clientX;
+  document.body.style.cursor = "ew-resize";
+  window.addEventListener("mousemove", onDragKeyframe);
+  window.addEventListener("mouseup", stopDragKeyframe);
+};
+
+const onDragKeyframe = (event: MouseEvent) => {
+  if (!isDraggingKeyframe.value || !draggedKeyframeClipId.value) return;
+  const clip = timelineStore.tracks
+    .flatMap((track) => track.clips)
+    .find((item) => item.id === draggedKeyframeClipId.value);
+  if (!clip) return;
+
+  const deltaMs = ((event.clientX - dragKeyframeStartX.value) / pixelsPerSecond.value) * 1000;
+  tempKeyframeTime.value = clampKeyframeTime(initialKeyframeTime.value + deltaMs, clip.duration);
+};
+
+const stopDragKeyframe = () => {
+  if (isDraggingKeyframe.value && draggedKeyframeClipId.value && draggedKeyframeId.value) {
+    timelineStore.updateClipKeyframe(draggedKeyframeClipId.value, draggedKeyframeId.value, {
+      timeMs: tempKeyframeTime.value,
+    });
+  }
+
+  isDraggingKeyframe.value = false;
+  draggedKeyframeId.value = null;
+  draggedKeyframeClipId.value = null;
+  document.body.style.cursor = "";
+  window.removeEventListener("mousemove", onDragKeyframe);
+  window.removeEventListener("mouseup", stopDragKeyframe);
+};
+
 // Animation Drag/Resize Logic
 const isDraggingAnimation = ref(false);
 const draggedAnimationId = ref<string | null>(null);
@@ -839,7 +945,13 @@ const handleKeyDown = (e: KeyboardEvent) => {
       return;
     }
 
-    if (timelineStore.selectedAnimationId && timelineStore.selectedClipId) {
+    if (
+      timelineStore.selectedKeyframeId &&
+      timelineStore.selectedKeyframeId !== BASE_KEYFRAME_ID &&
+      timelineStore.selectedClipId
+    ) {
+      timelineStore.removeClipKeyframe(timelineStore.selectedClipId, timelineStore.selectedKeyframeId);
+    } else if (timelineStore.selectedAnimationId && timelineStore.selectedClipId) {
       timelineStore.removeClipAnimation(timelineStore.selectedClipId, timelineStore.selectedAnimationId);
       timelineStore.selectedAnimationId = null;
     } else if (timelineStore.selectedClipId) {
@@ -1083,32 +1195,33 @@ onUnmounted(() => {
                     }"
                     :data-timeline-track-id="track.id"
                 >
-                     <!-- Animation Ghost Containers (aligned with clips) -->
+                     <!-- Keyframe Containers (aligned with clips) -->
                      <div 
                         v-for="clip in track.clips"
                         :key="clip.id"
                         class="absolute top-0 bottom-0 pointer-events-none" 
                         :style="{ ...getClipStyle(clip), border: 'none', background: 'transparent' }" 
                     >
-                         <!-- Animation Segments -->
+                         <div class="absolute inset-x-1 top-1/2 h-px bg-border/70"></div>
                          <div class="absolute inset-0">
-                             <div 
-                                v-for="(anim, index) in clip.animations" 
-                                :key="anim.id"
-                                class="absolute pointer-events-auto hover:brightness-110 cursor-pointer group/anim rounded-sm"
-                                :class="{ 'ring-1 ring-primary': timelineStore.selectedAnimationId === anim.id }"
-                                :style="getAnimationSegmentStyle(clip, anim, index)"
-                                @click="handleAnimationClick(clip, anim, $event)"
-                                @mousedown.stop="startDragAnimation($event, clip, anim)"
-                                title="动画片段"
-                             >
-                                <!-- Resize Handle for Animation -->
-                                <div 
-                                    class="absolute right-0 top-0 bottom-0 w-1 cursor-e-resize hover:bg-white/50 z-20 opacity-0 group-hover/anim:opacity-100"
-                                    data-handle="right"
-                                    @mousedown.stop="startResizeAnimation($event, clip, anim)"
-                                ></div>
-                             </div>
+                             <button
+                                v-for="marker in getClipKeyframeMarkers(clip)"
+                                :key="marker.id"
+                                type="button"
+                                class="absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border pointer-events-auto transition-colors"
+                                :class="[
+                                  marker.isBase
+                                    ? 'border-muted-foreground/60 bg-muted-foreground/70'
+                                    : 'border-primary/80 bg-primary',
+                                  isKeyframeSelected(clip, marker.id)
+                                    ? 'ring-2 ring-primary/45 ring-offset-1 ring-offset-background'
+                                    : 'hover:ring-2 hover:ring-primary/30'
+                                ]"
+                                :style="getKeyframeMarkerStyle(clip, marker)"
+                                :title="`${marker.label} · ${formatTime(marker.timeMs).str}`"
+                                @click="selectKeyframeMarker(clip, marker, $event)"
+                                @mousedown.stop="startDragKeyframe($event, clip, marker)"
+                             ></button>
                         </div>
                     </div>
                 </div>

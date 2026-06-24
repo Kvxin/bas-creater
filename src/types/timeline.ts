@@ -1,5 +1,32 @@
 import type { AnyDanmu } from './danmu';
 
+export type KeyframeInterpolation = 'linear' | 'step';
+
+export interface TimelineKeyframeProperties {
+  x?: number | string;
+  y?: number | string;
+  zIndex?: number;
+  scale?: number;
+  rotateX?: number;
+  rotateY?: number;
+  rotateZ?: number;
+  opacity?: number;
+  anchorX?: number;
+  anchorY?: number;
+  color?: number | string;
+  textColor?: number | string;
+  fontSize?: number | string;
+  strokeWidth?: number;
+}
+
+export interface TimelineKeyframe {
+  id: string;
+  timeMs: number;
+  properties: TimelineKeyframeProperties;
+  interpolation?: KeyframeInterpolation;
+  easing?: string;
+}
+
 export interface AnimationSegment {
   id: string;
   type: 'set' | 'then'; // 'set' = 并行/初始 (从 0 开始或指定时间), 'then' = 串行 (接在上一个之后)
@@ -19,6 +46,7 @@ export interface TimelineClip {
   trackId: string;    // 所属轨道 ID
   
   animations?: AnimationSegment[]; // 动画片段列表
+  keyframes?: TimelineKeyframe[]; // AE/视频编辑器式关键帧，优先用于新动画系统
 }
 
 export type TimelineTrackType = 'danmu' | 'audio';
