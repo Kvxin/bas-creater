@@ -33,6 +33,10 @@ import {
 } from "@/utils/keyframes";
 
 import type { AnimationSegment, TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
+import AudioWaveform from "./audio/AudioWaveform.vue";
+import AudioVolumeLine from "./audio/AudioVolumeLine.vue";
+import { dBToLinear } from "@/utils/audio/audio-math";
+import { WAVEFORM_GAIN_SAMPLE_COUNT } from "@/utils/audio/constants";
 
 const timelineStore = useTimelineStore();
 const danmuStore = useDanmuStore();
@@ -61,8 +65,9 @@ const handleContextMenu = (e: MouseEvent, type: 'track' | 'clip' | 'background',
   if (type === 'track') {
     contextMenu.show(e, 'track-header', { id: data });
   } else if (type === 'clip') {
-    // data is the clip object.
-    contextMenu.show(e, 'timeline-clip', data);
+    // 音频片段使用独立的右键菜单（不包含"查看详情"等弹幕专属功能）
+    const menuId = isAudioClip(data) ? 'timeline-audio-clip' : 'timeline-clip';
+    contextMenu.show(e, menuId, data);
   } else {
     contextMenu.show(e, 'timeline-bg');
   }
@@ -380,6 +385,18 @@ const selectKeyframeMarker = (
   timelineStore.setSelectedClip(clip.id);
   timelineStore.setSelectedKeyframe(marker.id);
   danmuStore.select(clip.resourceId);
+};
+
+/** 双击关键帧 → 将播放头定位到关键帧所在时间 */
+const handleKeyframeDblClick = (
+  clip: TimelineClip,
+  marker: { timeMs: number },
+) => {
+  const absoluteTime = clip.startTime + marker.timeMs;
+  timelineStore.setCurrentTime(absoluteTime);
+  if (!timelineStore.isPlaying) {
+    basService.seek(absoluteTime / 1000, true);
+  }
 };
 
 // 游标位置 (相对于内容区域)
@@ -921,7 +938,7 @@ const onDragPlayhead = (e: MouseEvent) => {
   
   timelineStore.setCurrentTime(time);
   if (!timelineStore.isPlaying) {
-      basService.seek(time / 1000, false);
+      basService.seek(time / 1000, true);
   }
 };
 
@@ -968,6 +985,75 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("keydown", handleKeyDown);
 });
+
+// ============================================================
+// 音频相关辅助函数
+// ============================================================
+
+/** 获取音频资源的 Blob URL */
+function getAudioUrl(clip: TimelineClip): string {
+  const resource = audioStore.audioResources.find((r) => r.id === clip.resourceId);
+  return resource?.url ?? "";
+}
+
+/** 判断 clip 是否为音频类型 */
+function isAudioClip(clip: TimelineClip): boolean {
+  return audioStore.audioResources.some((r) => r.id === clip.resourceId);
+}
+
+/** 获取 clip 的有效音量参数（考虑预览覆盖） */
+function getClipVolume(clip: TimelineClip): number {
+  return timelineStore.getEffectiveVolume(clip);
+}
+
+/** 判断 clip 是否被静音（元素级） */
+function isClipMuted(clip: TimelineClip): boolean {
+  return timelineStore.isClipMuted(clip);
+}
+
+/** 为波形生成增益采样数组 */
+function buildGainSamples(clip: TimelineClip): number[] {
+  const durationSec = Math.max(0.001, clip.duration / 1000);
+  const volumeDb = getClipVolume(clip);
+  const muted = isClipMuted(clip);
+
+  // 查找所属轨道
+  const track = timelineStore.tracks.find((t) => t.clips.some((c) => c.id === clip.id));
+  const trackMuted = track?.muted === true;
+
+  if (muted || trackMuted) {
+    // 静音 → 全部返回 0 增益
+    return new Array(WAVEFORM_GAIN_SAMPLE_COUNT).fill(0);
+  }
+
+  const linearGain = dBToLinear(volumeDb);
+  return new Array(WAVEFORM_GAIN_SAMPLE_COUNT).fill(linearGain);
+}
+
+// ---- 音量线事件处理 ----
+
+function handleVolumeChange(clipId: string, db: number) {
+  timelineStore.previewClipParams(clipId, { volume: db });
+}
+
+function handleVolumeCommit(clipId: string, db: number) {
+  timelineStore.previewClipParams(clipId, { volume: db });
+  timelineStore.commitPreview();
+}
+
+function handleVolumeDiscard() {
+  timelineStore.discardPreview();
+}
+
+function handleVolumeSelect(clipId: string) {
+  timelineStore.setSelectedClip(clipId);
+  const clip = timelineStore.tracks
+    .flatMap((t) => t.clips)
+    .find((c) => c.id === clipId);
+  if (clip) {
+    danmuStore.select(clip.resourceId);
+  }
+}
 
 </script>
 
@@ -1138,7 +1224,7 @@ onUnmounted(() => {
                     <div
                         v-for="clip in track.clips"
                         :key="clip.id"
-                        class="absolute top-1 bottom-1 rounded-sm border text-[10px] flex items-center px-2 text-white overflow-hidden cursor-move select-none shadow-sm hover:brightness-110"
+                        class="absolute top-1 bottom-1 rounded-sm border text-[10px] flex items-center px-2 text-white overflow-hidden cursor-move select-none shadow-sm hover:brightness-110 group/audio"
                         :class="{
                             'ring-1 ring-primary z-10': timelineStore.selectedClipId === clip.id,
                             'opacity-35': isDraggedClipLeavingTrack(clip)
@@ -1150,8 +1236,31 @@ onUnmounted(() => {
                         @mousedown.stop="startDragClip($event, clip)"
                         @contextmenu.stop="handleContextMenu($event, 'clip', clip)"
                     >
+                        <!-- 音频波形（渲染在内容下方） -->
+                        <AudioWaveform
+                            v-if="isAudioClip(clip)"
+                            class="absolute inset-0"
+                            :audio-url="getAudioUrl(clip)"
+                            :clip-duration-ms="clip.duration"
+                            :gain-samples="buildGainSamples(clip)"
+                            :pixels-per-second="pixelsPerSecond"
+                            :scroll-left="scrollLeft"
+                            :track-width="timelineViewportWidth"
+                        />
+
                         <span class="truncate text-white/90 font-medium z-10 relative pointer-events-none">{{ getClipName(clip) }}</span>
-                        
+
+                        <!-- 音频音量线 -->
+                        <AudioVolumeLine
+                            v-if="isAudioClip(clip)"
+                            :clip-id="clip.id"
+                            :current-volume="getClipVolume(clip)"
+                            @volume-change="(db: number) => handleVolumeChange(clip.id, db)"
+                            @volume-commit="(db: number) => handleVolumeCommit(clip.id, db)"
+                            @volume-discard="handleVolumeDiscard()"
+                            @select="handleVolumeSelect(clip.id)"
+                        />
+
                         <!-- Resize Handles -->
                         <template v-if="timelineStore.selectedClipId === clip.id">
                             <div 
@@ -1220,6 +1329,7 @@ onUnmounted(() => {
                                 :style="getKeyframeMarkerStyle(clip, marker)"
                                 :title="`${marker.label} · ${formatTime(marker.timeMs).str}`"
                                 @click="selectKeyframeMarker(clip, marker, $event)"
+                                @dblclick.stop="handleKeyframeDblClick(clip, marker)"
                                 @mousedown.stop="startDragKeyframe($event, clip, marker)"
                              ></button>
                         </div>
@@ -1256,4 +1366,3 @@ End:      {{ formatTime(tempState.startTime + tempState.duration).str }}</div>
     </div>
   </div>
 </template>
-
