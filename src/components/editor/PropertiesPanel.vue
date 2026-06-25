@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import { Settings, Plus, Trash2, FileText, Move, Palette, Sparkles } from "lucide-vue-next";
+import { Settings, Plus, Trash2, FileText, Move, Palette, Sparkles, Music2, Volume2 } from "lucide-vue-next";
 import { useDanmuStore } from "@/stores/danmu";
 import { useTimelineStore } from "@/stores/timeline";
+import { useAudioStore } from "@/stores/audio";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import type { AnyDanmu } from "@/types/danmu";
 import type { TimelineKeyframeProperties } from "@/types/timeline";
+import { VOLUME_DB_MIN, VOLUME_DB_MAX, VOLUME_STEP } from "@/utils/audio/constants";
+import { formatNumberForDisplay } from "@/utils/audio/audio-math";
 import {
   BASE_KEYFRAME_ID,
   clampKeyframeTime,
@@ -20,7 +23,52 @@ import {
 
 const danmuStore = useDanmuStore();
 const timelineStore = useTimelineStore();
+const audioStore = useAudioStore();
 const selected = computed(() => danmuStore.selected);
+
+// ---- 音频片段检测 ----
+
+/** 当前选中的且为音频类型的片段 */
+const selectedAudioClip = computed(() => {
+  if (!timelineStore.selectedClipId) return null;
+  for (const track of timelineStore.tracks) {
+    const clip = track.clips.find((c) => c.id === timelineStore.selectedClipId);
+    if (clip && audioStore.audioResources.some((r) => r.id === clip.resourceId)) {
+      return clip;
+    }
+  }
+  return null;
+});
+
+/** 音频片段对应的资源 */
+const selectedAudioResource = computed(() => {
+  if (!selectedAudioClip.value) return null;
+  return audioStore.getById(selectedAudioClip.value.resourceId);
+});
+
+/** 音频片段的有效音量（dB） */
+const audioVolumeDb = computed(() => {
+  if (!selectedAudioClip.value) return 0;
+  return timelineStore.getEffectiveVolume(selectedAudioClip.value);
+});
+
+/** 音频片段是否静音（元素级） */
+const audioClipMuted = computed(() => {
+  if (!selectedAudioClip.value) return false;
+  return timelineStore.isClipMuted(selectedAudioClip.value);
+});
+
+/** 更新音频片段音量 */
+function updateAudioVolume(db: number) {
+  if (!selectedAudioClip.value) return;
+  timelineStore.updateClipVolume(selectedAudioClip.value.id, Math.round(db / VOLUME_STEP) * VOLUME_STEP);
+}
+
+/** 切换音频片段静音 */
+function toggleAudioClipMuted() {
+  if (!selectedAudioClip.value) return;
+  timelineStore.toggleClipMuted(selectedAudioClip.value.id);
+}
 
 const selectedClip = computed(() => {
     if (!timelineStore.selectedClipId) return null;
@@ -811,6 +859,77 @@ const getButtonAV = (item: any): number | undefined => {
           <component :is="tab.icon" class="size-4 shrink-0" />
           <span class="max-w-full truncate">{{ tab.label }}</span>
         </button>
+      </div>
+    </div>
+
+    <!-- 音频片段编辑模式 -->
+    <div
+      v-else-if="selectedAudioClip"
+      class="flex-1 min-h-0 overflow-y-auto overflow-x-hidden scrollbar-hidden p-3 space-y-4 pb-10"
+    >
+      <div class="flex items-center justify-between select-none">
+        <Label class="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2">
+          <span class="w-1 h-3 bg-primary rounded-full"></span>
+          音频片段属性
+        </Label>
+      </div>
+
+      <div class="space-y-4 pt-1">
+        <!-- 片段名称 -->
+        <div class="rounded-sm border border-border bg-accent/40 px-3 py-3 space-y-2">
+          <div class="flex items-center gap-2 text-xs text-muted-foreground">
+            <Music2 class="size-3.5" />
+            <span class="truncate font-medium text-foreground">{{ selectedAudioClip.name || '音频片段' }}</span>
+          </div>
+          <div v-if="selectedAudioResource" class="text-[10px] text-muted-foreground/70 truncate">
+            {{ selectedAudioResource.file?.name ?? selectedAudioResource.name }}
+          </div>
+          <div class="text-[10px] text-muted-foreground/70">
+            时长: {{ (selectedAudioClip.duration / 1000).toFixed(2) }}s
+          </div>
+        </div>
+
+        <!-- 音量控制 -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <Label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
+              <Volume2 class="size-3" />
+              音量
+            </Label>
+            <span class="text-xs font-mono text-muted-foreground">{{ formatNumberForDisplay(audioVolumeDb, 1) }} dB</span>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <span class="text-[10px] text-muted-foreground w-6 text-right">{{ VOLUME_DB_MIN }}</span>
+            <Slider
+              :model-value="[audioVolumeDb]"
+              :min="VOLUME_DB_MIN"
+              :max="VOLUME_DB_MAX"
+              :step="VOLUME_STEP"
+              @update:model-value="(v) => v && updateAudioVolume(v[0])"
+              class="flex-1 h-7"
+            />
+            <span class="text-[10px] text-muted-foreground w-6">{{ VOLUME_DB_MAX }}</span>
+          </div>
+        </div>
+
+        <!-- 静音切换 -->
+        <div class="rounded-sm border border-border bg-accent/40 px-3 py-2.5 flex items-center justify-between">
+          <span class="text-xs text-muted-foreground">静音此片段</span>
+          <button
+            type="button"
+            role="switch"
+            :aria-checked="audioClipMuted"
+            @click="toggleAudioClipMuted"
+            class="peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            :class="audioClipMuted ? 'bg-destructive' : 'bg-input'"
+          >
+            <span
+              class="pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform"
+              :class="audioClipMuted ? 'translate-x-4' : 'translate-x-0'"
+            />
+          </button>
+        </div>
       </div>
     </div>
 

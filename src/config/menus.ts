@@ -66,12 +66,27 @@ export const MENU_REGISTRY: Record<string, MenuConfig> = {
       },
     ],
   },
-  // 轨道列表中的片段右键菜单区域
+  // 轨道列表中的片段右键菜单区域（弹幕片段）
   "timeline-clip": {
     label: "片段操作",
     items: [
       { id: "detail", label: "查看详情", action: "clip.viewDetails" },
       { id: "sep0", separator: true, label: "" },
+      { id: "copy", label: "复制", action: "clip.copy" },
+      { id: "cut", label: "剪切", disabled: true, action: "clip.cut" },
+      { id: "sep2", separator: true, label: "" },
+      {
+        id: "del",
+        label: "删除",
+        action: "clip.delete",
+        class: "text-destructive",
+      },
+    ],
+  },
+  // 音频片段右键菜单（不包含"查看详情"——仅弹幕适用）
+  "timeline-audio-clip": {
+    label: "音频片段操作",
+    items: [
       { id: "copy", label: "复制", action: "clip.copy" },
       { id: "cut", label: "剪切", disabled: true, action: "clip.cut" },
       { id: "sep2", separator: true, label: "" },

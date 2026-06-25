@@ -14,6 +14,8 @@ import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { useAudioStore } from "@/stores/audio";
 import { compileTimelineToBas } from "@/utils/compiler";
+import { getAudioEngine } from "@/utils/audio/audio-engine";
+import { dBToLinear } from "@/utils/audio/audio-math";
 import TransformControls from "./controls/TransformControls.vue";
 import type { AnyDanmu } from "@/types/danmu";
 import type { TimelineClip } from "@/types/timeline";
@@ -185,33 +187,9 @@ const basInitialized = ref(false);
 let animationFrameId: number | null = null;
 const needsRecompile = ref(false);
 
-type ScheduledAudio = {
-  clipId: string;
-  audio: HTMLAudioElement;
-  startTimerId: number;
-  stopTimerId: number;
-};
+// ---- Audio Engine 播放 ----
 
-let scheduledAudio: ScheduledAudio[] = [];
-const audioTimers = new Set<number>();
-let audioSession = 0;
-
-const stopAudioPlayback = () => {
-  audioSession += 1;
-  for (const timerId of audioTimers) {
-    window.clearTimeout(timerId);
-  }
-  audioTimers.clear();
-  for (const entry of scheduledAudio) {
-    try {
-      entry.audio.pause();
-      entry.audio.currentTime = 0;
-    } catch (err) {
-      // Ignore failed resets on unloaded audio elements.
-    }
-  }
-  scheduledAudio = [];
-};
+const audioEngine = getAudioEngine();
 
 const isAtTimelineEnd = (timeMs = timelineStore.currentTime) => {
   return (
@@ -220,15 +198,18 @@ const isAtTimelineEnd = (timeMs = timelineStore.currentTime) => {
   );
 };
 
-const startAudioPlayback = (startTimeMs: number) => {
-  stopAudioPlayback();
-  const session = audioSession;
+async function startAudioPlayback(startTimeMs: number) {
+  // 确保 AudioContext 处于运行状态
+  await audioEngine.ensureResumed();
+
+  const now = audioEngine.getCurrentTime();
   const resourceById = new Map(
-    audioStore.audioResources.map((resource) => [resource.id, resource])
+    audioStore.audioResources.map((resource) => [resource.id, resource]),
   );
 
   for (const track of timelineStore.tracks) {
     if (track.muted || (track.type !== "audio" && !track.visible)) continue;
+
     for (const clip of track.clips) {
       const resource = resourceById.get(clip.resourceId);
       if (!resource) continue;
@@ -237,57 +218,36 @@ const startAudioPlayback = (startTimeMs: number) => {
       const clipEnd = clip.startTime + clip.duration;
       if (clipEnd <= startTimeMs) continue;
 
-      const startDelay = Math.max(0, clipStart - startTimeMs);
-      const offsetMs = Math.max(0, startTimeMs - clipStart);
-      const remainingMs = clipEnd - startTimeMs;
+      // 计算调度参数
+      const delaySec = Math.max(0, (clipStart - startTimeMs) / 1000);
+      const offsetSec = Math.max(0, (startTimeMs - clipStart) / 1000);
+      const durationSec = (clipEnd - Math.max(startTimeMs, clipStart)) / 1000;
 
-      const audio = new Audio(resource.url);
-      audio.preload = "auto";
+      // 获取当前音量
+      const volumeDb = timelineStore.getEffectiveVolume(clip);
+      const isMuted = timelineStore.isClipMuted(clip);
+      const effectiveVolumeDb = isMuted ? -60 : volumeDb;
 
-      const startPlayback = async () => {
-        if (session !== audioSession) return;
-        const offsetSec = offsetMs / 1000;
-
-        if (audio.readyState < 1) {
-          await new Promise<void>((resolve) => {
-            const handleLoaded = () => {
-              audio.removeEventListener("loadedmetadata", handleLoaded);
-              resolve();
-            };
-            audio.addEventListener("loadedmetadata", handleLoaded);
-          });
-        }
-
-        if (session !== audioSession) return;
-        if (
-          Number.isFinite(audio.duration) &&
-          audio.duration > 0 &&
-          offsetSec >= audio.duration
-        ) {
-          return;
-        }
-
-        try {
-          audio.currentTime = offsetSec;
-        } catch (err) {
-          // Ignore invalid seeks on not-yet-ready audio elements.
-        }
-        audio.play().catch(() => {});
-      };
-
-      const startTimerId = window.setTimeout(() => {
-        void startPlayback();
-      }, startDelay);
-      const stopTimerId = window.setTimeout(() => {
-        audio.pause();
-      }, remainingMs);
-
-      audioTimers.add(startTimerId);
-      audioTimers.add(stopTimerId);
-      scheduledAudio.push({ clipId: clip.id, audio, startTimerId, stopTimerId });
+      try {
+        const buffer = await audioEngine.loadAudioBuffer(resource.url);
+        audioEngine.scheduleClip(
+          clip.id,
+          buffer,
+          now + delaySec,
+          offsetSec,
+          durationSec,
+          effectiveVolumeDb,
+        );
+      } catch (err) {
+        console.warn(`[PreviewPanel] Failed to load audio for clip ${clip.id}:`, err);
+      }
     }
   }
-};
+}
+
+function stopAudioPlayback() {
+  audioEngine.stopAll();
+}
 
 // Sync loop
 const startSyncLoop = () => {
@@ -454,6 +414,11 @@ watch(
 watch(
   () => timelineStore.isPlaying,
   (isPlayingNow) => {
+    // 播放时隐藏舞台溢出内容，暂停时恢复
+    if (danmakuRef.value) {
+      danmakuRef.value.style.overflow = isPlayingNow ? "hidden" : "";
+    }
+
     if (!isPlayingNow && needsRecompile.value) {
       compileAndLoad(true);
     }
