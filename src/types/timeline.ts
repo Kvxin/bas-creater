@@ -37,6 +37,12 @@ export interface AnimationSegment {
   delay?: number; 
 }
 
+/** 音频片段参数 */
+export interface TimelineClipParams {
+  volume?: number; // dB 值，默认 0
+  muted?: boolean; // 元素级静音
+}
+
 export interface TimelineClip {
   id: string;
   resourceId: string; // 关联到资源库中的 ID
@@ -44,7 +50,8 @@ export interface TimelineClip {
   startTime: number;  // 在时间轴上的开始时间 (ms)
   duration: number;   // 持续时间 (ms)，默认跟随资源的 durationMs
   trackId: string;    // 所属轨道 ID
-  
+  params?: TimelineClipParams; // 音频/视频参数（音量、静音等）
+
   animations?: AnimationSegment[]; // 动画片段列表
   keyframes?: TimelineKeyframe[]; // AE/视频编辑器式关键帧，优先用于新动画系统
 }
