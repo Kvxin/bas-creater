@@ -4,6 +4,7 @@ import type { CSSProperties } from 'vue'
 import type { AnyDanmu } from '@/types/danmu'
 
 const MIN_SCALE = 0.1
+const MIN_MEASURED_SIZE = 2
 const HANDLE_SCREEN_SIZE = 10
 const HANDLE_HIT_SCREEN_SIZE = 20
 const ROTATION_HANDLE_SCREEN_OFFSET = 28
@@ -251,6 +252,48 @@ const estimateElementSize = (danmu: AnyDanmu): ElementRect => {
     width: Math.max(80, text.length * 14 + 40),
     height: 36,
   }
+}
+
+const measureElementRect = (element: HTMLElement | null): ElementRect | null => {
+  if (!element) return null
+
+  // Use layout size only. getBoundingClientRect() includes BAS transform,
+  // editor zoom, and the draft scale, which would be multiplied again below.
+  const width = Math.max(element.offsetWidth, element.clientWidth)
+  const height = Math.max(element.offsetHeight, element.clientHeight)
+
+  if (
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width < MIN_MEASURED_SIZE ||
+    height < MIN_MEASURED_SIZE
+  ) {
+    return null
+  }
+
+  return { width, height }
+}
+
+const resolveElementRect = (
+  item: TransformOverlayItem,
+  measurementTarget: HTMLElement | null,
+  currentDraft: DraftTransform | undefined
+): ElementRect => {
+  const measuredRect = measureElementRect(measurementTarget)
+  if (measuredRect) return measuredRect
+
+  if (
+    currentDraft &&
+    currentDraft.width >= MIN_MEASURED_SIZE &&
+    currentDraft.height >= MIN_MEASURED_SIZE
+  ) {
+    return {
+      width: currentDraft.width,
+      height: currentDraft.height,
+    }
+  }
+
+  return estimateElementSize(item.danmu)
 }
 
 const createDraft = (danmu: AnyDanmu, rect: ElementRect): DraftTransform => ({
@@ -587,12 +630,8 @@ const syncStageState = async () => {
   for (const item of props.items) {
     const actualElement = findDanmakuElement(item.clipId)
     const measurementTarget = (actualElement?.querySelector('.bas-danmaku-item-inner') as HTMLElement | null) ?? actualElement
-    const rect = measurementTarget
-      ? {
-          width: Math.max(1, measurementTarget.offsetWidth || measurementTarget.clientWidth || 1),
-          height: Math.max(1, measurementTarget.offsetHeight || measurementTarget.clientHeight || 1),
-        }
-      : estimateElementSize(item.danmu)
+    const currentDraft = drafts.value[item.clipId]
+    const rect = resolveElementRect(item, measurementTarget, currentDraft)
 
     if (actualElement) {
       nextActualElements.set(item.clipId, actualElement)
@@ -601,7 +640,6 @@ const syncStageState = async () => {
       nextActualInnerElements.set(item.clipId, measurementTarget)
     }
 
-    const currentDraft = drafts.value[item.clipId]
     const shouldPreserveDraft = !!activeGesture.value && selectedClipIdSet.value.has(item.clipId)
 
     nextDrafts[item.clipId] = shouldPreserveDraft && currentDraft

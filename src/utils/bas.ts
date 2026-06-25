@@ -82,6 +82,7 @@ class BasService {
       fontFamily: opts.fontFamily ?? "",
       timeSyncFunc: () => this.clock.nowMs(),
     });
+    this.bas.workerDisabled = true;
     this.bas.init?.();
   }
 
