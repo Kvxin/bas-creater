@@ -43,6 +43,108 @@ export const useTimelineStore = defineStore("timeline", () => {
   const autoKeyframe = ref(true);
 
   // ============================================================
+  // 剪贴板系统（Clipboard System）
+  // 用于轨道的复制/粘贴功能
+  // ============================================================
+
+  interface ClipboardData {
+    clipData: Omit<TimelineClip, "id" | "trackId">;
+    /** 原始轨道类型（复制时记录，粘贴时用于类型兼容性检查） */
+    trackType: TimelineTrackType | undefined;
+  }
+
+  /** 剪贴板中存储的片段数据 */
+  const clipboardClip = ref<ClipboardData | null>(null);
+
+  /** 是否有可粘贴的片段 */
+  const hasClipboardClip = () => clipboardClip.value !== null;
+
+  /**
+   * 将片段复制到剪贴板
+   * 深拷贝片段数据，剥离 id 和 trackId，同时记录轨道类型
+   */
+  const copyClipToClipboard = (clip: TimelineClip) => {
+    const location = findClipLocation(clip.id);
+    const trackType = location?.track.type;
+    const { id: _id, trackId: _trackId, ...rest } = JSON.parse(JSON.stringify(clip));
+    clipboardClip.value = { clipData: rest, trackType };
+    console.log(`[TimelineStore] 已复制片段到剪贴板: ${clip.name || clip.id}`);
+  };
+
+  /**
+   * 从剪贴板粘贴片段到指定轨道
+   * 自动为所有嵌套结构生成新的 ID
+   */
+  const pasteClipFromClipboard = (trackId: string, startTime: number): TimelineClip | null => {
+    if (!clipboardClip.value) {
+      console.warn("[TimelineStore] 剪贴板为空，无法粘贴");
+      return null;
+    }
+
+    const track = tracks.value.find((t) => t.id === trackId);
+    if (!track) {
+      console.warn(`[TimelineStore] 目标轨道不存在: ${trackId}`);
+      return null;
+    }
+
+    const { clipData: source, trackType: sourceTrackType } = clipboardClip.value;
+
+    // 检查轨道类型兼容性
+    if (track.clips.length > 0 && track.type && sourceTrackType && track.type !== sourceTrackType) {
+      console.warn(
+        `[TimelineStore] 无法将 ${sourceTrackType} 片段粘贴到 ${track.type} 轨道`
+      );
+      return null;
+    }
+
+    // 深拷贝剪贴板数据
+    const clipData: any = JSON.parse(JSON.stringify(source));
+
+    // 为动画片段生成新 ID
+    if (clipData.animations) {
+      clipData.animations = clipData.animations.map((anim: AnimationSegment) => ({
+        ...anim,
+        id: `anim_${Math.random().toString(36).slice(2, 9)}`,
+      }));
+    }
+
+    // 为关键帧生成新 ID
+    if (clipData.keyframes) {
+      clipData.keyframes = clipData.keyframes.map((kf: TimelineKeyframe) => ({
+        ...kf,
+        id: `kf_${Math.random().toString(36).slice(2, 9)}`,
+      }));
+    }
+
+    const newClip: TimelineClip = {
+      ...clipData,
+      id: `clip_${Math.random().toString(36).slice(2, 9)}`,
+      trackId,
+      startTime: Math.max(0, startTime),
+    };
+
+    // 确保轨道类型匹配
+    if (!track.type && sourceTrackType) {
+      applyTrackType(track, sourceTrackType);
+    }
+
+    track.clips.push(newClip);
+    track.clips.sort((a, b) => a.startTime - b.startTime);
+    recalculateDuration();
+    selectedClipId.value = newClip.id;
+    selectedAnimationId.value = null;
+    selectedKeyframeId.value = BASE_KEYFRAME_ID;
+
+    console.log(`[TimelineStore] 已粘贴片段到轨道 ${track.name}:`, newClip);
+    return newClip;
+  };
+
+  /** 清空剪贴板 */
+  const clearClipboard = () => {
+    clipboardClip.value = null;
+  };
+
+  // ============================================================
   // 预览系统（Preview System）
   // 用于非破坏性编辑：拖动音量线等操作时不写入历史，
   // 只在松手后统一提交。
@@ -398,6 +500,93 @@ export const useTimelineStore = defineStore("timeline", () => {
     return true;
   };
 
+  /**
+   * 复制片段到目标轨道（Alt+拖拽跨轨道复制）
+   * 深拷贝源片段数据，生成新 ID，插入到目标轨道，保留原始片段不变
+   */
+  const copyClipToTrack = (
+    sourceClipId: string,
+    targetTrackId: string,
+    updates: Partial<TimelineClip> = {}
+  ): TimelineClip | null => {
+    const location = findClipLocation(sourceClipId);
+    if (!location) {
+      console.warn(`[TimelineStore] Source clip not found for copy: ${sourceClipId}`);
+      return null;
+    }
+
+    const targetTrack = tracks.value.find((t) => t.id === targetTrackId);
+    if (!targetTrack) {
+      console.warn(`[TimelineStore] Target track not found for copy: ${targetTrackId}`);
+      return null;
+    }
+
+    const { track: sourceTrack, clip: sourceClip } = location;
+    const clipType = sourceTrack.type;
+
+    // 类型兼容性检查 (同轨道复制无需检查，跨轨道才需要)
+    if (sourceTrack.id !== targetTrackId) {
+      const targetType = targetTrack.type;
+      if (targetType && clipType && targetType !== clipType) {
+        console.warn(
+          `[TimelineStore] Cannot copy ${clipType} clip to ${targetType} track: ${targetTrackId}`
+        );
+        return null;
+      }
+      if (targetTrack.clips.length > 0 && !targetType) {
+        console.warn(`[TimelineStore] Cannot copy clip to ambiguous track: ${targetTrackId}`);
+        return null;
+      }
+    }
+
+    // 深拷贝源片段，剥离 id 和 trackId
+    const sourceData = JSON.parse(JSON.stringify(sourceClip));
+    const { id: _id, trackId: _trackId, ...rest } = sourceData;
+
+    // 为嵌套结构生成新 ID
+    if (rest.animations) {
+      rest.animations = rest.animations.map((anim: AnimationSegment) => ({
+        ...anim,
+        id: `anim_${Math.random().toString(36).slice(2, 9)}`,
+      }));
+    }
+    if (rest.keyframes) {
+      rest.keyframes = rest.keyframes.map((kf: TimelineKeyframe) => ({
+        ...kf,
+        id: `kf_${Math.random().toString(36).slice(2, 9)}`,
+      }));
+    }
+
+    const newClip: TimelineClip = {
+      ...rest,
+      id: `clip_${Math.random().toString(36).slice(2, 9)}`,
+      trackId: targetTrackId,
+      startTime: Math.max(0, updates.startTime ?? sourceClip.startTime),
+    };
+
+    if (updates.duration !== undefined) {
+      newClip.duration = Math.max(0, updates.duration);
+    }
+
+    // 确保目标轨道有类型
+    if (!targetTrack.type && clipType) {
+      applyTrackType(targetTrack, clipType);
+    }
+
+    targetTrack.clips.push(newClip);
+    targetTrack.clips.sort((a, b) => a.startTime - b.startTime);
+    recalculateDuration();
+
+    selectedClipId.value = newClip.id;
+    selectedAnimationId.value = null;
+    selectedKeyframeId.value = BASE_KEYFRAME_ID;
+
+    console.log(
+      `[TimelineStore] Copied clip "${sourceClip.name || sourceClip.id}" to track "${targetTrack.name}"`
+    );
+    return newClip;
+  };
+
   // 更新当前时间
   const setCurrentTime = (time: number) => {
     currentTime.value = Math.max(0, Math.min(time, duration.value));
@@ -657,6 +846,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     removeClipsByResourceId,
     updateClip,
     moveClipToTrack,
+    copyClipToTrack,
     setCurrentTime,
     setSelectedClip,
     setSelectedAnimation,
@@ -682,6 +872,12 @@ export const useTimelineStore = defineStore("timeline", () => {
     addClipKeyframe,
     upsertClipKeyframeAtTime,
     updateClipKeyframe,
-    removeClipKeyframe
+    removeClipKeyframe,
+    // 剪贴板
+    clipboardClip,
+    hasClipboardClip,
+    copyClipToClipboard,
+    pasteClipFromClipboard,
+    clearClipboard,
   };
 });

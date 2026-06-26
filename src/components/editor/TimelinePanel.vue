@@ -69,7 +69,12 @@ const handleContextMenu = (e: MouseEvent, type: 'track' | 'clip' | 'background',
     const menuId = isAudioClip(data) ? 'timeline-audio-clip' : 'timeline-clip';
     contextMenu.show(e, menuId, data);
   } else {
-    contextMenu.show(e, 'timeline-bg');
+    // 背景右键：检测光标所在轨道和对应时间点
+    const trackId = getTrackIdAtPoint(e);
+    const rect = timelineContentRef.value!.getBoundingClientRect();
+    const clickX = e.clientX - rect.left + scrollLeft.value;
+    const clickTime = Math.max(0, (clickX / pixelsPerSecond.value) * 1000);
+    contextMenu.show(e, 'timeline-bg', { trackId, time: clickTime });
   }
 };
 
@@ -455,6 +460,7 @@ const dragStartX = ref(0);
 const originalClipTrackId = ref<string | null>(null);
 const dragTargetTrackId = ref<string | null>(null);
 const draggedClipType = ref<TimelineTrackType | null>(null);
+const isAltDragCopy = ref(false);
 
 const draggedClip = computed(() => {
   if (!draggedClipId.value) return null;
@@ -542,11 +548,12 @@ const startDragClip = (e: MouseEvent, clip: any) => {
   originalClipTrackId.value = clip.trackId;
   dragTargetTrackId.value = clip.trackId;
   draggedClipType.value = getClipTimelineType(clip);
-  
+  isAltDragCopy.value = false;
+
   // 初始化临时状态
   tempState.startTime = clip.startTime;
   tempState.duration = clip.duration;
-  
+
   // 初始化 tooltip 位置
   tooltipPosition.x = e.clientX + 15;
   tooltipPosition.y = e.clientY + 15;
@@ -558,16 +565,21 @@ const startDragClip = (e: MouseEvent, clip: any) => {
 
 const onDragClip = (e: MouseEvent) => {
   if (!isDraggingClip.value || !draggedClipId.value) return;
-  
+
   const deltaX = e.clientX - dragStartX.value;
   const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
-  
+
   let newStartTime = initialClipStartTime.value + deltaMs;
   newStartTime = Math.max(0, newStartTime); // 限制最小时间为 0
-  
+
   // 只更新本地临时状态，不触发 Store 更新
   tempState.startTime = newStartTime;
   dragTargetTrackId.value = getTrackIdAtPoint(e) ?? dragTargetTrackId.value;
+
+  // 跟踪 Alt 键状态：Alt + 跨轨道拖拽 = 复制
+  isAltDragCopy.value = e.altKey;
+  const crossingTracks = dragTargetTrackId.value !== originalClipTrackId.value;
+  document.body.style.cursor = e.altKey && crossingTracks ? "copy" : "move";
 
   // 更新 tooltip 位置
   tooltipPosition.x = e.clientX + 15;
@@ -578,26 +590,41 @@ const stopDragClip = () => {
   if (isDraggingClip.value && draggedClipId.value) {
       const targetTrackId = dragTargetTrackId.value ?? originalClipTrackId.value;
       const targetTrack = timelineStore.tracks.find((track) => track.id === targetTrackId);
-      const moved =
-        Boolean(targetTrackId) &&
-        Boolean(targetTrack) &&
-        timelineStore.moveClipToTrack(
-          draggedClipId.value,
-          targetTrackId!,
-          { startTime: tempState.startTime },
-          {
-            clipType: draggedClipType.value ?? undefined,
-            targetTrackType: targetTrack ? getTrackType(targetTrack) : null,
-          }
-        );
 
-      if (!moved && originalClipTrackId.value) {
-        timelineStore.moveClipToTrack(
+      // Alt + 跨轨道拖拽 = 复制到目标轨道
+      if (
+        isAltDragCopy.value &&
+        targetTrackId &&
+        targetTrackId !== originalClipTrackId.value &&
+        targetTrack
+      ) {
+        timelineStore.copyClipToTrack(
           draggedClipId.value,
-          originalClipTrackId.value,
-          { startTime: tempState.startTime },
-          { clipType: draggedClipType.value ?? undefined }
+          targetTrackId,
+          { startTime: tempState.startTime }
         );
+      } else {
+        const moved =
+          Boolean(targetTrackId) &&
+          Boolean(targetTrack) &&
+          timelineStore.moveClipToTrack(
+            draggedClipId.value,
+            targetTrackId!,
+            { startTime: tempState.startTime },
+            {
+              clipType: draggedClipType.value ?? undefined,
+              targetTrackType: targetTrack ? getTrackType(targetTrack) : null,
+            }
+          );
+
+        if (!moved && originalClipTrackId.value) {
+          timelineStore.moveClipToTrack(
+            draggedClipId.value,
+            originalClipTrackId.value,
+            { startTime: tempState.startTime },
+            { clipType: draggedClipType.value ?? undefined }
+          );
+        }
       }
   }
 
@@ -606,6 +633,7 @@ const stopDragClip = () => {
   originalClipTrackId.value = null;
   dragTargetTrackId.value = null;
   draggedClipType.value = null;
+  isAltDragCopy.value = false;
   document.body.style.cursor = "";
   window.removeEventListener("mousemove", onDragClip);
   window.removeEventListener("mouseup", stopDragClip);
@@ -1285,12 +1313,17 @@ function handleVolumeSelect(clipId: string) {
                         v-if="draggedClip && dragTargetTrackId === track.id && draggedClip.trackId !== track.id"
                         class="absolute top-1 bottom-1 rounded-sm border text-[10px] flex items-center px-2 text-white overflow-hidden pointer-events-none opacity-80 shadow-md"
                         :class="{
-                            'ring-1 ring-primary/80': canDropDraggedClipOnTrack(track),
+                            'ring-1 ring-primary/80': canDropDraggedClipOnTrack(track) && !isAltDragCopy,
+                            'ring-1 ring-green-400/80 border-green-400': canDropDraggedClipOnTrack(track) && isAltDragCopy,
                             'ring-1 ring-destructive/80 saturate-50': isInvalidDragTargetTrack(track)
                         }"
                         :style="{ ...getDragGhostClipStyle(draggedClip), ...getClipThemeStyle(draggedClip) }"
                     >
                         <span class="truncate text-white/90 font-medium">{{ getClipName(draggedClip) }}</span>
+                        <span
+                            v-if="isAltDragCopy && canDropDraggedClipOnTrack(track)"
+                            class="ml-1 px-1 text-[9px] font-bold bg-green-400 text-green-900 rounded-sm shrink-0"
+                        >+</span>
                     </div>
                 </div>
 
@@ -1359,7 +1392,10 @@ function handleVolumeSelect(clipId: string) {
       class="fixed z-50 pointer-events-none bg-popover text-popover-foreground px-2 py-1.5 rounded-sm shadow-md border border-border text-xs font-mono whitespace-pre flex flex-col gap-0.5"
       :style="{ top: tooltipPosition.y + 'px', left: tooltipPosition.x + 'px' }"
     >
-      <div v-if="isDraggingClip">Start: {{ formatTime(tempState.startTime).str }}</div>
+      <div v-if="isDraggingClip">
+        <template v-if="isAltDragCopy && dragTargetTrackId !== originalClipTrackId">Copy to: {{ formatTime(tempState.startTime).str }}</template>
+        <template v-else>Start: {{ formatTime(tempState.startTime).str }}</template>
+      </div>
       <div v-else-if="isResizingClip">Start:    {{ formatTime(tempState.startTime).str }}
 Duration: {{ formatTime(tempState.duration).str }}
 End:      {{ formatTime(tempState.startTime + tempState.duration).str }}</div>

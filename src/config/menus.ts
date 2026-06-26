@@ -103,7 +103,7 @@ export const MENU_REGISTRY: Record<string, MenuConfig> = {
     label: "时间轴",
     items: [
       { id: "add", label: "添加轨道", action: "track.add" },
-      { id: "paste", label: "粘贴", disabled: true, action: "track.paste" },
+      { id: "paste", label: "粘贴", action: "track.paste" },
     ],
   },
   // 弹幕资源区域的弹幕列表的右键菜单区域
@@ -146,7 +146,24 @@ export const GLOBAL_COMMANDS: Record<string, (data: any) => void> = {
     store.removeClip(clip.id);
   },
   "clip.copy": (clip) => {
-    console.log("[命令] 复制片段:", clip);
+    const store = useTimelineStore();
+    store.copyClipToClipboard(clip);
+    console.log("[命令] 复制片段:", clip?.name || clip?.id);
+  },
+
+  "track.paste": (data) => {
+    const store = useTimelineStore();
+    const trackId = data?.trackId;
+    const time = data?.time ?? store.currentTime;
+    if (!trackId) {
+      console.warn("[命令] 粘贴失败：未指定目标轨道");
+      return;
+    }
+    if (!store.hasClipboardClip()) {
+      console.warn("[命令] 粘贴失败：剪贴板为空");
+      return;
+    }
+    store.pasteClipFromClipboard(trackId, time);
   },
 
   // 资源命令
