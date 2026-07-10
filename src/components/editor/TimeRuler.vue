@@ -209,7 +209,7 @@ onUnmounted(() => {
 <template>
   <div
     ref="containerRef"
-    class="time-ruler w-full h-[22px] relative cursor-pointer"
+    class="time-ruler w-full h-full relative cursor-pointer"
     @click="handleClick"
   >
     <canvas

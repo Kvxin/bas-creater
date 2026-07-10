@@ -1138,16 +1138,16 @@ function handleVolumeSelect(clipId: string) {
         />
         <!-- 标尺上的游标指示器 -->
         <div 
-            class="absolute top-0 bottom-0 w-px bg-primary z-30 pointer-events-none"
+            class="timeline-playhead timeline-playhead--ruler absolute top-0 bottom-0 w-px z-30 pointer-events-none"
             :style="rulerPlayheadStyle"
         >
-            <div class="absolute top-1 left-1/2 size-3 -translate-x-1/2 rounded-full border-2 border-primary/50 bg-primary shadow-xs"></div>
+            <div class="timeline-playhead__head"></div>
         </div>
       </div>
     </div>
 
     <!-- 主体区域 (Body Row) -->
-    <div class="flex-1 flex overflow-hidden">
+    <div class="flex-1 min-h-0 flex overflow-hidden">
       <!-- 左侧：轨道列表 (无滚动条，由右侧控制 scrollTop) -->
       <div
         class="w-56 border-r border-border bg-background flex flex-col shrink-0 overflow-hidden"
@@ -1222,13 +1222,13 @@ function handleVolumeSelect(clipId: string) {
 
       <!-- 右侧：时间轴内容 (主滚动容器) -->
       <div
-        class="flex-1 flex flex-col overflow-auto scrollbar-thin relative bg-background"
+        class="flex-1 min-h-0 min-w-0 flex flex-col overflow-auto scrollbar-thin relative bg-background"
         ref="timelineContentRef"
         @scroll="handleScroll"
       >
         <!-- Tracks Container -->
         <div
-          class="relative"
+          class="timeline-track-surface relative shrink-0"
           :style="{ width: totalWidth + 'px' }"
           @mousedown.self="handleTimelineClick"
           @contextmenu.prevent="handleContextMenu($event, 'background')"
@@ -1375,12 +1375,12 @@ function handleVolumeSelect(clipId: string) {
 
             <!-- Playhead Line (内容区域) -->
             <div 
-                class="absolute top-0 bottom-0 w-px bg-primary z-30 group cursor-ew-resize"
+                class="timeline-playhead timeline-playhead--content absolute top-0 bottom-0 w-px z-30 cursor-ew-resize"
                 :style="playheadStyle"
                 @mousedown.stop="startDragPlayhead"
             >
-                 <!-- 拖拽把手 (只在内容区显示一个透明的点击区域即可，或者显示线) -->
-                 <div class="absolute top-0 -left-2 w-4 h-full bg-transparent"></div> <!-- Hit area -->
+                 <!-- 保持较宽的透明命中区域，视觉线条仍为 1px -->
+                 <div class="timeline-playhead__hit-area"></div>
             </div>
         </div>
       </div>
@@ -1402,3 +1402,110 @@ End:      {{ formatTime(tempState.startTime + tempState.duration).str }}</div>
     </div>
   </div>
 </template>
+
+<style scoped>
+[data-ui="timeline-panel"] {
+  --timeline-playhead-core: color-mix(
+    in oklab,
+    var(--primary) 94%,
+    var(--primary-foreground) 6%
+  );
+  --timeline-playhead-edge: color-mix(
+    in oklab,
+    var(--primary) 76%,
+    var(--primary-foreground) 24%
+  );
+  --timeline-playhead-glow: color-mix(in oklab, var(--primary) 22%, transparent);
+}
+
+.timeline-track-surface {
+  min-height: 100%;
+}
+
+.timeline-playhead::before {
+  position: absolute;
+  inset: 0;
+  content: "";
+  background: linear-gradient(
+    180deg,
+    var(--timeline-playhead-core),
+    color-mix(in oklab, var(--timeline-playhead-core) 86%, transparent)
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--primary) 12%, transparent),
+    0 0 8px var(--timeline-playhead-glow);
+  pointer-events: none;
+  transition: box-shadow 140ms ease;
+}
+
+.timeline-playhead--ruler::before {
+  top: 14px;
+}
+
+.timeline-playhead--content:hover::before {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--primary) 18%, transparent),
+    0 0 10px color-mix(in oklab, var(--primary) 30%, transparent);
+}
+
+.timeline-playhead__head {
+  position: absolute;
+  top: 2px;
+  left: 50%;
+  width: 14px;
+  height: 11px;
+  transform: translateX(-50%);
+  border: 1px solid var(--timeline-playhead-edge);
+  border-radius: 4px 4px 3px 3px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--primary) 82%, var(--primary-foreground) 18%),
+    var(--primary)
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--background) 76%, transparent),
+    0 3px 10px color-mix(in oklab, var(--primary) 30%, transparent),
+    inset 0 1px 0 color-mix(in oklab, var(--primary-foreground) 30%, transparent);
+}
+
+.timeline-playhead__head::before {
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  left: 3px;
+  height: 1px;
+  border-radius: 999px;
+  content: "";
+  background: color-mix(in oklab, var(--primary-foreground) 55%, transparent);
+}
+
+.timeline-playhead__head::after {
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  transform: translateX(-50%) rotate(45deg);
+  border-right: 1px solid var(--timeline-playhead-edge);
+  border-bottom: 1px solid var(--timeline-playhead-edge);
+  border-radius: 0 0 2px;
+  content: "";
+  background: var(--primary);
+}
+
+.timeline-playhead__hit-area {
+  position: absolute;
+  inset-block: 0;
+  left: 50%;
+  width: 16px;
+  transform: translateX(-50%);
+  background: transparent;
+  cursor: ew-resize;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timeline-playhead::before {
+    transition: none;
+  }
+}
+</style>
