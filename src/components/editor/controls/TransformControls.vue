@@ -71,7 +71,7 @@ interface RotateGesture extends CapturedGesture {
   type: 'rotate'
   clipId: string
   startDraft: DraftTransform
-  center: Point
+  pivot: Point
   startAngle: number
 }
 
@@ -166,7 +166,7 @@ const percentToPixels = (val: number | string | undefined, dimension: 'x' | 'y')
     return Number.isFinite(numericValue) ? numericValue : 0
   }
 
-  return Number.isFinite(val) ? (val / 100) * size : 0
+  return Number.isFinite(val) ? val : 0
 }
 
 const pixelsToPercent = (px: number, dimension: 'x' | 'y'): number => {
@@ -185,10 +185,10 @@ const resolveFontSizePx = (danmu: AnyDanmu): number => {
       ? danmu.fontSize
       : undefined
 
-  const fallbackPx = (5 / 100) * props.containerHeight
+  const fallbackPx = (5 / 100) * props.containerWidth
 
   if (typeof raw === 'number') {
-    return (raw / 100) * props.containerHeight
+    return raw
   }
 
   if (typeof raw === 'string') {
@@ -196,7 +196,7 @@ const resolveFontSizePx = (danmu: AnyDanmu): number => {
 
     if (trimmed.endsWith('%')) {
       const parsedPercent = parseFloat(trimmed)
-      return Number.isFinite(parsedPercent) ? (parsedPercent / 100) * props.containerHeight : fallbackPx
+      return Number.isFinite(parsedPercent) ? (parsedPercent / 100) * props.containerWidth : fallbackPx
     }
 
     if (trimmed.endsWith('px')) {
@@ -205,7 +205,7 @@ const resolveFontSizePx = (danmu: AnyDanmu): number => {
     }
 
     const parsed = parseFloat(trimmed)
-    return Number.isFinite(parsed) ? (parsed / 100) * props.containerHeight : fallbackPx
+    return Number.isFinite(parsed) ? parsed : fallbackPx
   }
 
   return fallbackPx
@@ -744,7 +744,9 @@ function applyGestureDraft(clipId: string, nextDraft: DraftTransform) {
   applyDraftToActualElement(clipId)
 }
 
-function commitDrafts(clipIds: string[]) {
+type DraftCommitField = 'x' | 'y' | 'scale' | 'rotateZ' | 'anchorX' | 'anchorY'
+
+function commitDrafts(clipIds: string[], fields: DraftCommitField[]) {
   const updates = new Map<string, Partial<AnyDanmu>>()
 
   for (const clipId of clipIds) {
@@ -752,14 +754,22 @@ function commitDrafts(clipIds: string[]) {
     const draft = getDraft(clipId)
     if (!item || !draft) continue
 
-    updates.set(item.danmu.id, {
-      x: round(pixelsToPercent(draft.x, 'x')),
-      y: round(pixelsToPercent(draft.y, 'y')),
+    const values: Record<DraftCommitField, number | string> = {
+      x: typeof item.danmu.x === 'string' && item.danmu.x.trim().endsWith('%')
+        ? `${round(pixelsToPercent(draft.x, 'x'))}%`
+        : round(draft.x),
+      y: typeof item.danmu.y === 'string' && item.danmu.y.trim().endsWith('%')
+        ? `${round(pixelsToPercent(draft.y, 'y'))}%`
+        : round(draft.y),
       scale: round(clampScale(draft.scale)),
       rotateZ: round(draft.rotateZ),
       anchorX: round(clamp(draft.anchorX, 0, 1)),
       anchorY: round(clamp(draft.anchorY, 0, 1)),
-    })
+    }
+    updates.set(
+      item.danmu.id,
+      Object.fromEntries(fields.map((field) => [field, values[field]])) as Partial<AnyDanmu>
+    )
   }
 
   if (!updates.size) return
@@ -850,14 +860,16 @@ function onRotatePointerDown(event: PointerEvent) {
   event.preventDefault()
   event.stopPropagation()
 
-  const center = getDraftCenter(draft)
+  // `x`/`y` are the canvas coordinates of the element's configured anchor.
+  // Rotating must preserve that point, rather than the element's visual center.
+  const pivot = { x: draft.x, y: draft.y }
   activeGesture.value = {
     type: 'rotate',
     pointerId: event.pointerId,
     clipId,
-    center,
+    pivot,
     startDraft: cloneDraft(draft),
-    startAngle: Math.atan2(pointer.y - center.y, pointer.x - center.x) * (180 / Math.PI),
+    startAngle: Math.atan2(pointer.y - pivot.y, pointer.x - pivot.x) * (180 / Math.PI),
   }
   capturePointer(event.pointerId)
 }
@@ -938,24 +950,15 @@ function updateScaleGesture(gesture: ScaleGesture, point: Point) {
 }
 
 function updateRotateGesture(gesture: RotateGesture, point: Point, event: PointerEvent) {
-  const currentAngle = Math.atan2(point.y - gesture.center.y, point.x - gesture.center.x) * (180 / Math.PI)
+  const currentAngle = Math.atan2(point.y - gesture.pivot.y, point.x - gesture.pivot.x) * (180 / Math.PI)
   let deltaAngle = currentAngle - gesture.startAngle
   if (deltaAngle > 180) deltaAngle -= 360
   if (deltaAngle < -180) deltaAngle += 360
 
   const nextRotateZ = snapRotation(gesture.startDraft.rotateZ + deltaAngle, !event.shiftKey)
-  const nextAnchorPoint = getAnchorPointForCenter(
-    gesture.center,
-    gesture.startDraft,
-    gesture.startDraft.anchorX,
-    gesture.startDraft.anchorY,
-    gesture.startDraft.scale,
-    nextRotateZ
-  )
 
   applyGestureDraft(gesture.clipId, {
     ...gesture.startDraft,
-    ...nextAnchorPoint,
     rotateZ: nextRotateZ,
   })
 }
@@ -1000,7 +1003,7 @@ function finishGesture(event?: PointerEvent) {
 
   if (gesture.type === 'drag') {
     if (gesture.moved) {
-      commitDrafts(gesture.snapshots.map((snapshot) => snapshot.clipId))
+      commitDrafts(gesture.snapshots.map((snapshot) => snapshot.clipId), ['x', 'y'])
     }
     return
   }
@@ -1010,7 +1013,13 @@ function finishGesture(event?: PointerEvent) {
     return
   }
 
-  commitDrafts([gesture.clipId])
+  if (gesture.type === 'scale') {
+    commitDrafts([gesture.clipId], ['x', 'y', 'scale'])
+  } else if (gesture.type === 'rotate') {
+    commitDrafts([gesture.clipId], ['rotateZ'])
+  } else {
+    commitDrafts([gesture.clipId], ['x', 'y', 'anchorX', 'anchorY'])
+  }
 }
 
 function onTargetPointerDown(event: PointerEvent, clipId: string) {

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import type { AnyDanmu } from "@/types/danmu";
 import type { TimelineKeyframeProperties } from "@/types/timeline";
 import { VOLUME_DB_MIN, VOLUME_DB_MAX, VOLUME_STEP } from "@/utils/audio/constants";
@@ -18,6 +19,7 @@ import {
   createKeyframeSnapshot,
   getBaseKeyframeProperties,
   normalizeKeyframes,
+  pickKeyframePropertiesForResource,
   resolveKeyframeProperties,
 } from "@/utils/keyframes";
 
@@ -90,15 +92,30 @@ const propertyTabs = [
   { id: "animation", label: "动画", title: "动画与关键帧", icon: Sparkles },
 ] as const;
 
-const clipKeyframes = computed(() =>
-  selectedClip.value ? normalizeKeyframes(selectedClip.value.keyframes, selectedClip.value.duration) : []
-);
+const clipKeyframes = computed(() => {
+  const clip = selectedClip.value;
+  if (!clip) return [];
+
+  const normalized = normalizeKeyframes(clip.keyframes, clip.duration);
+  const resource = selected.value;
+  if (!resource || clip.resourceId !== resource.id) return normalized;
+
+  return normalized.map((keyframe) => ({
+    ...keyframe,
+    properties: pickKeyframePropertiesForResource(resource, keyframe.properties),
+  }));
+});
 
 const activeKeyframeId = computed(() => timelineStore.selectedKeyframeId ?? BASE_KEYFRAME_ID);
 
 const activeKeyframeProperties = computed<TimelineKeyframeProperties>(() => {
   if (!selected.value || !selectedClip.value) return {};
   return resolveKeyframeProperties(selected.value, selectedClip.value, activeKeyframeId.value);
+});
+
+const activeKeyframeStoredProperties = computed<TimelineKeyframeProperties>(() => {
+  if (!selectedClip.value || activeKeyframeId.value === BASE_KEYFRAME_ID) return {};
+  return clipKeyframes.value.find((keyframe) => keyframe.id === activeKeyframeId.value)?.properties ?? {};
 });
 
 const currentClipLocalTime = computed(() => {
@@ -193,14 +210,25 @@ const updateKeyframeProperty = (
   const parsedValue = asNumber ? Number(value) : value;
   if (asNumber && !Number.isFinite(parsedValue as number)) return;
 
+  if (tryAutoKeyframeProperty(key, parsedValue)) return;
+
+  if (
+    timelineStore.autoKeyframe &&
+    selected.value &&
+    selectedClip.value?.resourceId === selected.value.id
+  ) {
+    updateResourceField(key, parsedValue);
+    return;
+  }
+
   if (activeKeyframeId.value === BASE_KEYFRAME_ID) {
-    updateField(key, parsedValue, false);
+    updateResourceField(key, parsedValue);
     return;
   }
 
   timelineStore.updateClipKeyframe(selectedClip.value.id, activeKeyframeId.value, {
     properties: {
-      ...activeKeyframeProperties.value,
+      ...activeKeyframeStoredProperties.value,
       [key]: parsedValue,
     },
   });
@@ -208,6 +236,16 @@ const updateKeyframeProperty = (
 
 const updateKeyframeColor = (key: keyof TimelineKeyframeProperties, htmlHex: string) => {
   updateKeyframeProperty(key, "0x" + htmlHex.replace("#", ""), false);
+};
+
+const activeKeyframeText = computed(() =>
+  selected.value?.type === "button"
+    ? activeKeyframeProperties.value.text
+    : activeKeyframeProperties.value.content
+);
+
+const updateKeyframeText = (value: string | number) => {
+  updateKeyframeProperty(selected.value?.type === "button" ? "text" : "content", value, false);
 };
 
 watch(selectedClip, (clip) => {
@@ -224,16 +262,118 @@ const typeNames: Record<string, string> = {
   path: "路径弹幕",
 };
 
+const updateResourceField = (key: string, value: unknown) => {
+  danmuStore.updateSelected({ [key]: value } as Partial<AnyDanmu>);
+};
+
+const tryAutoKeyframeProperty = (key: string, value: unknown) => {
+  const resource = selected.value;
+  const clip = selectedClip.value;
+  if (
+    !timelineStore.autoKeyframe ||
+    !resource ||
+    !clip ||
+    clip.resourceId !== resource.id
+  ) {
+    return false;
+  }
+
+  const properties = pickKeyframePropertiesForResource(
+    resource,
+    { [key]: value } as Partial<AnyDanmu>
+  );
+  if (Object.keys(properties).length === 0) return false;
+
+  const rawLocalTimeMs = timelineStore.currentTime - clip.startTime;
+  if (rawLocalTimeMs <= 0 || rawLocalTimeMs > clip.duration) return false;
+  const localTimeMs = clampKeyframeTime(rawLocalTimeMs, clip.duration);
+
+  timelineStore.upsertClipKeyframeAtTime(clip.id, localTimeMs, properties);
+  return true;
+};
+
 // 更新字段的辅助函数
 const updateField = (key: string, value: any, asNumber: boolean = false) => {
+  let nextValue = value;
   if (asNumber) {
     const parsed = parseFloat(value);
-    if (!isNaN(parsed)) {
-      danmuStore.updateSelected({ [key]: parsed } as Partial<AnyDanmu>);
-    }
-  } else {
-    danmuStore.updateSelected({ [key]: value } as Partial<AnyDanmu>);
+    if (isNaN(parsed)) return;
+    nextValue = parsed;
   }
+
+  if (tryAutoKeyframeProperty(key, nextValue)) return;
+  updateResourceField(key, nextValue);
+};
+
+const updateDuration = (value: string | number) => {
+  const durationMs = Number(value);
+  if (!Number.isFinite(durationMs)) return;
+
+  const nextDuration = Math.max(0, durationMs);
+  danmuStore.updateSelected({ durationMs: nextDuration } as Partial<AnyDanmu>);
+
+  // The resource duration is the default, while an on-canvas danmu is rendered
+  // according to its timeline clip. Keep the active clip in sync when it uses
+  // this selected resource so the change takes effect immediately.
+  if (selected.value && selectedClip.value?.resourceId === selected.value.id) {
+    timelineStore.updateClip(selectedClip.value.id, { duration: nextDuration });
+  }
+};
+
+type PercentageField = "x" | "y" | "fontSize" | "width" | "height";
+type KeyframePercentageField = Extract<PercentageField, "x" | "y" | "fontSize">;
+type AnchorAxis = "x" | "y";
+
+const anchorPercentageMode = ref<Record<AnchorAxis, boolean>>({ x: true, y: true });
+
+const isPercentageValue = (field: PercentageField) => {
+  const value = (selected.value as Record<string, unknown> | null)?.[field];
+  return typeof value === "string" && value.trim().endsWith("%");
+};
+
+const setPercentageMode = (field: PercentageField, enabled: boolean) => {
+  const value = (selected.value as Record<string, unknown> | null)?.[field];
+  const numericValue = typeof value === "number" ? value : Number.parseFloat(String(value));
+  if (!Number.isFinite(numericValue)) return;
+
+  updateField(field, enabled ? `${numericValue}%` : numericValue);
+};
+
+const getAnchorValue = (axis: AnchorAxis) => {
+  const key = axis === "x" ? "anchorX" : "anchorY";
+  const value = selected.value?.[key] ?? 0;
+  return anchorPercentageMode.value[axis] ? value * 100 : value;
+};
+
+const updateAnchorValue = (axis: AnchorAxis, value: string | number) => {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return;
+
+  const normalizedValue = anchorPercentageMode.value[axis]
+    ? numericValue / 100
+    : numericValue;
+  const key = axis === "x" ? "anchorX" : "anchorY";
+  danmuStore.updateSelected({
+    [key]: Math.min(1, Math.max(0, normalizedValue)),
+  } as Partial<AnyDanmu>);
+};
+
+const isKeyframePercentageValue = (field: KeyframePercentageField) => {
+  const value = activeKeyframeProperties.value[field];
+  return typeof value === "string" && value.trim().endsWith("%");
+};
+
+const updateKeyframePercentageValue = (field: KeyframePercentageField, value: string | number) => {
+  const numericValue = Number.parseFloat(String(value));
+  if (!Number.isFinite(numericValue)) return;
+  updateKeyframeProperty(field, isKeyframePercentageValue(field) ? `${numericValue}%` : numericValue, false);
+};
+
+const setKeyframePercentageMode = (field: KeyframePercentageField, enabled: boolean) => {
+  const value = activeKeyframeProperties.value[field];
+  const numericValue = typeof value === "number" ? value : Number.parseFloat(String(value));
+  if (!Number.isFinite(numericValue)) return;
+  updateKeyframeProperty(field, enabled ? `${numericValue}%` : numericValue, false);
 };
 
 // --- 颜色辅助函数 ---
@@ -256,11 +396,7 @@ const toHtmlColor = (val: string | number | undefined): string => {
 
 const updateColor = (key: string, htmlHex: string, asNumber: boolean) => {
   const cleanHex = htmlHex.replace("#", "");
-  if (asNumber) {
-    danmuStore.updateSelected({ [key]: parseInt(cleanHex, 16) } as Partial<AnyDanmu>);
-  } else {
-    danmuStore.updateSelected({ [key]: "0x" + cleanHex } as Partial<AnyDanmu>);
-  }
+  updateField(key, asNumber ? parseInt(cleanHex, 16) : "0x" + cleanHex);
 };
 
 const updateButtonAV = (val: string | number) => {
@@ -404,11 +540,17 @@ const getButtonAV = (item: any): number | undefined => {
             <div class="grid grid-cols-2 gap-x-4 gap-y-3">
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">X 坐标</span>
-                <Input :model-value="selected.x" @update:model-value="(v) => updateField('x', v)" class="h-7 text-xs font-mono bg-accent" />
+                <div class="flex gap-2">
+                  <Input :model-value="selected.x" @update:model-value="(v) => updateField('x', v)" class="h-7 min-w-0 flex-1 text-xs font-mono bg-accent" />
+                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比定位"><Switch :model-value="isPercentageValue('x')" @update:model-value="setPercentageMode('x', $event)" />%</label>
+                </div>
             </div>
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">Y 坐标</span>
-                <Input :model-value="selected.y" @update:model-value="(v) => updateField('y', v)" class="h-7 text-xs font-mono bg-accent" />
+                <div class="flex gap-2">
+                  <Input :model-value="selected.y" @update:model-value="(v) => updateField('y', v)" class="h-7 min-w-0 flex-1 text-xs font-mono bg-accent" />
+                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布高度的百分比定位"><Switch :model-value="isPercentageValue('y')" @update:model-value="setPercentageMode('y', $event)" />%</label>
+                </div>
             </div>
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">缩放 (Scale)</span>
@@ -422,12 +564,18 @@ const getButtonAV = (item: any): number | undefined => {
 
             <div class="grid grid-cols-2 gap-4 pt-1">
             <div class="space-y-1">
-                <span class="text-[10px] text-muted-foreground uppercase">锚点 X (0-1)</span>
-                <Input type="number" step="0.1" :model-value="selected.anchorX" @update:model-value="(v) => updateField('anchorX', v, true)" class="h-7 text-xs font-mono" />
+                <span class="text-[10px] text-muted-foreground uppercase">锚点 X</span>
+                <div class="flex gap-2">
+                  <Input type="number" :step="anchorPercentageMode.x ? 1 : 0.01" :model-value="getAnchorValue('x')" @update:model-value="(v) => updateAnchorValue('x', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
+                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="以百分比编辑锚点；BAS 会保存为 0–1 的归一化值"><Switch v-model="anchorPercentageMode.x" />%</label>
+                </div>
             </div>
             <div class="space-y-1">
-                <span class="text-[10px] text-muted-foreground uppercase">锚点 Y (0-1)</span>
-                <Input type="number" step="0.1" :model-value="selected.anchorY" @update:model-value="(v) => updateField('anchorY', v, true)" class="h-7 text-xs font-mono" />
+                <span class="text-[10px] text-muted-foreground uppercase">锚点 Y</span>
+                <div class="flex gap-2">
+                  <Input type="number" :step="anchorPercentageMode.y ? 1 : 0.01" :model-value="getAnchorValue('y')" @update:model-value="(v) => updateAnchorValue('y', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
+                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="以百分比编辑锚点；BAS 会保存为 0–1 的归一化值"><Switch v-model="anchorPercentageMode.y" />%</label>
+                </div>
             </div>
             </div>
 
@@ -478,7 +626,7 @@ const getButtonAV = (item: any): number | undefined => {
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">持续时间 (ms)</span>
-                    <Input type="number" step="100" :model-value="selected.durationMs" @update:model-value="(v) => updateField('durationMs', v, true)" class="h-7 text-xs font-mono" />
+                    <Input type="number" step="100" :model-value="selected.durationMs" @update:model-value="updateDuration" class="h-7 text-xs font-mono" />
                 </div>
             </div>
 
@@ -487,7 +635,10 @@ const getButtonAV = (item: any): number | undefined => {
             <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">字号</span>
-                    <Input :model-value="(selected as any).fontSize" @update:model-value="(v) => updateField('fontSize', v)" class="h-7 text-xs font-mono" />
+                    <div class="flex gap-2">
+                      <Input :model-value="(selected as any).fontSize" @update:model-value="(v) => updateField('fontSize', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
+                      <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置字号"><Switch :model-value="isPercentageValue('fontSize')" @update:model-value="setPercentageMode('fontSize', $event)" />%</label>
+                    </div>
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">字体</span>
@@ -559,7 +710,10 @@ const getButtonAV = (item: any): number | undefined => {
             <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">字号</span>
-                    <Input type="number" :model-value="(selected as any).fontSize" @update:model-value="(v) => updateField('fontSize', v, true)" class="h-7 text-xs font-mono" />
+                    <div class="flex gap-2">
+                      <Input :model-value="(selected as any).fontSize" @update:model-value="(v) => updateField('fontSize', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
+                      <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置字号"><Switch :model-value="isPercentageValue('fontSize')" @update:model-value="setPercentageMode('fontSize', $event)" />%</label>
+                    </div>
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">文字颜色</span>
@@ -593,11 +747,17 @@ const getButtonAV = (item: any): number | undefined => {
             <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">宽度 (Width)</span>
-                    <Input :model-value="(selected as any).width" @update:model-value="(v) => updateField('width', v)" class="h-7 text-xs font-mono" />
+                    <div class="flex gap-2">
+                      <Input :model-value="(selected as any).width" @update:model-value="(v) => updateField('width', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
+                      <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置；需要 ViewBox"><Switch :model-value="isPercentageValue('width')" @update:model-value="setPercentageMode('width', $event)" />%</label>
+                    </div>
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">高度 (Height)</span>
-                    <Input :model-value="(selected as any).height" @update:model-value="(v) => updateField('height', v)" class="h-7 text-xs font-mono" />
+                    <div class="flex gap-2">
+                      <Input :model-value="(selected as any).height" @update:model-value="(v) => updateField('height', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
+                      <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布高度的百分比设置；需要 ViewBox"><Switch :model-value="isPercentageValue('height')" @update:model-value="setPercentageMode('height', $event)" />%</label>
+                    </div>
                 </div>
             </div>
             <div class="grid grid-cols-2 gap-4">
@@ -647,11 +807,9 @@ const getButtonAV = (item: any): number | undefined => {
               动画与关键帧
             </Label>
             <label class="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              <input
-                type="checkbox"
-                class="size-3 accent-primary"
-                :checked="timelineStore.autoKeyframe"
-                @change="timelineStore.setAutoKeyframe(($event.target as HTMLInputElement).checked)"
+              <Switch
+                :model-value="timelineStore.autoKeyframe"
+                @update:model-value="timelineStore.setAutoKeyframe"
               />
               自动
             </label>
@@ -726,7 +884,7 @@ const getButtonAV = (item: any): number | undefined => {
                 </button>
               </div>
 
-              <div class="grid grid-cols-2 gap-3">
+              <div class="grid gap-3" :class="selected.type === 'text' ? 'grid-cols-2' : 'grid-cols-1'">
                 <div class="space-y-1">
                   <Label class="text-[10px] text-muted-foreground uppercase">时间 (ms)</Label>
                   <Input
@@ -738,7 +896,7 @@ const getButtonAV = (item: any): number | undefined => {
                     class="h-8 text-xs font-mono"
                   />
                 </div>
-                <div class="space-y-1">
+                <div v-if="selected.type === 'text'" class="space-y-1">
                   <Label class="text-[10px] text-muted-foreground uppercase">不透明度</Label>
                   <Input
                     type="number"
@@ -752,26 +910,35 @@ const getButtonAV = (item: any): number | undefined => {
                 </div>
               </div>
 
-              <div class="grid grid-cols-2 gap-3">
-                <div class="space-y-1">
-                  <Label class="text-[10px] text-muted-foreground uppercase">X 坐标</Label>
-                  <Input
-                    :model-value="activeKeyframeProperties.x"
-                    @update:model-value="(v) => updateKeyframeProperty('x', v)"
-                    class="h-8 text-xs font-mono"
-                  />
-                </div>
-                <div class="space-y-1">
-                  <Label class="text-[10px] text-muted-foreground uppercase">Y 坐标</Label>
-                  <Input
-                    :model-value="activeKeyframeProperties.y"
-                    @update:model-value="(v) => updateKeyframeProperty('y', v)"
-                    class="h-8 text-xs font-mono"
-                  />
-                </div>
+              <div v-if="selected.type === 'text' || selected.type === 'button'" class="space-y-1">
+                <Label class="text-[10px] text-muted-foreground uppercase">
+                  {{ selected.type === 'text' ? '文本内容' : '按钮文字' }}
+                </Label>
+                <Input
+                  :model-value="activeKeyframeText"
+                  @update:model-value="updateKeyframeText"
+                  class="h-8 text-xs"
+                />
               </div>
 
               <div class="grid grid-cols-2 gap-3">
+                <div class="space-y-1">
+                  <Label class="text-[10px] text-muted-foreground uppercase">X 坐标</Label>
+                  <div class="flex gap-2">
+                    <Input :model-value="activeKeyframeProperties.x" @update:model-value="(v) => updateKeyframePercentageValue('x', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" />
+                    <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置关键帧"><Switch :model-value="isKeyframePercentageValue('x')" @update:model-value="setKeyframePercentageMode('x', $event)" />%</label>
+                  </div>
+                </div>
+                <div class="space-y-1">
+                  <Label class="text-[10px] text-muted-foreground uppercase">Y 坐标</Label>
+                  <div class="flex gap-2">
+                    <Input :model-value="activeKeyframeProperties.y" @update:model-value="(v) => updateKeyframePercentageValue('y', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" />
+                    <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布高度的百分比设置关键帧"><Switch :model-value="isKeyframePercentageValue('y')" @update:model-value="setKeyframePercentageMode('y', $event)" />%</label>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="selected.type === 'text'" class="grid grid-cols-1 gap-3">
                 <div class="space-y-1">
                   <Label class="text-[10px] text-muted-foreground uppercase">缩放</Label>
                   <Input
@@ -782,19 +949,17 @@ const getButtonAV = (item: any): number | undefined => {
                     class="h-8 text-xs font-mono"
                   />
                 </div>
-                <div class="space-y-1">
-                  <Label class="text-[10px] text-muted-foreground uppercase">层级</Label>
-                  <Input
-                    type="number"
-                    step="1"
-                    :model-value="activeKeyframeProperties.zIndex"
-                    @update:model-value="(v) => updateKeyframeProperty('zIndex', v)"
-                    class="h-8 text-xs font-mono"
-                  />
+              </div>
+
+              <div v-if="selected.type === 'text' || selected.type === 'button'" class="space-y-1">
+                <Label class="text-[10px] text-muted-foreground uppercase">字号</Label>
+                <div class="flex gap-2">
+                  <Input :model-value="activeKeyframeProperties.fontSize" @update:model-value="(v) => updateKeyframePercentageValue('fontSize', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" />
+                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置关键帧字号"><Switch :model-value="isKeyframePercentageValue('fontSize')" @update:model-value="setKeyframePercentageMode('fontSize', $event)" />%</label>
                 </div>
               </div>
 
-              <div class="grid grid-cols-3 gap-2">
+              <div v-if="selected.type === 'text'" class="grid grid-cols-3 gap-2">
                 <div class="space-y-1">
                   <span class="text-[10px] text-muted-foreground uppercase">旋转 X</span>
                   <Input type="number" :model-value="activeKeyframeProperties.rotateX" @update:model-value="(v) => updateKeyframeProperty('rotateX', v)" class="h-8 text-xs font-mono" />

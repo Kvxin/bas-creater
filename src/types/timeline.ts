@@ -5,18 +5,15 @@ export type KeyframeInterpolation = 'linear' | 'step';
 export interface TimelineKeyframeProperties {
   x?: number | string;
   y?: number | string;
-  zIndex?: number;
+  content?: string;
+  text?: string;
   scale?: number;
   rotateX?: number;
   rotateY?: number;
   rotateZ?: number;
   opacity?: number;
-  anchorX?: number;
-  anchorY?: number;
   color?: number | string;
-  textColor?: number | string;
   fontSize?: number | string;
-  strokeWidth?: number;
 }
 
 export interface TimelineKeyframe {

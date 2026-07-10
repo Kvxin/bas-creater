@@ -22,7 +22,7 @@ function ms(v: number | string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function coord(v: number | string | undefined, fallback: number): number | string {
+function coord(v: number | string | undefined, fallback: number | string): number | string {
   if (v == null) return fallback;
   if (typeof v === "string") {
     return v.trim() === "" ? fallback : v;
@@ -36,8 +36,8 @@ function baseDefaults(type: DanmuType, ov: Partial<DanmuBase> = {}): DanmuBase {
     id: genId(10),
     type,
     name: ov.name,
-    x: coord((ov as any).x, 0),
-    y: coord((ov as any).y, 0),
+    x: coord((ov as any).x, "0%"),
+    y: coord((ov as any).y, "0%"),
     zIndex: ov.zIndex ?? 1,
     durationMs: ms((ov as any).durationMs, 2000), // duration 还是给一个默认值比较好，或者也留空？BAS需要duration。保留默认值吧。
     scale: ov.scale ?? 1,
@@ -57,7 +57,7 @@ export function createTextDanmu(ov: Partial<TextDanmu> = {}): TextDanmu {
     ...base,
     type: "text",
     content: ov.content ?? "请输入内容",
-    fontSize: (ov as any).fontSize ?? 5,
+    fontSize: (ov as any).fontSize ?? "5%",
     fontFamily: ov.fontFamily ?? "黑体",
     bold: ov.bold ?? 0,
     textShadow: ov.textShadow ?? 0,
@@ -74,7 +74,7 @@ export function createButtonDanmu(ov: Partial<ButtonDanmu> = {}): ButtonDanmu {
     ...base,
     type: "button",
     text: ov.text ?? "按钮",
-    fontSize: (ov as any).fontSize ?? 5,
+    fontSize: (ov as any).fontSize ?? "5%",
     textColor: ov.textColor ?? 0xffffff,
     fillColor: ov.fillColor ?? 0xff9100,
     fillAlpha: ov.fillAlpha ?? 0.8,
@@ -94,8 +94,8 @@ export function createPathDanmu(ov: Partial<PathDanmu> = {}): PathDanmu {
     borderAlpha: ov.borderAlpha ?? 1,
     fillColor: ov.fillColor ?? 0x00a1d6,
     fillAlpha: ov.fillAlpha ?? 0.8,
-    width: (ov as any).width ?? 20,
-    height: (ov as any).height ?? 20,
+    width: (ov as any).width ?? "20%",
+    height: (ov as any).height ?? "20%",
   };
 }
 

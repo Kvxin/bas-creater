@@ -35,7 +35,7 @@ export interface TextDanmu extends DanmuBase {
 export interface ButtonDanmu extends DanmuBase {
   type: 'button'
   text?: string
-  fontSize?: number
+  fontSize?: number | string // 支持 56 或 "5%"
   textColor?: number
   textAlpha?: number // 0~1
   fillColor?: number

@@ -6,8 +6,8 @@ import type {
 } from "@/types/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import {
-  getEffectiveKeyframePropertiesAtTime,
   normalizeKeyframes,
+  pickKeyframePropertiesForResource,
 } from "@/utils/keyframes";
 
 const formatValue = (key: string, value: unknown): string => {
@@ -17,14 +17,13 @@ const formatValue = (key: string, value: unknown): string => {
     return "0x" + value.toString(16).padStart(6, "0");
   }
 
-  if (
-    (key === "x" || key === "y" || key === "fontSize") &&
-    typeof value === "number"
-  ) {
-    return `${Number(value.toFixed(4))}%`;
-  }
-
   if (typeof value === "string") {
+    if (
+      (key === "x" || key === "y" || key === "fontSize" || key === "width" || key === "height") &&
+      value.trim().endsWith("%")
+    ) {
+      return value.trim();
+    }
     return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   }
 
@@ -142,13 +141,12 @@ const compileKeyframesToBas = (
   let previousTimeMs = 0;
   keyframes.forEach((keyframe) => {
     const durationMs = Math.max(0, keyframe.timeMs - previousTimeMs);
-    const targetProperties = getEffectiveKeyframePropertiesAtTime(
-      resource,
-      clip,
-      keyframe.timeMs
+    basCode += formatSetStatement(
+      command,
+      varName,
+      pickKeyframePropertiesForResource(resource, keyframe.properties),
+      durationMs
     );
-
-    basCode += formatSetStatement(command, varName, targetProperties, durationMs);
     command = "then set";
     previousTimeMs = keyframe.timeMs;
   });

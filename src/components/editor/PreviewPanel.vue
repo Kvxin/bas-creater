@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from "vue";
+import { onClickOutside } from "@vueuse/core";
 import {
+  Check,
+  ChevronDown,
   Play,
   Pause,
   SkipBack,
@@ -8,6 +11,8 @@ import {
   Minus,
   Plus,
   RotateCcw,
+  Maximize,
+  Minimize,
 } from "lucide-vue-next";
 import basService from "@/utils/bas";
 import { useTimelineStore } from "@/stores/timeline";
@@ -15,26 +20,65 @@ import { useDanmuStore } from "@/stores/danmu";
 import { useAudioStore } from "@/stores/audio";
 import { compileTimelineToBas } from "@/utils/compiler";
 import { getAudioEngine } from "@/utils/audio/audio-engine";
-import { dBToLinear } from "@/utils/audio/audio-math";
 import TransformControls from "./controls/TransformControls.vue";
 import type { AnyDanmu } from "@/types/danmu";
 import type { TimelineClip } from "@/types/timeline";
 import {
   BASE_KEYFRAME_ID,
   clampKeyframeTime,
-  createKeyframeSnapshot,
   getEffectiveDanmuAtTime,
-  pickKeyframeProperties,
-  resolveKeyframeProperties,
+  pickKeyframePropertiesForResource,
 } from "@/utils/keyframes";
 
 const ZOOM_SENSITIVITY = 0.001;
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 5.0;
-const DANMAKU_WIDTH = 800;
-const DANMAKU_HEIGHT = 450; // 16:9 aspect ratio
 const PLAYBACK_END_EPSILON_MS = 1000 / 60;
 const SKIP_FORWARD_MS = 5000;
+const CANVAS_MIN_SIZE = 1;
+const CANVAS_MAX_SIZE = 9999;
+
+// ---- 画布分辨率预设（快捷预设，用户可自定义任意宽高） ----
+const CANVAS_PRESETS = [
+  {
+    label: "800×450",
+    aspect: "16:9",
+    previewClass: "h-3 w-5",
+    width: 800,
+    height: 450,
+  },
+  {
+    label: "640×360",
+    aspect: "16:9",
+    previewClass: "h-3 w-5",
+    width: 640,
+    height: 360,
+  },
+  {
+    label: "1080×1920",
+    aspect: "9:16",
+    previewClass: "h-5 w-3",
+    width: 1080,
+    height: 1920,
+  },
+  {
+    label: "1920×1080",
+    aspect: "16:9",
+    previewClass: "h-3 w-5",
+    width: 1920,
+    height: 1080,
+  },
+] as const;
+type CanvasPreset = (typeof CANVAS_PRESETS)[number];
+
+// ---- 视图缩放预设 (Fit + 25% ~ 200%) ----
+const ZOOM_PRESETS = [25, 50, 75, 100, 150, 200] as const;
+
+// 当前画布分辨率（默认匹配原有 800×450）
+const canvasWidth = ref(800);
+const canvasHeight = ref(450);
+const editWidth = ref<number | string>(800);
+const editHeight = ref<number | string>(450);
 
 // Stores
 const timelineStore = useTimelineStore();
@@ -48,6 +92,15 @@ const isDragging = ref(false);
 const lastMousePos = { x: 0, y: 0 };
 const containerRef = ref<HTMLElement | null>(null);
 const danmakuRef = ref<HTMLElement | null>(null);
+const isFullscreen = ref(false);
+const isZoomMenuOpen = ref(false);
+const isResolutionMenuOpen = ref(false);
+const zoomMenuRef = ref<HTMLElement | null>(null);
+const resolutionMenuRef = ref<HTMLElement | null>(null);
+
+// 点击菜单外部时关闭
+onClickOutside(zoomMenuRef, () => { isZoomMenuOpen.value = false; });
+onClickOutside(resolutionMenuRef, () => { isResolutionMenuOpen.value = false; });
 
 const previewTransformItems = computed(() => {
   const items: Array<{ clipId: string; danmu: AnyDanmu }> = [];
@@ -76,6 +129,117 @@ const previewTransformItems = computed(() => {
 
   return items;
 });
+
+// ---- 视图缩放 / 全屏 ----
+
+/** 自适应缩放：使画布完整适配视口 */
+const fitScale = computed(() => {
+  if (!containerRef.value) return 1;
+  const rect = containerRef.value.getBoundingClientRect();
+  const paddingW = rect.width > 0 ? Math.max(0, rect.width - 32) : 0;
+  const paddingH = rect.height > 0 ? Math.max(0, rect.height - 32) : 0;
+  const sx = paddingW / canvasWidth.value;
+  const sy = paddingH / canvasHeight.value;
+  return Math.min(sx, sy);
+});
+
+/** 显示用缩放百分比（四舍五入取整） */
+const zoomPercent = computed(() => Math.round(scale.value * 100));
+
+/** 当前是否处于 Fit 模式（误差 ≤ 1%） */
+const isAtFit = computed(
+  () =>
+    Math.abs(scale.value - fitScale.value) / Math.max(0.01, fitScale.value) <
+    0.01
+);
+const zoomDisplayLabel = computed(() =>
+  isAtFit.value ? "Fit" : `${zoomPercent.value}%`
+);
+
+/** 自适应：将画布居中缩放至完整适配视口 */
+const fitToScreen = () => {
+  const s = fitScale.value;
+  scale.value = s;
+  centerStageView(s);
+};
+
+/** 按照百分比设置缩放（用于预设 25% / 50% / … / 200%） */
+const setViewportPercent = (percent: number) => {
+  scale.value = Math.max(MIN_SCALE, Math.min(MAX_SCALE, percent / 100));
+  centerStageView(scale.value);
+};
+
+const nudgeViewportZoom = (direction: 1 | -1) => {
+  scale.value = Math.max(
+    MIN_SCALE,
+    Math.min(MAX_SCALE, scale.value + direction * fitScale.value * 0.25)
+  );
+  centerStageView(scale.value);
+};
+
+/** 切换全屏 */
+const toggleFullscreen = async () => {
+  if (!containerRef.value) return;
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await containerRef.value.requestFullscreen();
+    }
+  } catch {
+    // 全屏 API 不可用时静默忽略
+  }
+};
+
+/** 当前分辨率是否匹配某个预设 */
+const currentPresetLabel = computed(() => {
+  const match = CANVAS_PRESETS.find(
+    (p) => p.width === canvasWidth.value && p.height === canvasHeight.value
+  );
+  return match?.label ?? null;
+});
+const canvasSizeLabel = computed(
+  () => currentPresetLabel.value ?? `${canvasWidth.value}×${canvasHeight.value}`
+);
+
+const isCanvasPresetSelected = (preset: CanvasPreset) =>
+  canvasWidth.value === preset.width && canvasHeight.value === preset.height;
+
+const isZoomPresetSelected = (preset: number) =>
+  !isAtFit.value && zoomPercent.value === preset;
+
+const clampCanvasDimension = (value: number | string) => {
+  const numericValue = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numericValue)) return CANVAS_MIN_SIZE;
+  return Math.min(
+    CANVAS_MAX_SIZE,
+    Math.max(CANVAS_MIN_SIZE, Math.round(numericValue))
+  );
+};
+
+/** 设置画布分辨率 */
+const setCanvasResolution = (w: number, h: number) => {
+  const nextWidth = clampCanvasDimension(w);
+  const nextHeight = clampCanvasDimension(h);
+  canvasWidth.value = nextWidth;
+  canvasHeight.value = nextHeight;
+  editWidth.value = nextWidth;
+  editHeight.value = nextHeight;
+  nextTick(() => {
+    fitToScreen();
+    if (needsRecompile.value) compileAndLoad(true);
+  });
+};
+
+/** 应用自定义宽高 */
+const applyCustomResolution = () => {
+  const w = clampCanvasDimension(editWidth.value);
+  const h = clampCanvasDimension(editHeight.value);
+  editWidth.value = w;
+  editHeight.value = h;
+  setCanvasResolution(w, h);
+  isResolutionMenuOpen.value = false;
+};
 
 const handleTransformSelection = (payload: {
   clipIds: string[];
@@ -117,21 +281,53 @@ const handleTransformCommit = (
   for (const update of updates) {
     const resource = danmuStore.danmus.find((item) => item.id === update.id);
     const clip = findClipByResourceId(update.id);
-    const keyframeProperties = pickKeyframeProperties(update.changes);
+    const keyframeProperties = resource
+      ? pickKeyframePropertiesForResource(resource, update.changes)
+      : {};
     const hasAnimatableChanges = Object.keys(keyframeProperties).length > 0;
 
+    const animatableKeys = new Set(Object.keys(keyframeProperties));
+    const resourceChanges = Object.fromEntries(
+      Object.entries(update.changes).filter(([key]) => !animatableKeys.has(key))
+    ) as Partial<AnyDanmu>;
+    if (Object.keys(resourceChanges).length > 0) {
+      danmuStore.updateDanmu(update.id, resourceChanges);
+    }
+
     if (!resource || !clip || !hasAnimatableChanges) {
-      danmuStore.updateDanmu(update.id, update.changes);
+      if (hasAnimatableChanges) {
+        danmuStore.updateDanmu(update.id, keyframeProperties as Partial<AnyDanmu>);
+      }
       continue;
     }
 
     const selectedKeyframeId =
       clip.id === timelineStore.selectedClipId ? timelineStore.selectedKeyframeId : null;
 
+    const rawLocalTimeMs = timelineStore.currentTime - clip.startTime;
+    const localTimeMs = clampKeyframeTime(rawLocalTimeMs, clip.duration);
+
+    if (
+      timelineStore.autoKeyframe &&
+      rawLocalTimeMs > 0 &&
+      rawLocalTimeMs <= clip.duration
+    ) {
+      timelineStore.upsertClipKeyframeAtTime(clip.id, localTimeMs, keyframeProperties);
+      continue;
+    }
+
+    if (timelineStore.autoKeyframe) {
+      danmuStore.updateDanmu(update.id, keyframeProperties as Partial<AnyDanmu>);
+      continue;
+    }
+
     if (selectedKeyframeId && selectedKeyframeId !== BASE_KEYFRAME_ID) {
+      const storedProperties = clip.keyframes?.find(
+        (keyframe) => keyframe.id === selectedKeyframeId
+      )?.properties ?? {};
       timelineStore.updateClipKeyframe(clip.id, selectedKeyframeId, {
         properties: {
-          ...resolveKeyframeProperties(resource, clip, selectedKeyframeId),
+          ...storedProperties,
           ...keyframeProperties,
         },
       });
@@ -139,22 +335,11 @@ const handleTransformCommit = (
     }
 
     if (selectedKeyframeId === BASE_KEYFRAME_ID) {
-      danmuStore.updateDanmu(update.id, update.changes);
+      danmuStore.updateDanmu(update.id, keyframeProperties as Partial<AnyDanmu>);
       continue;
     }
 
-    const localTimeMs = clampKeyframeTime(
-      timelineStore.currentTime - clip.startTime,
-      clip.duration
-    );
-
-    if (timelineStore.autoKeyframe && localTimeMs > 0 && localTimeMs < clip.duration) {
-      const snapshot = createKeyframeSnapshot(resource, clip, localTimeMs, update.changes);
-      timelineStore.upsertClipKeyframeAtTime(clip.id, snapshot.timeMs, snapshot.properties);
-      continue;
-    }
-
-    danmuStore.updateDanmu(update.id, update.changes);
+    danmuStore.updateDanmu(update.id, keyframeProperties as Partial<AnyDanmu>);
   }
 };
 
@@ -313,8 +498,8 @@ const centerStageView = (nextScale = scale.value) => {
   if (!containerRef.value) return;
 
   const rect = containerRef.value.getBoundingClientRect();
-  position.value.x = (rect.width - DANMAKU_WIDTH * nextScale) / 2;
-  position.value.y = (rect.height - DANMAKU_HEIGHT * nextScale) / 2;
+  position.value.x = (rect.width - canvasWidth.value * nextScale) / 2;
+  position.value.y = (rect.height - canvasHeight.value * nextScale) / 2;
 };
 
 // Helpers
@@ -434,6 +619,11 @@ watch(
   }
 );
 
+// Fullscreen change handler (needs stable reference for cleanup)
+const onFullscreenChange = () => {
+  isFullscreen.value = document.fullscreenElement !== null;
+};
+
 // Initial centering and BAS init
 onMounted(() => {
   if (containerRef.value) {
@@ -442,6 +632,9 @@ onMounted(() => {
 
   window.addEventListener("mousemove", onDrag);
   window.addEventListener("mouseup", stopDrag);
+
+  // 监听全屏状态变化
+  document.addEventListener("fullscreenchange", onFullscreenChange);
 
   // 初始化 BAS 弹幕服务
   nextTick(() => {
@@ -462,6 +655,7 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("mousemove", onDrag);
   window.removeEventListener("mouseup", stopDrag);
+  document.removeEventListener("fullscreenchange", onFullscreenChange);
   stopPlayback();
 });
 
@@ -564,36 +758,44 @@ const skipForward = () => {
       @wheel="handleWheel"
       @mousedown="startDrag"
     >
-      <!-- Controls Overlay -->
+      <!-- Controls Overlay: Zoom + Fullscreen -->
       <div
-        class="absolute top-3 right-3 flex flex-col gap-0.5 bg-background/95 border border-border rounded-sm z-10 p-1 shadow-sm"
+        class="absolute top-3 right-3 z-10 flex flex-col gap-1 rounded-md border border-border/80 bg-background/95 p-1.5 shadow-lg backdrop-blur-sm"
       >
         <button
-          @click="scale = Math.min(MAX_SCALE, scale + 0.1)"
-          class="size-7 inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground rounded-sm"
-          title="Zoom In"
+          @click="nudgeViewportZoom(1)"
+          class="inline-flex size-9 items-center justify-center rounded-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          title="放大"
         >
           <Plus class="size-4" />
         </button>
+
         <button
-          @click="scale = Math.max(MIN_SCALE, scale - 0.1)"
-          class="size-7 inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground rounded-sm"
-          title="Zoom Out"
+          @click="fitToScreen()"
+          class="inline-flex h-9 min-w-9 items-center justify-center rounded-sm px-1 font-mono text-xs tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          title="点击适配窗口"
+        >
+          {{ zoomDisplayLabel }}
+        </button>
+
+        <button
+          @click="nudgeViewportZoom(-1)"
+          class="inline-flex size-9 items-center justify-center rounded-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          title="缩小"
         >
           <Minus class="size-4" />
         </button>
+
+        <div class="my-0.5 border-t border-border"></div>
+
         <button
-          @click="resetView"
-          class="size-7 inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground rounded-sm"
-          title="Reset View"
+          @click="toggleFullscreen"
+          class="inline-flex size-9 items-center justify-center rounded-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          :title="isFullscreen ? '退出全屏' : '全屏'"
         >
-          <RotateCcw class="size-3" />
+          <Minimize v-if="isFullscreen" class="size-4" />
+          <Maximize v-else class="size-4" />
         </button>
-        <div
-          class="text-[10px] text-center font-mono text-muted-foreground border-t border-border pt-1 mt-1"
-        >
-          {{ Math.round(scale * 100) }}%
-        </div>
       </div>
 
       <!-- Transform Wrapper -->
@@ -604,7 +806,8 @@ const skipForward = () => {
         <div
           ref="danmakuRef"
           id="danmaku"
-          class="w-[800px] aspect-video bg-black rounded-sm border border-border flex items-center justify-center relative group select-none shadow-sm"
+          class="bg-black rounded-sm border border-border flex items-center justify-center relative group select-none shadow-sm"
+          :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }"
         >
           <!-- BAS renders danmaku items here -->
 
@@ -613,8 +816,8 @@ const skipForward = () => {
             v-if="previewTransformItems.length && !isPlaying"
             :items="previewTransformItems"
             :selected-clip-id="timelineStore.selectedClipId"
-            :container-width="DANMAKU_WIDTH"
-            :container-height="DANMAKU_HEIGHT"
+            :container-width="canvasWidth"
+            :container-height="canvasHeight"
             :canvas-scale="scale"
             @select="handleTransformSelection"
             @commit="handleTransformCommit"
@@ -625,42 +828,161 @@ const skipForward = () => {
 
     <!-- Playback Controls -->
     <div
-      class="h-[3.25rem] border-t border-border grid grid-cols-[1fr_auto_1fr] items-center px-5 bg-background text-foreground shrink-0 z-20"
+      class="grid h-[3.75rem] shrink-0 grid-cols-[minmax(8rem,1fr)_auto_minmax(14rem,1fr)] items-center border-t border-border bg-background px-5 text-foreground z-20"
     >
-      <div></div>
-      <div class="flex items-center justify-center gap-2">
-      <button
-        @click="playFromStart"
-        class="size-8 rounded-sm inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
-        title="从头播放"
-      >
-        <RotateCcw class="size-4" />
-      </button>
-      <button
-        @click="seekToStart"
-        class="size-8 rounded-sm inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
-        title="回到开头"
-      >
-        <SkipBack class="size-4" />
-      </button>
-      <button
-        @click="togglePlay"
-        class="size-8 rounded-sm inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors text-primary"
-        :title="isPlaying ? '暂停' : '播放'"
-      >
-        <Pause v-if="isPlaying" class="size-5 fill-current" />
-        <Play v-else class="size-5 fill-current" />
-      </button>
-      <button
-        @click="skipForward"
-        class="size-8 rounded-sm inline-flex items-center justify-center hover:bg-accent hover:text-accent-foreground transition-colors"
-        title="快进"
-      >
-        <SkipForward class="size-4" />
-      </button>
+      <div class="min-w-0"></div>
+      <div class="flex items-center justify-center gap-1.5">
+        <button
+          @click="playFromStart"
+          class="inline-flex size-9 items-center justify-center rounded-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+          title="从头播放"
+        >
+          <RotateCcw class="size-4" />
+        </button>
+        <button
+          @click="seekToStart"
+          class="inline-flex size-9 items-center justify-center rounded-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+          title="回到开头"
+        >
+          <SkipBack class="size-4" />
+        </button>
+        <button
+          @click="togglePlay"
+          class="inline-flex size-10 items-center justify-center rounded-sm text-primary transition-colors hover:bg-accent hover:text-accent-foreground"
+          :title="isPlaying ? '暂停' : '播放'"
+        >
+          <Pause v-if="isPlaying" class="size-5 fill-current" />
+          <Play v-else class="size-5 fill-current" />
+        </button>
+        <button
+          @click="skipForward"
+          class="inline-flex size-9 items-center justify-center rounded-sm transition-colors hover:bg-accent hover:text-accent-foreground"
+          title="快进"
+        >
+          <SkipForward class="size-4" />
+        </button>
       </div>
-      <div class="justify-self-end text-xs text-muted-foreground tabular-nums">
-        {{ Math.round(scale * 100) }}%
+
+      <!-- Right: Zoom + Resolution -->
+      <div class="justify-self-end flex items-center gap-2">
+        <!-- Zoom Select -->
+        <div class="relative" ref="zoomMenuRef">
+          <button
+            @click.stop="isZoomMenuOpen = !isZoomMenuOpen; isResolutionMenuOpen = false"
+            class="inline-flex h-9 min-w-[5.25rem] items-center justify-between gap-2 rounded-sm border border-border/70 bg-accent/35 px-3 font-mono text-xs tabular-nums text-foreground transition-colors hover:bg-accent"
+            title="视图缩放"
+          >
+            <span>{{ zoomDisplayLabel }}</span>
+            <ChevronDown class="size-3.5 text-muted-foreground" />
+          </button>
+          <div
+            v-if="isZoomMenuOpen"
+            class="absolute right-0 bottom-full z-50 mb-2 w-44 overflow-hidden rounded-md border border-border bg-popover p-1.5 text-popover-foreground shadow-xl"
+          >
+            <button
+              @click.stop="fitToScreen(); isZoomMenuOpen = false"
+              :class="[
+                'flex h-8 w-full items-center justify-between rounded-sm px-2.5 text-left text-sm transition-colors hover:bg-accent hover:text-accent-foreground',
+                isAtFit ? 'bg-accent text-accent-foreground' : ''
+              ]"
+            >
+              <span>Fit</span>
+              <Check v-if="isAtFit" class="size-4" />
+            </button>
+            <div class="my-1.5 h-px bg-border"></div>
+            <button
+              v-for="preset in ZOOM_PRESETS"
+              :key="preset"
+              @click.stop="setViewportPercent(preset); isZoomMenuOpen = false"
+              :class="[
+                'flex h-8 w-full items-center justify-between rounded-sm px-2.5 text-left font-mono text-sm tabular-nums transition-colors hover:bg-accent hover:text-accent-foreground',
+                isZoomPresetSelected(preset) ? 'bg-accent text-accent-foreground' : ''
+              ]"
+            >
+              <span>{{ preset }}%</span>
+              <Check v-if="isZoomPresetSelected(preset)" class="size-4" />
+            </button>
+          </div>
+        </div>
+
+        <!-- Resolution -->
+        <div class="relative" ref="resolutionMenuRef">
+          <button
+            @click.stop="isResolutionMenuOpen = !isResolutionMenuOpen; isZoomMenuOpen = false"
+            class="inline-flex h-9 min-w-[7.5rem] items-center justify-between gap-2 rounded-sm border border-border/70 bg-accent/35 px-3 font-mono text-xs tabular-nums text-foreground transition-colors hover:bg-accent"
+            title="画布分辨率"
+          >
+            <span>{{ canvasSizeLabel }}</span>
+            <ChevronDown class="size-3.5 text-muted-foreground" />
+          </button>
+          <div
+            v-if="isResolutionMenuOpen"
+            class="absolute right-0 bottom-full z-50 mb-2 w-72 overflow-hidden rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-xl"
+          >
+            <!-- 快捷预设 -->
+            <div class="flex flex-col gap-1">
+              <button
+                v-for="preset in CANVAS_PRESETS"
+                :key="preset.label"
+                @click.stop="setCanvasResolution(preset.width, preset.height); isResolutionMenuOpen = false"
+                :class="[
+                  'flex h-10 w-full items-center gap-3 rounded-sm px-2.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground',
+                  isCanvasPresetSelected(preset) ? 'bg-accent text-accent-foreground' : ''
+                ]"
+              >
+                <span
+                  :class="[
+                    'shrink-0 rounded-[2px] border border-current opacity-70',
+                    preset.previewClass
+                  ]"
+                ></span>
+                <span class="min-w-0 flex-1">
+                  <span class="block font-mono text-sm tabular-nums">{{ preset.label }}</span>
+                  <span class="block text-xs text-muted-foreground">{{ preset.aspect }}</span>
+                </span>
+                <Check v-if="isCanvasPresetSelected(preset)" class="size-4 shrink-0" />
+              </button>
+            </div>
+            <div class="my-2 h-px bg-border"></div>
+            <!-- 自定义宽高 -->
+            <div class="grid grid-cols-[1fr_auto_1fr_2.25rem] items-end gap-2">
+              <label class="min-w-0">
+                <span class="mb-1 block text-xs text-muted-foreground">宽</span>
+                <input
+                  v-model.number="editWidth"
+                  type="number"
+                  :min="CANVAS_MIN_SIZE"
+                  :max="CANVAS_MAX_SIZE"
+                  inputmode="numeric"
+                  aria-label="画布宽度"
+                  class="h-9 w-full rounded-sm border border-border bg-input px-2 text-center font-mono text-xs tabular-nums text-foreground [appearance:textfield] focus:border-ring focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  @keydown.enter.stop="applyCustomResolution()"
+                />
+              </label>
+              <span class="pb-2 text-xs text-muted-foreground">×</span>
+              <label class="min-w-0">
+                <span class="mb-1 block text-xs text-muted-foreground">高</span>
+                <input
+                  v-model.number="editHeight"
+                  type="number"
+                  :min="CANVAS_MIN_SIZE"
+                  :max="CANVAS_MAX_SIZE"
+                  inputmode="numeric"
+                  aria-label="画布高度"
+                  class="h-9 w-full rounded-sm border border-border bg-input px-2 text-center font-mono text-xs tabular-nums text-foreground [appearance:textfield] focus:border-ring focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  @keydown.enter.stop="applyCustomResolution()"
+                />
+              </label>
+              <button
+                @click.stop="applyCustomResolution()"
+                class="inline-flex size-9 items-center justify-center rounded-sm bg-primary text-primary-foreground transition-colors hover:brightness-110"
+                title="应用自定义尺寸"
+              >
+                <Check class="size-4" />
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
