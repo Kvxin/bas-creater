@@ -13,6 +13,7 @@ import { useClipDetailsStore } from '@/stores/clipDetails'
 import { useTimelineStore } from '@/stores/timeline'
 import { useDanmuStore } from '@/stores/danmu'
 import { compileClipToBas } from '@/utils/compiler'
+import { resolveDanmuDefaults } from '@/utils/danmuDefaults'
 
 const store = useClipDetailsStore()
 const timelineStore = useTimelineStore()
@@ -22,6 +23,17 @@ const currentClip = computed(() => store.clip)
 const currentResource = computed(() => {
   if (!currentClip.value) return null
   return danmuStore.danmus.find(r => r.id === currentClip.value?.resourceId)
+})
+const resolvedCurrentResource = computed(() => {
+  if (!currentResource.value) return null
+  return resolveDanmuDefaults(currentResource.value)
+})
+const resolvedResourceColor = computed(() => {
+  const resource = resolvedCurrentResource.value
+  if (!resource) return undefined
+  if (resource.type === 'text') return resource.color
+  if (resource.type === 'button') return resource.textColor
+  return resource.fillColor
 })
 
 const generatedCode = computed(() => {
@@ -53,6 +65,16 @@ const updateResource = (key: string, val: any) => {
 const updateClip = (key: string, val: any) => {
     if(!currentClip.value) return
     timelineStore.updateClip(currentClip.value.id, { [key]: Number(val) })
+}
+
+const updateResourceColor = (val: string | number) => {
+    if(!currentResource.value) return
+    const key = currentResource.value.type === 'text'
+        ? 'color'
+        : currentResource.value.type === 'button'
+          ? 'textColor'
+          : 'fillColor'
+    updateResource(key, val)
 }
 </script>
 
@@ -109,41 +131,41 @@ const updateClip = (key: string, val: any) => {
                     <!-- Content based on type -->
                     <div v-if="currentResource.type === 'text'" class="space-y-1">
                         <Label>内容 (Content)</Label>
-                        <Input :model-value="(currentResource as any).content" @update:model-value="v => updateResource('content', v)" />
+                        <Input :model-value="(resolvedCurrentResource as any)?.content" @update:model-value="v => updateResource('content', v)" />
                     </div>
                     <div v-if="currentResource.type === 'button'" class="space-y-1">
                         <Label>文本 (Text)</Label>
-                        <Input :model-value="(currentResource as any).text" @update:model-value="v => updateResource('text', v)" />
+                        <Input :model-value="(resolvedCurrentResource as any)?.text" @update:model-value="v => updateResource('text', v)" />
                     </div>
 
                     <!-- Position -->
                     <div class="grid grid-cols-2 gap-4">
                         <div class="space-y-1">
                             <Label>X 坐标</Label>
-                            <Input :model-value="currentResource.x" @update:model-value="v => updateResource('x', isNaN(Number(v)) ? v : Number(v))" />
+                            <Input :model-value="resolvedCurrentResource?.x" @update:model-value="v => updateResource('x', isNaN(Number(v)) ? v : Number(v))" />
                         </div>
                          <div class="space-y-1">
                             <Label>Y 坐标</Label>
-                            <Input :model-value="currentResource.y" @update:model-value="v => updateResource('y', isNaN(Number(v)) ? v : Number(v))" />
+                            <Input :model-value="resolvedCurrentResource?.y" @update:model-value="v => updateResource('y', isNaN(Number(v)) ? v : Number(v))" />
                         </div>
                     </div>
 
                      <!-- Style -->
                     <div class="grid grid-cols-2 gap-4">
-                         <div class="space-y-1">
+                         <div v-if="currentResource.type === 'text' || currentResource.type === 'button'" class="space-y-1">
                             <Label>字号 (FontSize)</Label>
-                            <Input :model-value="(currentResource as any).fontSize" @update:model-value="v => updateResource('fontSize', isNaN(Number(v)) ? v : Number(v))" />
+                             <Input :model-value="(resolvedCurrentResource as any)?.fontSize" @update:model-value="v => updateResource('fontSize', isNaN(Number(v)) ? v : Number(v))" />
                         </div>
-                        <div class="space-y-1">
+                        <div v-if="currentResource.type === 'text'" class="space-y-1">
                              <Label>透明度 (Opacity)</Label>
-                             <Input type="number" step="0.1" min="0" max="1" :model-value="currentResource.opacity ?? 1" @update:model-value="v => updateResource('opacity', Number(v))" />
+                             <Input type="number" step="0.1" min="0" max="1" :model-value="resolvedCurrentResource?.opacity ?? 1" @update:model-value="v => updateResource('opacity', Number(v))" />
                         </div>
                     </div>
                     
                      <div class="grid grid-cols-2 gap-4">
                          <div class="space-y-1">
                             <Label>颜色 (Color/Hex)</Label>
-                            <Input :model-value="(currentResource as any).color || (currentResource as any).textColor" @update:model-value="v => updateResource('color', v)" placeholder="0xFFFFFF" />
+                            <Input :model-value="resolvedResourceColor" @update:model-value="updateResourceColor" placeholder="0xFFFFFF" />
                         </div>
                     </div>
                 </div>

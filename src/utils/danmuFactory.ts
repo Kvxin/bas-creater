@@ -6,6 +6,7 @@ import type {
   PathDanmu,
   TextDanmu,
 } from "@/types/danmu";
+import { compileDanmuDefinition } from "@/utils/compiler";
 
 function genId(len = 10) {
   const chars =
@@ -22,33 +23,76 @@ function ms(v: number | string | undefined, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function coord(v: number | string | undefined, fallback: number | string): number | string {
-  if (v == null) return fallback;
-  if (typeof v === "string") {
-    return v.trim() === "" ? fallback : v;
-  }
-  return Number.isFinite(v) ? v : fallback;
-}
+const COMMON_OPTIONAL_KEYS = [
+  "name",
+  "x",
+  "y",
+  "zIndex",
+  "scale",
+  "rotateX",
+  "rotateY",
+  "rotateZ",
+  "opacity",
+  "anchorX",
+  "anchorY",
+  "parentId",
+] as const;
+
+const TEXT_OPTIONAL_KEYS = [
+  "fontSize",
+  "fontFamily",
+  "bold",
+  "textShadow",
+  "color",
+  "strokeWidth",
+  "strokeColor",
+  "textColor",
+] as const;
+
+const BUTTON_OPTIONAL_KEYS = [
+  "fontSize",
+  "textColor",
+  "textAlpha",
+  "fillColor",
+  "fillAlpha",
+  "target",
+] as const;
+
+const PATH_OPTIONAL_KEYS = [
+  "viewBox",
+  "borderWidth",
+  "borderColor",
+  "borderAlpha",
+  "fillColor",
+  "fillAlpha",
+  "width",
+  "height",
+] as const;
+
+const pickDefined = (
+  source: Record<string, unknown>,
+  keys: readonly string[]
+): Record<string, unknown> => {
+  const result: Record<string, unknown> = {};
+
+  keys.forEach((key) => {
+    const value = source[key];
+    if (value !== undefined) result[key] = value;
+  });
+
+  return result;
+};
 
 function baseDefaults(type: DanmuType, ov: Partial<DanmuBase> = {}): DanmuBase {
-  // 仅保留 id 和 type，其他属性如果 ov 中有则保留，没有则 undefined
   return {
-    id: genId(10),
+    id: ov.id ?? genId(10),
     type,
-    name: ov.name,
-    x: coord((ov as any).x, "0%"),
-    y: coord((ov as any).y, "0%"),
-    zIndex: ov.zIndex ?? 1,
-    durationMs: ms((ov as any).durationMs, 2000), // duration 还是给一个默认值比较好，或者也留空？BAS需要duration。保留默认值吧。
-    scale: ov.scale ?? 1,
-    rotateX: ov.rotateX ?? 0,
-    rotateY: ov.rotateY ?? 0,
-    rotateZ: ov.rotateZ ?? 0,
-    opacity: ov.opacity ?? 1,
-    anchorX: ov.anchorX ?? 0,
-    anchorY: ov.anchorY ?? 0,
-    parentId: ov.parentId ?? null,
-  };
+    durationMs: ms(ov.durationMs, 2000),
+    ...pickDefined(
+      ov as Record<string, unknown>,
+      COMMON_OPTIONAL_KEYS
+    ),
+  } as DanmuBase;
 }
 
 export function createTextDanmu(ov: Partial<TextDanmu> = {}): TextDanmu {
@@ -57,15 +101,11 @@ export function createTextDanmu(ov: Partial<TextDanmu> = {}): TextDanmu {
     ...base,
     type: "text",
     content: ov.content ?? "请输入内容",
-    fontSize: (ov as any).fontSize ?? "5%",
-    fontFamily: ov.fontFamily ?? "黑体",
-    bold: ov.bold ?? 0,
-    textShadow: ov.textShadow ?? 0,
-    color: ov.color ?? 0xffffff,
-    strokeWidth: ov.strokeWidth ?? 0,
-    strokeColor: ov.strokeColor ?? 0x000000,
-    textColor: ov.textColor ?? 0xffffff,
-  };
+    ...pickDefined(
+      ov as Record<string, unknown>,
+      TEXT_OPTIONAL_KEYS
+    ),
+  } as TextDanmu;
 }
 
 export function createButtonDanmu(ov: Partial<ButtonDanmu> = {}): ButtonDanmu {
@@ -74,12 +114,11 @@ export function createButtonDanmu(ov: Partial<ButtonDanmu> = {}): ButtonDanmu {
     ...base,
     type: "button",
     text: ov.text ?? "按钮",
-    fontSize: (ov as any).fontSize ?? "5%",
-    textColor: ov.textColor ?? 0xffffff,
-    fillColor: ov.fillColor ?? 0xff9100,
-    fillAlpha: ov.fillAlpha ?? 0.8,
-    target: ov.target,
-  };
+    ...pickDefined(
+      ov as Record<string, unknown>,
+      BUTTON_OPTIONAL_KEYS
+    ),
+  } as ButtonDanmu;
 }
 
 export function createPathDanmu(ov: Partial<PathDanmu> = {}): PathDanmu {
@@ -88,15 +127,11 @@ export function createPathDanmu(ov: Partial<PathDanmu> = {}): PathDanmu {
     ...base,
     type: "path",
     d: ov.d ?? "M0 0 H100 V100 H0 Z",
-    viewBox: ov.viewBox ?? "0 0 100 100",
-    borderWidth: ov.borderWidth ?? 1,
-    borderColor: ov.borderColor ?? 0xffffff,
-    borderAlpha: ov.borderAlpha ?? 1,
-    fillColor: ov.fillColor ?? 0x00a1d6,
-    fillAlpha: ov.fillAlpha ?? 0.8,
-    width: (ov as any).width ?? "20%",
-    height: (ov as any).height ?? "20%",
-  };
+    ...pickDefined(
+      ov as Record<string, unknown>,
+      PATH_OPTIONAL_KEYS
+    ),
+  } as PathDanmu;
 }
 
 export function createDanmuByKey(key: string, payload: Partial<AnyDanmu> = {}): AnyDanmu {
@@ -126,77 +161,7 @@ export function createDanmuByKey(key: string, payload: Partial<AnyDanmu> = {}): 
  */
 export function danmuToDSL(danmu: AnyDanmu): string {
   const name = danmu.id.replace(/[^a-zA-Z0-9_]/g, "_");
-  const durationSec = (danmu.durationMs ?? 2000) / 1000;
-
-  // 格式化百分比或数值
-  const fmt = (v: number | string | undefined, suffix = "%"): string => {
-    if (v === undefined) return "0";
-    if (typeof v === "string") return v;
-    return `${v}${suffix}`;
-  };
-
-  // 格式化颜色 (0xRRGGBB -> 0xRRGGBB)
-  const fmtColor = (c: number | string | undefined): string => {
-    if (c === undefined) return "0xffffff";
-    if (typeof c === "string") return c;
-    return `0x${c.toString(16).padStart(6, "0")}`;
-  };
-
-  let defBlock = "";
-  let setBlock = "";
-
-  if (danmu.type === "text") {
-    const d = danmu as TextDanmu;
-    defBlock = `def text ${name} {
-    content = "${(d.content ?? "").replace(/"/g, '\\"')}"
-    fontSize = ${fmt(d.fontSize)}
-    x = ${fmt(d.x)}
-    y = ${fmt(d.y)}
-    anchorX = ${d.anchorX ?? 0.5}
-    anchorY = ${d.anchorY ?? 0.5}
-    color = ${fmtColor(d.color as any)}
-    alpha = ${d.opacity ?? 1}
-    zIndex = ${d.zIndex ?? 1}
-    scale = ${d.scale ?? 1}
-    rotateX = ${d.rotateX ?? 0}
-    rotateY = ${d.rotateY ?? 0}
-    rotateZ = ${d.rotateZ ?? 0}
-    bold = ${d.bold ? 1 : 0}
-    textShadow = ${d.textShadow ?? 0}
-    fontFamily = "${d.fontFamily ?? "黑体"}"
-}`;
-    setBlock = `set ${name} {} ${durationSec}s`;
-  } else if (danmu.type === "button") {
-    const d = danmu as ButtonDanmu;
-    defBlock = `def button ${name} {
-    text = "${(d.text ?? "").replace(/"/g, '\\"')}"
-    fontSize = ${fmt(d.fontSize)}
-    x = ${fmt(d.x)}
-    y = ${fmt(d.y)}
-    scale = ${d.scale ?? 1}
-    textColor = ${fmtColor(d.textColor)}
-    fillColor = ${fmtColor(d.fillColor)}
-    fillAlpha = ${d.fillAlpha ?? 0.8}
-    zIndex = ${d.zIndex ?? 1}
-}`;
-    setBlock = `set ${name} {} ${durationSec}s`;
-  } else if (danmu.type === "path") {
-    const d = danmu as PathDanmu;
-    defBlock = `def path ${name} {
-    d = "${(d.d ?? "").replace(/"/g, '\\"')}"
-    ${d.viewBox ? `viewBox = "${d.viewBox}"` : ""}
-    x = ${fmt(d.x)}
-    y = ${fmt(d.y)}
-    scale = ${d.scale ?? 1}
-    fillColor = ${fmtColor(d.fillColor)}
-    fillAlpha = ${d.fillAlpha ?? 0.8}
-    borderColor = ${fmtColor(d.borderColor)}
-    borderAlpha = ${d.borderAlpha ?? 0.8}
-    borderWidth = ${d.borderWidth ?? 1}
-    zIndex = ${d.zIndex ?? 1}
-}`;
-    setBlock = `set ${name} {} ${durationSec}s`;
-  }
-
-  return `${defBlock}\n${setBlock}`;
+  const durationMs = danmu.durationMs ?? 2000;
+  const definition = compileDanmuDefinition(danmu, name, durationMs).trimEnd();
+  return durationMs <= 0 ? `${definition}\nset ${name} {} 0s` : definition;
 }

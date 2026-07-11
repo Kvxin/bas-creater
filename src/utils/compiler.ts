@@ -9,20 +9,145 @@ import {
   normalizeKeyframes,
   pickKeyframePropertiesForResource,
 } from "@/utils/keyframes";
+import { isDanmuFieldBasDefault } from "@/utils/danmuDefaults";
+
+const PERCENTAGE_VALUE_KEYS = new Set(["x", "y", "fontSize", "width", "height"]);
+
+const NUMERIC_VALUE_KEYS = new Set([
+  "x",
+  "y",
+  "zIndex",
+  "scale",
+  "opacity",
+  "alpha",
+  "anchorX",
+  "anchorY",
+  "fontSize",
+  "bold",
+  "textShadow",
+  "strokeWidth",
+  "rotateX",
+  "rotateY",
+  "rotateZ",
+  "textAlpha",
+  "fillAlpha",
+  "borderWidth",
+  "borderAlpha",
+  "width",
+  "height",
+]);
+
+const COLOR_VALUE_KEYS = new Set([
+  "color",
+  "strokeColor",
+  "textColor",
+  "fillColor",
+  "borderColor",
+]);
+
+const DEFINITION_FIELDS_BY_TYPE: Record<AnyDanmu["type"], readonly string[]> = {
+  text: [
+    "x",
+    "y",
+    "zIndex",
+    "scale",
+    "opacity",
+    "color",
+    "anchorX",
+    "anchorY",
+    "fontSize",
+    "fontFamily",
+    "bold",
+    "textShadow",
+    "strokeWidth",
+    "strokeColor",
+    "rotateX",
+    "rotateY",
+    "rotateZ",
+    "parentId",
+  ],
+  button: [
+    "x",
+    "y",
+    "zIndex",
+    "scale",
+    "fontSize",
+    "textColor",
+    "textAlpha",
+    "fillColor",
+    "fillAlpha",
+    "target",
+  ],
+  path: [
+    "x",
+    "y",
+    "zIndex",
+    "scale",
+    "viewBox",
+    "borderWidth",
+    "borderColor",
+    "borderAlpha",
+    "fillColor",
+    "fillAlpha",
+    "width",
+    "height",
+  ],
+};
+
+const formatTargetValue = (value: unknown): string => {
+  if (!value || typeof value !== "object") return "";
+
+  const target = value as Record<string, unknown>;
+  const type = "av" in target ? "av" : "bangumi" in target ? "bangumi" : null;
+  if (!type) return "";
+
+  const payload = target[type];
+  if (!payload || typeof payload !== "object") return "";
+
+  const lines = Object.entries(payload as Record<string, unknown>)
+    .filter(([, item]) => item !== undefined && item !== null)
+    .map(([key, item]) => {
+      if (key === "timeMs" && typeof item === "number") {
+        return `        time = ${Number((item / 1000).toFixed(4))}s`;
+      }
+      return `        ${key} = ${String(item)}`;
+    });
+
+  return `${type} {\n${lines.join("\n")}\n    }`;
+};
 
 const formatValue = (key: string, value: unknown): string => {
   if (value === undefined || value === null) return "";
 
-  if (key.toLowerCase().includes("color") && typeof value === "number") {
+  if (key === "target") return formatTargetValue(value);
+
+  if (COLOR_VALUE_KEYS.has(key) && typeof value === "number") {
     return "0x" + value.toString(16).padStart(6, "0");
   }
 
+  if (typeof value === "boolean") return value ? "1" : "0";
+
   if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (COLOR_VALUE_KEYS.has(key)) {
+      const shortHex = trimmed.match(/^#([\da-f]{3})$/i)?.[1];
+      if (shortHex) {
+        return `0x${shortHex
+          .split("")
+          .map((character) => character.repeat(2))
+          .join("")}`;
+      }
+      if (/^#[\da-f]{6}$/i.test(trimmed)) return `0x${trimmed.slice(1)}`;
+      if (/^0x[\da-f]+$/i.test(trimmed)) return trimmed;
+      if (/^\d+$/.test(trimmed)) return trimmed;
+    }
     if (
-      (key === "x" || key === "y" || key === "fontSize" || key === "width" || key === "height") &&
-      value.trim().endsWith("%")
+      NUMERIC_VALUE_KEYS.has(key) &&
+      (/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(trimmed) ||
+        (PERCENTAGE_VALUE_KEYS.has(key) &&
+          /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?%$/i.test(trimmed)))
     ) {
-      return value.trim();
+      return trimmed;
     }
     return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   }
@@ -33,7 +158,11 @@ const formatValue = (key: string, value: unknown): string => {
 const formatSeconds = (milliseconds: number) =>
   `${Number((Math.max(0, milliseconds) / 1000).toFixed(4))}s`;
 
-const toBasKey = (key: string) => (key === "opacity" ? "alpha" : key);
+const toBasKey = (key: string) => {
+  if (key === "opacity") return "alpha";
+  if (key === "parentId") return "parent";
+  return key;
+};
 
 const formatInlineProperties = (
   properties: Partial<AnyDanmu> | TimelineKeyframeProperties
@@ -82,29 +211,26 @@ const appendResourceIdentity = (resource: AnyDanmu) => {
   return "";
 };
 
-const compileDefinition = (clip: TimelineClip, resource: AnyDanmu) => {
-  const varName = `obj_${clip.id.replace(/[^a-zA-Z0-9]/g, "_")}`;
-  const startSec = clip.startTime / 1000;
-  const totalDurationSec = (clip.startTime + clip.duration) / 1000;
-  const excludeKeys = new Set([
-    "id",
-    "type",
-    "name",
-    "durationMs",
-    "parentId",
-    "content",
-    "text",
-    "d",
-    ...(startSec > 0 ? ["alpha", "opacity"] : []),
-  ]);
+export const compileDanmuDefinition = (
+  resource: AnyDanmu,
+  varName: string,
+  durationMs: number,
+  startTimeMs = 0
+) => {
+  const startSec = startTimeMs / 1000;
+  const totalDurationSec = (startTimeMs + durationMs) / 1000;
+  const rawResource = resource as unknown as Record<string, unknown>;
 
   let basCode = `def ${getDefType(resource)} ${varName} {\n`;
   basCode += appendResourceIdentity(resource);
 
-  Object.entries(resource).forEach(([key, val]) => {
-    if (excludeKeys.has(key) || val === undefined || val === null) return;
+  DEFINITION_FIELDS_BY_TYPE[resource.type].forEach((key) => {
+    const value = rawResource[key];
+    if (value === undefined || value === null) return;
+    if (startSec > 0 && (key === "alpha" || key === "opacity")) return;
+    if (isDanmuFieldBasDefault(resource, key, value)) return;
 
-    const formatted = formatValue(key, val);
+    const formatted = formatValue(key, value);
     if (formatted) {
       basCode += `    ${toBasKey(key)} = ${formatted}\n`;
     }
@@ -119,6 +245,14 @@ const compileDefinition = (clip: TimelineClip, resource: AnyDanmu) => {
   basCode += "}\n";
   return basCode;
 };
+
+const compileDefinition = (clip: TimelineClip, resource: AnyDanmu) =>
+  compileDanmuDefinition(
+    resource,
+    `obj_${clip.id.replace(/[^a-zA-Z0-9]/g, "_")}`,
+    clip.duration,
+    clip.startTime
+  );
 
 const compileKeyframesToBas = (
   clip: TimelineClip,
@@ -151,11 +285,6 @@ const compileKeyframesToBas = (
     previousTimeMs = keyframe.timeMs;
   });
 
-  const holdMs = Math.max(0, clip.duration - previousTimeMs);
-  if (holdMs > 0 || basCode.length === 0) {
-    basCode += formatSetStatement(command, varName, {}, holdMs);
-  }
-
   return basCode;
 };
 
@@ -167,27 +296,49 @@ const compileLegacyAnimationsToBas = (
 ) => {
   const targetAlpha = resource.opacity ?? 1;
   let basCode = "";
+  let hasSerialRoot = false;
 
   if (clip.startTime > 0) {
     basCode += formatSetStatement("set", varName, {}, clip.startTime);
     basCode += formatSetStatement("then set", varName, { opacity: targetAlpha }, 0);
+    hasSerialRoot = true;
   }
 
   animations.forEach((animation) => {
-    const command = animation.type === "set" ? "set" : "then set";
+    const properties = pickKeyframePropertiesForResource(resource, animation.properties);
+    const absoluteDelay = Math.max(0, clip.startTime) + Math.max(0, animation.delay ?? 0);
 
-    if (animation.type === "set" && animation.delay && animation.delay > 0) {
-      basCode += formatSetStatement("set", varName, {}, animation.delay);
+    if (animation.type === "set" && absoluteDelay > 0) {
+      basCode += formatSetStatement("set", varName, {}, absoluteDelay);
       basCode += formatSetStatement(
         "then set",
         varName,
-        animation.properties,
+        properties,
         animation.duration
       );
+      hasSerialRoot = true;
       return;
     }
 
-    basCode += formatSetStatement(command, varName, animation.properties, animation.duration);
+    if (animation.type === "set") {
+      basCode += formatSetStatement("set", varName, properties, animation.duration);
+      hasSerialRoot = true;
+      return;
+    }
+
+    const delay = Math.max(0, animation.delay ?? 0);
+    if (delay > 0) {
+      basCode += formatSetStatement(hasSerialRoot ? "then set" : "set", varName, {}, delay);
+      hasSerialRoot = true;
+    }
+
+    basCode += formatSetStatement(
+      hasSerialRoot ? "then set" : "set",
+      varName,
+      properties,
+      animation.duration
+    );
+    hasSerialRoot = true;
   });
 
   return basCode;
@@ -214,8 +365,9 @@ export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string
     const targetAlpha = resource.opacity ?? 1;
     basCode += formatSetStatement("set", varName, {}, clip.startTime);
     basCode += formatSetStatement("then set", varName, { opacity: targetAlpha }, 0);
-    basCode += formatSetStatement("then set", varName, {}, clip.duration);
-  } else {
+  } else if (clip.duration <= 0) {
+    // BAS only creates a duration hold for truthy def.duration values. Keep an
+    // explicit zero-length unit so a zero-duration clip does not fall back to 4s.
     basCode += formatSetStatement("set", varName, {}, clip.duration);
   }
 

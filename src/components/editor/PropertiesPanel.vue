@@ -13,6 +13,7 @@ import type { AnyDanmu } from "@/types/danmu";
 import type { TimelineKeyframeProperties } from "@/types/timeline";
 import { VOLUME_DB_MIN, VOLUME_DB_MAX, VOLUME_STEP } from "@/utils/audio/constants";
 import { formatNumberForDisplay } from "@/utils/audio/audio-math";
+import { resolveDanmuDefaults } from "@/utils/danmuDefaults";
 import {
   BASE_KEYFRAME_ID,
   clampKeyframeTime,
@@ -27,6 +28,9 @@ const danmuStore = useDanmuStore();
 const timelineStore = useTimelineStore();
 const audioStore = useAudioStore();
 const selected = computed(() => danmuStore.selected);
+const resolvedSelected = computed(() =>
+  selected.value ? resolveDanmuDefaults(selected.value) : null
+);
 
 // ---- 音频片段检测 ----
 
@@ -109,8 +113,12 @@ const clipKeyframes = computed(() => {
 const activeKeyframeId = computed(() => timelineStore.selectedKeyframeId ?? BASE_KEYFRAME_ID);
 
 const activeKeyframeProperties = computed<TimelineKeyframeProperties>(() => {
-  if (!selected.value || !selectedClip.value) return {};
-  return resolveKeyframeProperties(selected.value, selectedClip.value, activeKeyframeId.value);
+  if (!resolvedSelected.value || !selectedClip.value) return {};
+  return resolveKeyframeProperties(
+    resolvedSelected.value,
+    selectedClip.value,
+    activeKeyframeId.value
+  );
 });
 
 const activeKeyframeStoredProperties = computed<TimelineKeyframeProperties>(() => {
@@ -127,7 +135,7 @@ const currentClipLocalTime = computed(() => {
 });
 
 const keyframeRows = computed(() => {
-  if (!selected.value || !selectedClip.value) return [];
+  if (!resolvedSelected.value || !selectedClip.value) return [];
 
   return [
     {
@@ -136,7 +144,7 @@ const keyframeRows = computed(() => {
       label: "基态",
       timeMs: 0,
       isBase: true,
-      properties: getBaseKeyframeProperties(selected.value),
+      properties: getBaseKeyframeProperties(resolvedSelected.value),
     },
     ...clipKeyframes.value.map((keyframe, index) => ({
       id: keyframe.id,
@@ -161,6 +169,10 @@ watch(
 const selectKeyframe = (keyframeId: string) => {
   if (selectedClip.value) {
     timelineStore.setSelectedClip(selectedClip.value.id);
+    const keyframe = keyframeRows.value.find(row => row.id === keyframeId);
+    if (keyframe) {
+      timelineStore.setCurrentTime(selectedClip.value.startTime + keyframe.timeMs);
+    }
   }
   timelineStore.setSelectedKeyframe(keyframeId);
   activeTab.value = "animation";
@@ -325,14 +337,60 @@ type KeyframePercentageField = Extract<PercentageField, "x" | "y" | "fontSize">;
 type AnchorAxis = "x" | "y";
 
 const anchorPercentageMode = ref<Record<AnchorAxis, boolean>>({ x: true, y: true });
+const percentageModeOverrides = ref<Record<string, boolean>>({});
+const keyframePercentageModeOverrides = ref<Record<string, boolean>>({});
+
+const isUnsetValue = (value: unknown) =>
+  value === undefined || value === null || value === "";
+
+const getPercentageModeKey = (field: PercentageField) =>
+  `${selected.value?.id ?? "none"}:${field}`;
+
+const getRawPercentageValue = (field: PercentageField) =>
+  (selected.value as Record<string, unknown> | null)?.[field];
+
+const getPercentageInputValue = (
+  field: PercentageField
+): string | number | undefined => {
+  const rawValue = getRawPercentageValue(field);
+  if (field === "fontSize" && isUnsetValue(rawValue)) return "";
+  const value = isUnsetValue(rawValue)
+    ? (resolvedSelected.value as unknown as Record<string, unknown> | null)?.[field]
+    : rawValue;
+  return typeof value === "string" || typeof value === "number" ? value : undefined;
+};
 
 const isPercentageValue = (field: PercentageField) => {
-  const value = (selected.value as Record<string, unknown> | null)?.[field];
+  const override = percentageModeOverrides.value[getPercentageModeKey(field)];
+  if (override !== undefined) return override;
+
+  const value = getRawPercentageValue(field);
+  if (isUnsetValue(value)) return true;
   return typeof value === "string" && value.trim().endsWith("%");
 };
 
+const updatePercentageValue = (field: PercentageField, value: string | number) => {
+  const numericValue = Number.parseFloat(String(value));
+  if (!Number.isFinite(numericValue)) return;
+
+  updateField(field, isPercentageValue(field) ? `${numericValue}%` : numericValue);
+};
+
 const setPercentageMode = (field: PercentageField, enabled: boolean) => {
-  const value = (selected.value as Record<string, unknown> | null)?.[field];
+  percentageModeOverrides.value = {
+    ...percentageModeOverrides.value,
+    [getPercentageModeKey(field)]: enabled,
+  };
+
+  const value = getRawPercentageValue(field);
+  if (isUnsetValue(value)) {
+    const resolvedValue = (resolvedSelected.value as unknown as Record<string, unknown> | null)?.[field];
+    const numericValue = Number.parseFloat(String(resolvedValue));
+    if (!Number.isFinite(numericValue)) return;
+    updateField(field, enabled ? `${numericValue}%` : numericValue);
+    return;
+  }
+
   const numericValue = typeof value === "number" ? value : Number.parseFloat(String(value));
   if (!Number.isFinite(numericValue)) return;
 
@@ -341,7 +399,7 @@ const setPercentageMode = (field: PercentageField, enabled: boolean) => {
 
 const getAnchorValue = (axis: AnchorAxis) => {
   const key = axis === "x" ? "anchorX" : "anchorY";
-  const value = selected.value?.[key] ?? 0;
+  const value = resolvedSelected.value?.[key] ?? 0;
   return anchorPercentageMode.value[axis] ? value * 100 : value;
 };
 
@@ -358,9 +416,31 @@ const updateAnchorValue = (axis: AnchorAxis, value: string | number) => {
   } as Partial<AnyDanmu>);
 };
 
+const getKeyframePercentageSource = (field: KeyframePercentageField) => {
+  let value = getRawPercentageValue(field);
+  if (activeKeyframeId.value !== BASE_KEYFRAME_ID) {
+    for (const keyframe of clipKeyframes.value) {
+      const storedValue = keyframe.properties[field];
+      if (!isUnsetValue(storedValue)) value = storedValue;
+      if (keyframe.id === activeKeyframeId.value) break;
+    }
+  }
+  return value;
+};
+
 const isKeyframePercentageValue = (field: KeyframePercentageField) => {
-  const value = activeKeyframeProperties.value[field];
+  const overrideKey = `${selectedClip.value?.id ?? "none"}:${activeKeyframeId.value}:${field}`;
+  const override = keyframePercentageModeOverrides.value[overrideKey];
+  if (override !== undefined) return override;
+
+  const value = getKeyframePercentageSource(field);
+  if (isUnsetValue(value)) return true;
   return typeof value === "string" && value.trim().endsWith("%");
+};
+
+const getKeyframePercentageInputValue = (field: KeyframePercentageField) => {
+  if (field === "fontSize" && isUnsetValue(getKeyframePercentageSource(field))) return "";
+  return activeKeyframeProperties.value[field];
 };
 
 const updateKeyframePercentageValue = (field: KeyframePercentageField, value: string | number) => {
@@ -370,7 +450,28 @@ const updateKeyframePercentageValue = (field: KeyframePercentageField, value: st
 };
 
 const setKeyframePercentageMode = (field: KeyframePercentageField, enabled: boolean) => {
-  const value = activeKeyframeProperties.value[field];
+  const overrideKey = `${selectedClip.value?.id ?? "none"}:${activeKeyframeId.value}:${field}`;
+  keyframePercentageModeOverrides.value = {
+    ...keyframePercentageModeOverrides.value,
+    [overrideKey]: enabled,
+  };
+
+  const value = activeKeyframeId.value === BASE_KEYFRAME_ID
+    ? getRawPercentageValue(field)
+    : activeKeyframeStoredProperties.value[field];
+  if (isUnsetValue(value)) {
+    if (activeKeyframeId.value === BASE_KEYFRAME_ID) {
+      setPercentageMode(field, enabled);
+      return;
+    }
+
+    const effectiveValue = activeKeyframeProperties.value[field];
+    const numericValue = Number.parseFloat(String(effectiveValue));
+    if (!Number.isFinite(numericValue)) return;
+    updateKeyframeProperty(field, enabled ? `${numericValue}%` : numericValue, false);
+    return;
+  }
+
   const numericValue = typeof value === "number" ? value : Number.parseFloat(String(value));
   if (!Number.isFinite(numericValue)) return;
   updateKeyframeProperty(field, enabled ? `${numericValue}%` : numericValue, false);
@@ -468,7 +569,7 @@ const getButtonAV = (item: any): number | undefined => {
           <div v-if="selected.type === 'text'" class="space-y-1">
             <span class="text-[10px] text-muted-foreground uppercase font-medium">文本内容 (Content)</span>
             <Textarea
-              :model-value="(selected as any).content"
+              :model-value="(resolvedSelected as any)?.content"
               @update:model-value="(v) => updateField('content', v)"
               class="min-h-20 text-xs resize-y leading-extended"
               placeholder="请输入弹幕文本..."
@@ -480,7 +581,7 @@ const getButtonAV = (item: any): number | undefined => {
             <div class="space-y-1">
               <span class="text-[10px] text-muted-foreground uppercase font-medium">按钮文字 (Display Text)</span>
               <Input
-                :model-value="(selected as any).text"
+                :model-value="(resolvedSelected as any)?.text"
                 @update:model-value="(v) => updateField('text', v)"
                 class="h-8 text-xs"
                 placeholder="按钮上显示的文字"
@@ -503,7 +604,7 @@ const getButtonAV = (item: any): number | undefined => {
             <div class="space-y-1">
               <span class="text-[10px] text-muted-foreground uppercase font-medium">SVG 路径 (Path Data - d)</span>
               <Textarea
-                :model-value="(selected as any).d"
+                :model-value="(resolvedSelected as any)?.d"
                 @update:model-value="(v) => updateField('d', v)"
                 class="min-h-20 text-xs font-mono resize-y"
                 placeholder="M0 0 L10 10..."
@@ -512,7 +613,7 @@ const getButtonAV = (item: any): number | undefined => {
             <div class="space-y-1">
               <span class="text-[10px] text-muted-foreground uppercase font-medium">画布范围 (ViewBox)</span>
               <Input
-                :model-value="(selected as any).viewBox"
+                :model-value="(resolvedSelected as any)?.viewBox"
                 @update:model-value="(v) => updateField('viewBox', v)"
                 class="h-8 text-xs font-mono"
                 placeholder="0 0 100 100"
@@ -541,28 +642,28 @@ const getButtonAV = (item: any): number | undefined => {
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">X 坐标</span>
                 <div class="flex gap-2">
-                  <Input :model-value="selected.x" @update:model-value="(v) => updateField('x', v)" class="h-7 min-w-0 flex-1 text-xs font-mono bg-accent" />
+                  <Input :model-value="getPercentageInputValue('x')" @update:model-value="(v) => updatePercentageValue('x', v)" class="h-7 min-w-0 flex-1 text-xs font-mono bg-accent" />
                   <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比定位"><Switch :model-value="isPercentageValue('x')" @update:model-value="setPercentageMode('x', $event)" />%</label>
                 </div>
             </div>
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">Y 坐标</span>
                 <div class="flex gap-2">
-                  <Input :model-value="selected.y" @update:model-value="(v) => updateField('y', v)" class="h-7 min-w-0 flex-1 text-xs font-mono bg-accent" />
+                  <Input :model-value="getPercentageInputValue('y')" @update:model-value="(v) => updatePercentageValue('y', v)" class="h-7 min-w-0 flex-1 text-xs font-mono bg-accent" />
                   <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布高度的百分比定位"><Switch :model-value="isPercentageValue('y')" @update:model-value="setPercentageMode('y', $event)" />%</label>
                 </div>
             </div>
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">缩放 (Scale)</span>
-                <Input type="number" step="0.1" :model-value="selected.scale" @update:model-value="(v) => updateField('scale', v, true)" class="h-7 text-xs font-mono" />
+                <Input type="number" step="0.1" :model-value="resolvedSelected?.scale" @update:model-value="(v) => updateField('scale', v, true)" class="h-7 text-xs font-mono" />
             </div>
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">层级 (Z-Index)</span>
-                <Input type="number" step="1" :model-value="selected.zIndex" @update:model-value="(v) => updateField('zIndex', v, true)" class="h-7 text-xs font-mono" />
+                <Input type="number" step="1" :model-value="resolvedSelected?.zIndex" @update:model-value="(v) => updateField('zIndex', v, true)" class="h-7 text-xs font-mono" />
             </div>
             </div>
 
-            <div class="grid grid-cols-2 gap-4 pt-1">
+            <div v-if="selected.type === 'text'" class="grid grid-cols-2 gap-4 pt-1">
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">锚点 X</span>
                 <div class="flex gap-2">
@@ -579,18 +680,18 @@ const getButtonAV = (item: any): number | undefined => {
             </div>
             </div>
 
-            <div class="grid grid-cols-3 gap-2 pt-1">
+            <div v-if="selected.type === 'text'" class="grid grid-cols-3 gap-2 pt-1">
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">旋转 X</span>
-                <Input type="number" :model-value="selected.rotateX" @update:model-value="(v) => updateField('rotateX', v, true)" class="h-7 text-xs font-mono" />
+                <Input type="number" :model-value="resolvedSelected?.rotateX" @update:model-value="(v) => updateField('rotateX', v, true)" class="h-7 text-xs font-mono" />
             </div>
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">旋转 Y</span>
-                <Input type="number" :model-value="selected.rotateY" @update:model-value="(v) => updateField('rotateY', v, true)" class="h-7 text-xs font-mono" />
+                <Input type="number" :model-value="resolvedSelected?.rotateY" @update:model-value="(v) => updateField('rotateY', v, true)" class="h-7 text-xs font-mono" />
             </div>
             <div class="space-y-1">
                 <span class="text-[10px] text-muted-foreground uppercase">旋转 Z</span>
-                <Input type="number" :model-value="selected.rotateZ" @update:model-value="(v) => updateField('rotateZ', v, true)" class="h-7 text-xs font-mono" />
+                <Input type="number" :model-value="resolvedSelected?.rotateZ" @update:model-value="(v) => updateField('rotateZ', v, true)" class="h-7 text-xs font-mono" />
             </div>
             </div>
         </div>
@@ -611,15 +712,15 @@ const getButtonAV = (item: any): number | undefined => {
         </div>
 
         <div class="space-y-4 pt-1">
-            <!-- 通用：不透明度与时长 -->
+            <!-- 文本不透明度与通用时长 -->
             <div class="grid grid-cols-2 gap-4">
-            <div class="space-y-1">
+            <div v-if="selected.type === 'text'" class="space-y-1">
                 <div class="flex justify-between items-center mb-1">
                     <span class="text-[10px] text-muted-foreground uppercase">不透明度</span>
-                    <span class="text-[10px] text-muted-foreground font-mono">{{ ((selected.opacity ?? 1) * 100).toFixed(0) }}%</span>
+                    <span class="text-[10px] text-muted-foreground font-mono">{{ ((resolvedSelected?.opacity ?? 1) * 100).toFixed(0) }}%</span>
                 </div>
                 <Slider
-                    :model-value="[selected.opacity ?? 1]" :max="1" :step="0.01"
+                    :model-value="[resolvedSelected?.opacity ?? 1]" :max="1" :step="0.01"
                     @update:model-value="(v) => v && updateField('opacity', v[0], true)"
                     class="w-full h-7"
                 />
@@ -636,19 +737,19 @@ const getButtonAV = (item: any): number | undefined => {
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">字号</span>
                     <div class="flex gap-2">
-                      <Input :model-value="(selected as any).fontSize" @update:model-value="(v) => updateField('fontSize', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
+                      <Input :model-value="getPercentageInputValue('fontSize')" @update:model-value="(v) => updatePercentageValue('fontSize', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" placeholder="BAS 默认 25px" />
                       <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置字号"><Switch :model-value="isPercentageValue('fontSize')" @update:model-value="setPercentageMode('fontSize', $event)" />%</label>
                     </div>
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">字体</span>
-                    <Input :model-value="(selected as any).fontFamily" @update:model-value="(v) => updateField('fontFamily', v)" class="h-7 text-xs" />
+                    <Input :model-value="(resolvedSelected as any)?.fontFamily" @update:model-value="(v) => updateField('fontFamily', v)" class="h-7 text-xs" />
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">文字颜色</span>
                     <div class="flex gap-2">
-                        <Input type="color" :model-value="toHtmlColor((selected as any).color)" @input="(e: Event) => updateColor('color', (e.target as HTMLInputElement).value, false)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
-                        <Input :model-value="(selected as any).color" @update:model-value="(v) => updateField('color', v)" class="h-7 text-[10px] font-mono flex-1" />
+                        <Input type="color" :model-value="toHtmlColor((resolvedSelected as any)?.color)" @input="(e: Event) => updateColor('color', (e.target as HTMLInputElement).value, false)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
+                        <Input :model-value="(resolvedSelected as any)?.color" @update:model-value="(v) => updateField('color', v)" class="h-7 text-[10px] font-mono flex-1" />
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-2">
@@ -658,14 +759,14 @@ const getButtonAV = (item: any): number | undefined => {
                         <button
                             type="button"
                             role="switch"
-                            :aria-checked="!!(selected as any).bold"
-                            @click="updateBoolean('bold', !(selected as any).bold)"
+                            :aria-checked="!!(resolvedSelected as any)?.bold"
+                            @click="updateBoolean('bold', !(resolvedSelected as any)?.bold)"
                             class="peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
-                            :class="!!(selected as any).bold ? 'bg-primary' : 'bg-input'"
+                            :class="!!(resolvedSelected as any)?.bold ? 'bg-primary' : 'bg-input'"
                         >
                             <span
                             class="pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform"
-                            :class="!!(selected as any).bold ? 'translate-x-4' : 'translate-x-0'"
+                            :class="!!(resolvedSelected as any)?.bold ? 'translate-x-4' : 'translate-x-0'"
                             />
                         </button>
                     </div>
@@ -676,14 +777,14 @@ const getButtonAV = (item: any): number | undefined => {
                         <button
                             type="button"
                             role="switch"
-                            :aria-checked="!!(selected as any).textShadow"
-                            @click="updateBoolean('textShadow', !(selected as any).textShadow)"
+                            :aria-checked="!!(resolvedSelected as any)?.textShadow"
+                            @click="updateBoolean('textShadow', !(resolvedSelected as any)?.textShadow)"
                             class="peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
-                            :class="!!(selected as any).textShadow ? 'bg-primary' : 'bg-input'"
+                            :class="!!(resolvedSelected as any)?.textShadow ? 'bg-primary' : 'bg-input'"
                         >
                             <span
                             class="pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform"
-                            :class="!!(selected as any).textShadow ? 'translate-x-4' : 'translate-x-0'"
+                            :class="!!(resolvedSelected as any)?.textShadow ? 'translate-x-4' : 'translate-x-0'"
                             />
                         </button>
                     </div>
@@ -694,13 +795,13 @@ const getButtonAV = (item: any): number | undefined => {
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">描边颜色</span>
                     <div class="flex gap-2">
-                        <Input type="color" :model-value="toHtmlColor((selected as any).strokeColor)" @input="(e: Event) => updateColor('strokeColor', (e.target as HTMLInputElement).value, false)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
-                        <Input :model-value="(selected as any).strokeColor" @update:model-value="(v) => updateField('strokeColor', v)" class="h-7 text-[10px] font-mono flex-1" />
+                        <Input type="color" :model-value="toHtmlColor((resolvedSelected as any)?.strokeColor)" @input="(e: Event) => updateColor('strokeColor', (e.target as HTMLInputElement).value, false)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
+                        <Input :model-value="(resolvedSelected as any)?.strokeColor" @update:model-value="(v) => updateField('strokeColor', v)" class="h-7 text-[10px] font-mono flex-1" />
                     </div>
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">描边宽度</span>
-                    <Input type="number" step="0.5" :model-value="(selected as any).strokeWidth" @update:model-value="(v) => updateField('strokeWidth', v, true)" class="h-7 text-xs font-mono" />
+                    <Input type="number" step="0.5" :model-value="(resolvedSelected as any)?.strokeWidth" @update:model-value="(v) => updateField('strokeWidth', v, true)" class="h-7 text-xs font-mono" />
                 </div>
             </div>
             </div>
@@ -711,32 +812,32 @@ const getButtonAV = (item: any): number | undefined => {
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">字号</span>
                     <div class="flex gap-2">
-                      <Input :model-value="(selected as any).fontSize" @update:model-value="(v) => updateField('fontSize', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
+                      <Input :model-value="getPercentageInputValue('fontSize')" @update:model-value="(v) => updatePercentageValue('fontSize', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" placeholder="BAS 默认 25px" />
                       <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置字号"><Switch :model-value="isPercentageValue('fontSize')" @update:model-value="setPercentageMode('fontSize', $event)" />%</label>
                     </div>
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">文字颜色</span>
                     <div class="flex items-center gap-2">
-                    <Input type="color" :model-value="toHtmlColor((selected as any).textColor)" @input="(e: Event) => updateColor('textColor', (e.target as HTMLInputElement).value, true)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
-                    <span class="text-[10px] font-mono uppercase">{{ toHtmlColor((selected as any).textColor) }}</span>
+                    <Input type="color" :model-value="toHtmlColor((resolvedSelected as any)?.textColor)" @input="(e: Event) => updateColor('textColor', (e.target as HTMLInputElement).value, true)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
+                    <span class="text-[10px] font-mono uppercase">{{ toHtmlColor((resolvedSelected as any)?.textColor) }}</span>
                     </div>
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">填充颜色</span>
                     <div class="flex items-center gap-2">
-                    <Input type="color" :model-value="toHtmlColor((selected as any).fillColor)" @input="(e: Event) => updateColor('fillColor', (e.target as HTMLInputElement).value, true)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
-                    <span class="text-[10px] font-mono uppercase">{{ toHtmlColor((selected as any).fillColor) }}</span>
+                    <Input type="color" :model-value="toHtmlColor((resolvedSelected as any)?.fillColor)" @input="(e: Event) => updateColor('fillColor', (e.target as HTMLInputElement).value, true)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
+                    <span class="text-[10px] font-mono uppercase">{{ toHtmlColor((resolvedSelected as any)?.fillColor) }}</span>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">文字透</span>
-                    <Input type="number" step="0.1" :min="0" :max="1" :model-value="(selected as any).textAlpha" @update:model-value="(v) => updateField('textAlpha', v, true)" class="h-7 text-[10px] font-mono" />
+                    <Input type="number" step="0.1" :min="0" :max="1" :model-value="(resolvedSelected as any)?.textAlpha" @update:model-value="(v) => updateField('textAlpha', v, true)" class="h-7 text-[10px] font-mono" />
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">填充透</span>
-                    <Input type="number" step="0.1" :min="0" :max="1" :model-value="(selected as any).fillAlpha" @update:model-value="(v) => updateField('fillAlpha', v, true)" class="h-7 text-[10px] font-mono" />
+                    <Input type="number" step="0.1" :min="0" :max="1" :model-value="(resolvedSelected as any)?.fillAlpha" @update:model-value="(v) => updateField('fillAlpha', v, true)" class="h-7 text-[10px] font-mono" />
                 </div>
                 </div>
             </div>
@@ -748,14 +849,14 @@ const getButtonAV = (item: any): number | undefined => {
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">宽度 (Width)</span>
                     <div class="flex gap-2">
-                      <Input :model-value="(selected as any).width" @update:model-value="(v) => updateField('width', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
+                      <Input :model-value="getPercentageInputValue('width')" @update:model-value="(v) => updatePercentageValue('width', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
                       <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置；需要 ViewBox"><Switch :model-value="isPercentageValue('width')" @update:model-value="setPercentageMode('width', $event)" />%</label>
                     </div>
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">高度 (Height)</span>
                     <div class="flex gap-2">
-                      <Input :model-value="(selected as any).height" @update:model-value="(v) => updateField('height', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
+                      <Input :model-value="getPercentageInputValue('height')" @update:model-value="(v) => updatePercentageValue('height', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
                       <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布高度的百分比设置；需要 ViewBox"><Switch :model-value="isPercentageValue('height')" @update:model-value="setPercentageMode('height', $event)" />%</label>
                     </div>
                 </div>
@@ -764,29 +865,29 @@ const getButtonAV = (item: any): number | undefined => {
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">填充颜色</span>
                     <div class="flex items-center gap-2">
-                    <Input type="color" :model-value="toHtmlColor((selected as any).fillColor)" @input="(e: Event) => updateColor('fillColor', (e.target as HTMLInputElement).value, true)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
-                    <span class="text-[10px] font-mono uppercase">{{ toHtmlColor((selected as any).fillColor) }}</span>
+                    <Input type="color" :model-value="toHtmlColor((resolvedSelected as any)?.fillColor)" @input="(e: Event) => updateColor('fillColor', (e.target as HTMLInputElement).value, true)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
+                    <span class="text-[10px] font-mono uppercase">{{ toHtmlColor((resolvedSelected as any)?.fillColor) }}</span>
                     </div>
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">填充透明度</span>
-                    <Input type="number" step="0.1" :min="0" :max="1" :model-value="(selected as any).fillAlpha" @update:model-value="(v) => updateField('fillAlpha', v, true)" class="h-7 text-xs font-mono" />
+                    <Input type="number" step="0.1" :min="0" :max="1" :model-value="(resolvedSelected as any)?.fillAlpha" @update:model-value="(v) => updateField('fillAlpha', v, true)" class="h-7 text-xs font-mono" />
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">描边颜色</span>
                     <div class="flex items-center gap-2">
-                    <Input type="color" :model-value="toHtmlColor((selected as any).borderColor)" @input="(e: Event) => updateColor('borderColor', (e.target as HTMLInputElement).value, true)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
-                    <span class="text-[10px] font-mono uppercase">{{ toHtmlColor((selected as any).borderColor) }}</span>
+                    <Input type="color" :model-value="toHtmlColor((resolvedSelected as any)?.borderColor)" @input="(e: Event) => updateColor('borderColor', (e.target as HTMLInputElement).value, true)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
+                    <span class="text-[10px] font-mono uppercase">{{ toHtmlColor((resolvedSelected as any)?.borderColor) }}</span>
                     </div>
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">描边宽</span>
-                    <Input type="number" step="0.5" :model-value="(selected as any).borderWidth" @update:model-value="(v) => updateField('borderWidth', v, true)" class="h-7 text-[10px] font-mono" />
+                    <Input type="number" step="0.5" :model-value="(resolvedSelected as any)?.borderWidth" @update:model-value="(v) => updateField('borderWidth', v, true)" class="h-7 text-[10px] font-mono" />
                 </div>
                 <div class="space-y-1">
                     <span class="text-[10px] text-muted-foreground uppercase">描边透</span>
-                    <Input type="number" step="0.1" :min="0" :max="1" :model-value="(selected as any).borderAlpha" @update:model-value="(v) => updateField('borderAlpha', v, true)" class="h-7 text-[10px] font-mono" />
+                    <Input type="number" step="0.1" :min="0" :max="1" :model-value="(resolvedSelected as any)?.borderAlpha" @update:model-value="(v) => updateField('borderAlpha', v, true)" class="h-7 text-[10px] font-mono" />
                 </div>
                 </div>
             </div>
@@ -925,14 +1026,14 @@ const getButtonAV = (item: any): number | undefined => {
                 <div class="space-y-1">
                   <Label class="text-[10px] text-muted-foreground uppercase">X 坐标</Label>
                   <div class="flex gap-2">
-                    <Input :model-value="activeKeyframeProperties.x" @update:model-value="(v) => updateKeyframePercentageValue('x', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" />
+                    <Input :model-value="getKeyframePercentageInputValue('x')" @update:model-value="(v) => updateKeyframePercentageValue('x', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" />
                     <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置关键帧"><Switch :model-value="isKeyframePercentageValue('x')" @update:model-value="setKeyframePercentageMode('x', $event)" />%</label>
                   </div>
                 </div>
                 <div class="space-y-1">
                   <Label class="text-[10px] text-muted-foreground uppercase">Y 坐标</Label>
                   <div class="flex gap-2">
-                    <Input :model-value="activeKeyframeProperties.y" @update:model-value="(v) => updateKeyframePercentageValue('y', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" />
+                    <Input :model-value="getKeyframePercentageInputValue('y')" @update:model-value="(v) => updateKeyframePercentageValue('y', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" />
                     <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布高度的百分比设置关键帧"><Switch :model-value="isKeyframePercentageValue('y')" @update:model-value="setKeyframePercentageMode('y', $event)" />%</label>
                   </div>
                 </div>
@@ -954,7 +1055,7 @@ const getButtonAV = (item: any): number | undefined => {
               <div v-if="selected.type === 'text' || selected.type === 'button'" class="space-y-1">
                 <Label class="text-[10px] text-muted-foreground uppercase">字号</Label>
                 <div class="flex gap-2">
-                  <Input :model-value="activeKeyframeProperties.fontSize" @update:model-value="(v) => updateKeyframePercentageValue('fontSize', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" />
+                  <Input :model-value="getKeyframePercentageInputValue('fontSize')" @update:model-value="(v) => updateKeyframePercentageValue('fontSize', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" placeholder="继承 BAS 默认 25px" />
                   <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置关键帧字号"><Switch :model-value="isKeyframePercentageValue('fontSize')" @update:model-value="setKeyframePercentageMode('fontSize', $event)" />%</label>
                 </div>
               </div>
@@ -1071,7 +1172,7 @@ const getButtonAV = (item: any): number | undefined => {
               :min="VOLUME_DB_MIN"
               :max="VOLUME_DB_MAX"
               :step="VOLUME_STEP"
-              @update:model-value="(v) => v && updateAudioVolume(v[0])"
+              @update:model-value="(v) => updateAudioVolume(v?.[0] ?? audioVolumeDb)"
               class="flex-1 h-7"
             />
             <span class="text-[10px] text-muted-foreground w-6">{{ VOLUME_DB_MAX }}</span>

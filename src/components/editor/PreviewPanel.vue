@@ -27,6 +27,7 @@ import {
   BASE_KEYFRAME_ID,
   clampKeyframeTime,
   getEffectiveDanmuAtTime,
+  normalizeKeyframes,
   pickKeyframePropertiesForResource,
 } from "@/utils/keyframes";
 
@@ -102,8 +103,67 @@ const resolutionMenuRef = ref<HTMLElement | null>(null);
 onClickOutside(zoomMenuRef, () => { isZoomMenuOpen.value = false; });
 onClickOutside(resolutionMenuRef, () => { isResolutionMenuOpen.value = false; });
 
+type CoordinateField = "x" | "y";
+
+const isUnsetCoordinate = (value: unknown) =>
+  value === undefined || value === null || value === "";
+
+const isPercentageCoordinate = (value: unknown) =>
+  typeof value === "string" && value.trim().endsWith("%");
+
+const getSelectedCoordinateSource = (
+  danmu: AnyDanmu,
+  clip: TimelineClip,
+  selectedKeyframeId: string,
+  field: CoordinateField
+) => {
+  let source = danmu[field];
+
+  for (const keyframe of normalizeKeyframes(clip.keyframes, clip.duration)) {
+    const value = keyframe.properties[field];
+    if (!isUnsetCoordinate(value)) source = value;
+    if (keyframe.id === selectedKeyframeId) break;
+  }
+
+  return source;
+};
+
+const usesPercentageCoordinate = (
+  danmu: AnyDanmu,
+  clip: TimelineClip,
+  selectedKeyframeId: string | null,
+  effectiveValue: unknown,
+  field: CoordinateField
+) => {
+  if (typeof effectiveValue === "string" && effectiveValue.trim().endsWith("%")) {
+    return true;
+  }
+
+  if (selectedKeyframeId && selectedKeyframeId !== BASE_KEYFRAME_ID) {
+    const source = getSelectedCoordinateSource(danmu, clip, selectedKeyframeId, field);
+    return isUnsetCoordinate(source) || isPercentageCoordinate(source);
+  }
+
+  const rawValue = danmu[field];
+  const localTimeMs = timelineStore.currentTime - clip.startTime;
+  if (selectedKeyframeId === BASE_KEYFRAME_ID || localTimeMs <= 0) {
+    return isUnsetCoordinate(rawValue) || isPercentageCoordinate(rawValue);
+  }
+
+  const hasAnimatedValue = clip.keyframes?.some(
+    keyframe => !isUnsetCoordinate(keyframe.properties[field])
+  );
+  if (hasAnimatedValue) return false;
+
+  return isUnsetCoordinate(rawValue) || isPercentageCoordinate(rawValue);
+};
+
 const previewTransformItems = computed(() => {
-  const items: Array<{ clipId: string; danmu: AnyDanmu }> = [];
+  const items: Array<{
+    clipId: string;
+    danmu: AnyDanmu;
+    coordinatePercentageMode: { x: boolean; y: boolean };
+  }> = [];
 
   for (const track of timelineStore.tracks) {
     if (!track.visible) continue;
@@ -114,15 +174,32 @@ const previewTransformItems = computed(() => {
 
       const selectedKeyframeId =
         clip.id === timelineStore.selectedClipId ? timelineStore.selectedKeyframeId : null;
+      const effectiveDanmu = getEffectiveDanmuAtTime(
+        danmu,
+        clip,
+        timelineStore.currentTime,
+        selectedKeyframeId
+      );
 
       items.push({
         clipId: clip.id,
-        danmu: getEffectiveDanmuAtTime(
-          danmu,
-          clip,
-          timelineStore.currentTime,
-          selectedKeyframeId
-        ),
+        danmu: effectiveDanmu,
+        coordinatePercentageMode: {
+          x: usesPercentageCoordinate(
+            danmu,
+            clip,
+            selectedKeyframeId,
+            effectiveDanmu.x,
+            "x"
+          ),
+          y: usesPercentageCoordinate(
+            danmu,
+            clip,
+            selectedKeyframeId,
+            effectiveDanmu.y,
+            "y"
+          ),
+        },
       });
     }
   }

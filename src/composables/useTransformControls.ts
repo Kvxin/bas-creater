@@ -53,7 +53,7 @@ export function useTransformControls(
   }
 
   // Convert percentage to pixels
-  const percentToPixels = (val: number | string, dimension: 'x' | 'y'): number => {
+  const percentToPixels = (val: number | string | undefined, dimension: 'x' | 'y'): number => {
     if (typeof val === 'string' && val.endsWith('%')) {
       const percent = parseFloat(val)
       return (percent / 100) * (dimension === 'x' ? containerWidth.value : containerHeight.value)

@@ -5,8 +5,8 @@ export interface DanmuBase {
   id: string
   type: DanmuType
   name?: string // 用户自定义名称
-  x: number | string
-  y: number | string
+  x?: number | string
+  y?: number | string
   zIndex?: number
   durationMs?: number
   scale?: number

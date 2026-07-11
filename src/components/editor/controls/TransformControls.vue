@@ -18,6 +18,10 @@ type ActiveGesture = DragGesture | ScaleGesture | RotateGesture | AnchorGesture 
 interface TransformOverlayItem {
   clipId: string
   danmu: AnyDanmu
+  coordinatePercentageMode?: {
+    x: boolean
+    y: boolean
+  }
 }
 
 interface ElementRect {
@@ -151,6 +155,11 @@ const selectedDraft = computed(() => {
   return clipId ? getDraft(clipId) : null
 })
 
+const selectedSupportsTextTransform = computed(() => {
+  const clipId = primarySelectedClipId.value
+  return clipId ? itemByClipId.value.get(clipId)?.danmu.type === 'text' : false
+})
+
 const percentToPixels = (val: number | string | undefined, dimension: 'x' | 'y'): number => {
   const size = dimension === 'x' ? props.containerWidth : props.containerHeight
 
@@ -174,6 +183,18 @@ const pixelsToPercent = (px: number, dimension: 'x' | 'y'): number => {
   return size > 0 && Number.isFinite(px) ? (px / size) * 100 : 0
 }
 
+const shouldStoreCoordinateAsPercentage = (
+  item: TransformOverlayItem,
+  dimension: 'x' | 'y'
+) => {
+  const preferredMode = item.coordinatePercentageMode?.[dimension]
+  if (preferredMode !== undefined) return preferredMode
+
+  const value = item.danmu[dimension]
+  return value == null ||
+    (typeof value === 'string' && value.trim().endsWith('%'))
+}
+
 const sanitizeClipId = (clipId: string) => clipId.replace(/[^a-zA-Z0-9]/g, '_')
 
 const cloneDraft = (draft: DraftTransform): DraftTransform => ({ ...draft })
@@ -185,7 +206,7 @@ const resolveFontSizePx = (danmu: AnyDanmu): number => {
       ? danmu.fontSize
       : undefined
 
-  const fallbackPx = (5 / 100) * props.containerWidth
+  const fallbackPx = 25
 
   if (typeof raw === 'number') {
     return raw
@@ -464,7 +485,7 @@ const anchorPoint = computed(() => {
 const anchorHandlePoint = computed(() => {
   const draft = selectedDraft.value
   const point = anchorPoint.value
-  if (!draft || !point || textEditor.value) return null
+  if (!draft || !point || textEditor.value || !selectedSupportsTextTransform.value) return null
 
   const corners = Object.values(getDraftCorners(draft))
   const overlapThreshold = HANDLE_HIT_SCREEN_SIZE * getInverseCanvasScale()
@@ -488,7 +509,7 @@ const anchorHandlePoint = computed(() => {
 
 const rotationHandlePoint = computed(() => {
   const draft = selectedDraft.value
-  if (!draft || textEditor.value) return null
+  if (!draft || textEditor.value || !selectedSupportsTextTransform.value) return null
 
   const center = getDraftCenter(draft)
   const topCenter = getDraftPoint(draft, 0.5, 0)
@@ -746,7 +767,13 @@ function applyGestureDraft(clipId: string, nextDraft: DraftTransform) {
 
 type DraftCommitField = 'x' | 'y' | 'scale' | 'rotateZ' | 'anchorX' | 'anchorY'
 
-function commitDrafts(clipIds: string[], fields: DraftCommitField[]) {
+const DRAFT_CHANGE_EPSILON = 0.0001
+
+function commitDrafts(
+  clipIds: string[],
+  fields: DraftCommitField[],
+  initialDrafts?: ReadonlyMap<string, DraftTransform>
+) {
   const updates = new Map<string, Partial<AnyDanmu>>()
 
   for (const clipId of clipIds) {
@@ -754,11 +781,17 @@ function commitDrafts(clipIds: string[], fields: DraftCommitField[]) {
     const draft = getDraft(clipId)
     if (!item || !draft) continue
 
+    const initialDraft = initialDrafts?.get(clipId)
+    const changedFields = initialDraft
+      ? fields.filter((field) => Math.abs(draft[field] - initialDraft[field]) > DRAFT_CHANGE_EPSILON)
+      : fields
+    if (!changedFields.length) continue
+
     const values: Record<DraftCommitField, number | string> = {
-      x: typeof item.danmu.x === 'string' && item.danmu.x.trim().endsWith('%')
+      x: shouldStoreCoordinateAsPercentage(item, 'x')
         ? `${round(pixelsToPercent(draft.x, 'x'))}%`
         : round(draft.x),
-      y: typeof item.danmu.y === 'string' && item.danmu.y.trim().endsWith('%')
+      y: shouldStoreCoordinateAsPercentage(item, 'y')
         ? `${round(pixelsToPercent(draft.y, 'y'))}%`
         : round(draft.y),
       scale: round(clampScale(draft.scale)),
@@ -768,7 +801,7 @@ function commitDrafts(clipIds: string[], fields: DraftCommitField[]) {
     }
     updates.set(
       item.danmu.id,
-      Object.fromEntries(fields.map((field) => [field, values[field]])) as Partial<AnyDanmu>
+      Object.fromEntries(changedFields.map((field) => [field, values[field]])) as Partial<AnyDanmu>
     )
   }
 
@@ -1003,7 +1036,11 @@ function finishGesture(event?: PointerEvent) {
 
   if (gesture.type === 'drag') {
     if (gesture.moved) {
-      commitDrafts(gesture.snapshots.map((snapshot) => snapshot.clipId), ['x', 'y'])
+      commitDrafts(
+        gesture.snapshots.map((snapshot) => snapshot.clipId),
+        ['x', 'y'],
+        new Map(gesture.snapshots.map((snapshot) => [snapshot.clipId, snapshot]))
+      )
     }
     return
   }
@@ -1014,11 +1051,23 @@ function finishGesture(event?: PointerEvent) {
   }
 
   if (gesture.type === 'scale') {
-    commitDrafts([gesture.clipId], ['x', 'y', 'scale'])
+    commitDrafts(
+      [gesture.clipId],
+      ['x', 'y', 'scale'],
+      new Map([[gesture.clipId, gesture.startDraft]])
+    )
   } else if (gesture.type === 'rotate') {
-    commitDrafts([gesture.clipId], ['rotateZ'])
+    commitDrafts(
+      [gesture.clipId],
+      ['rotateZ'],
+      new Map([[gesture.clipId, gesture.startDraft]])
+    )
   } else {
-    commitDrafts([gesture.clipId], ['x', 'y', 'anchorX', 'anchorY'])
+    commitDrafts(
+      [gesture.clipId],
+      ['x', 'y', 'anchorX', 'anchorY'],
+      new Map([[gesture.clipId, gesture.startDraft]])
+    )
   }
 }
 

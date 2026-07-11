@@ -4,6 +4,7 @@ import type {
   TimelineKeyframe,
   TimelineKeyframeProperties,
 } from "@/types/timeline";
+import { resolveDanmuDefaults } from "@/utils/danmuDefaults";
 
 export const BASE_KEYFRAME_ID = "__base_keyframe__";
 
@@ -75,7 +76,12 @@ export const pickKeyframeProperties = (
 
   for (const key of ANIMATABLE_KEYS) {
     const value = (source as Record<string, unknown>)[key];
-    if (value !== undefined && value !== null && value !== "") {
+    const allowsEmptyString = key === "content" || key === "text";
+    if (
+      value !== undefined &&
+      value !== null &&
+      (value !== "" || allowsEmptyString)
+    ) {
       (picked as Record<string, unknown>)[key] = value;
     }
   }
@@ -95,23 +101,31 @@ export const pickKeyframePropertiesForResource = (
   ) as TimelineKeyframeProperties;
 };
 
-export const getBaseKeyframeProperties = (resource: AnyDanmu): TimelineKeyframeProperties =>
-  pickKeyframePropertiesForResource(resource, {
-    x: resource.x,
-    y: resource.y,
-    content: resource.type === "text" ? resource.content : undefined,
-    text: resource.type === "button" ? resource.text : undefined,
-    scale: resource.scale,
-    rotateX: resource.rotateX,
-    rotateY: resource.rotateY,
-    rotateZ: resource.rotateZ,
-    opacity: resource.opacity,
-    color: resource.type === "text" ? resource.color : undefined,
+export const getBaseKeyframeProperties = (resource: AnyDanmu): TimelineKeyframeProperties => {
+  const resolved = resolveDanmuDefaults(resource);
+
+  return pickKeyframePropertiesForResource(resource, {
+    x: resolved.x,
+    y: resolved.y,
+    content:
+      resolved.type === "text"
+        ? resolved.content
+        : undefined,
+    text:
+      resolved.type === "button" ? resolved.text : undefined,
+    scale: resolved.scale,
+    rotateX: resolved.rotateX,
+    rotateY: resolved.rotateY,
+    rotateZ: resolved.rotateZ,
+    opacity: resolved.opacity,
+    color:
+      resolved.type === "text" ? resolved.color : undefined,
     fontSize:
-      resource.type === "text" || resource.type === "button"
-        ? resource.fontSize
+      resolved.type === "text" || resolved.type === "button"
+        ? resolved.fontSize
         : undefined,
   });
+};
 
 export const findKeyframeAtTime = (
   keyframes: TimelineKeyframe[] | undefined,
