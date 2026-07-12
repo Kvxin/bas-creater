@@ -120,7 +120,11 @@ export class AudioEngine {
 
     source.start(when, offset, duration);
     source.onended = () => {
-      this.activeSourceNodes.delete(clipId);
+      // A replacement may already be registered for this clip. An old source
+      // must not remove the handle used to stop the newer source.
+      if (this.activeSourceNodes.get(clipId)?.source === source) {
+        this.activeSourceNodes.delete(clipId);
+      }
     };
 
     this.activeSourceNodes.set(clipId, { source, gainNode });
@@ -169,7 +173,9 @@ export class AudioEngine {
 
     source.start(when, offset, duration);
     source.onended = () => {
-      this.activeSourceNodes.delete(clipId);
+      if (this.activeSourceNodes.get(clipId)?.source === source) {
+        this.activeSourceNodes.delete(clipId);
+      }
     };
 
     this.activeSourceNodes.set(clipId, { source, gainNode });

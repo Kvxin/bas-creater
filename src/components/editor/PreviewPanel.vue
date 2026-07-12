@@ -452,6 +452,8 @@ const needsRecompile = ref(false);
 // ---- Audio Engine 播放 ----
 
 const audioEngine = getAudioEngine();
+// Invalidates stale async buffer-loading work whenever audio is rescheduled.
+let audioPlaybackRequestId = 0;
 
 const isAtTimelineEnd = (timeMs = timelineStore.currentTime) => {
   return (
@@ -461,8 +463,13 @@ const isAtTimelineEnd = (timeMs = timelineStore.currentTime) => {
 };
 
 async function startAudioPlayback(startTimeMs: number) {
+  const requestId = ++audioPlaybackRequestId;
+  audioEngine.stopAll();
+
   // 确保 AudioContext 处于运行状态
   await audioEngine.ensureResumed();
+
+  if (requestId !== audioPlaybackRequestId) return;
 
   const now = audioEngine.getCurrentTime();
   const resourceById = new Map(
@@ -492,6 +499,8 @@ async function startAudioPlayback(startTimeMs: number) {
 
       try {
         const buffer = await audioEngine.loadAudioBuffer(resource.url);
+        if (requestId !== audioPlaybackRequestId) return;
+
         audioEngine.scheduleClip(
           clip.id,
           buffer,
@@ -508,6 +517,7 @@ async function startAudioPlayback(startTimeMs: number) {
 }
 
 function stopAudioPlayback() {
+  audioPlaybackRequestId++;
   audioEngine.stopAll();
 }
 
