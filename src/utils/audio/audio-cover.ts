@@ -10,6 +10,8 @@ export async function extractAudioCover(file: File): Promise<string | null> {
         const type = item.get("pictureType")?.toString().toLowerCase();
         return type === "3" || type === "front cover";
       }) ?? pictures[0];
+    if (!picture) return null;
+
     const data = picture?.get("data")?.toByteVector().data;
 
     if (!data?.length) return null;

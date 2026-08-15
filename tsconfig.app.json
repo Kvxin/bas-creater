@@ -7,7 +7,8 @@
 
     "paths": {
       "@/*": ["./src/*"],
-      "moveable": ["./node_modules/.pnpm/node_modules/moveable"]
+      "moveable": ["./node_modules/.pnpm/node_modules/moveable"],
+      "@dantheman827/taglib-ts/*": ["./node_modules/@dantheman827/taglib-ts/dist/*"]
     },
     "baseUrl": "."
   }
