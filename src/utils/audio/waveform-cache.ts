@@ -30,12 +30,14 @@ function computePeakBuckets(buffer: AudioBuffer, buckets: SampleBucket[]): Float
 
   const result = new Float32Array(buckets.length);
   for (let i = 0; i < buckets.length; i++) {
-    const { bucketStart, bucketEnd } = buckets[i];
+    const bucket = buckets[i];
+    if (!bucket) continue;
+    const { bucketStart, bucketEnd } = bucket;
     let peak = 0;
     for (let c = 0; c < channels; c++) {
       const data = channelData[c];
       for (let j = bucketStart; j < bucketEnd; j++) {
-        const abs = Math.abs(data[j] ?? 0);
+        const abs = Math.abs(data?.[j] ?? 0);
         if (abs > peak) peak = abs;
       }
     }

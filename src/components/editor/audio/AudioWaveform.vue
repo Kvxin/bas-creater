@@ -212,8 +212,10 @@ function sampleGainAtClipTime(samples: number[], clipTimeSec: number, durationSe
   const rawIndex = progress * (samples.length - 1);
   const lo = Math.floor(rawIndex);
   const hi = Math.min(samples.length - 1, lo + 1);
-  if (lo === hi) return samples[lo];
-  return samples[lo] + (samples[hi] - samples[lo]) * (rawIndex - lo);
+  const lowSample = samples[lo] ?? 1;
+  if (lo === hi) return lowSample;
+  const highSample = samples[hi] ?? lowSample;
+  return lowSample + (highSample - lowSample) * (rawIndex - lo);
 }
 
 // ---- 查找可滚动父元素 ----
