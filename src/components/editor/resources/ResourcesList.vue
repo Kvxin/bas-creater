@@ -23,6 +23,7 @@ import {
 
 const props = defineProps<{
   items: Array<AnyDanmu | AudioResource>;
+  layout: "list" | "grid";
   selectedId?: string | null;
 }>();
 
@@ -145,6 +146,7 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
   <div class="flex-1 flex flex-col min-w-0 overflow-hidden" data-ui="resources-list">
     <!-- List Header -->
     <div
+      v-if="layout === 'list'"
       class="flex items-center px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border/70 bg-background"
     >
       <div class="flex-1">名称</div>
@@ -154,7 +156,14 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
     </div>
 
     <!-- List Body -->
-    <div class="flex-1 overflow-y-auto scrollbar-hidden p-1 space-y-0.5">
+    <div
+      class="flex-1 overflow-y-auto scrollbar-hidden"
+      :class="
+        layout === 'grid'
+          ? 'grid auto-rows-min grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] content-start gap-2 p-2'
+          : 'space-y-0.5 p-1'
+      "
+    >
       <div
         v-for="item in items"
         :key="item.id"
@@ -162,19 +171,39 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
         @dragstart="handleDragStart(item, $event)"
         @click="handleItemClick(item)"
         @contextmenu.prevent="emit('contextmenu', item, $event)"
-        class="group flex h-8 items-center px-2 rounded-sm hover:bg-accent cursor-pointer transition-colors text-xs"
-        :class="{
-          'bg-secondary text-secondary-foreground ring-1 ring-secondary-border':
-            selectedId === item.id,
-        }"
+        class="group cursor-pointer text-xs transition-colors"
+        :class="[
+          layout === 'grid'
+            ? 'relative flex min-h-28 flex-col justify-between rounded-sm border border-border bg-background p-3 hover:border-primary/60 hover:bg-accent/60'
+            : 'flex h-8 items-center rounded-sm px-2 hover:bg-accent',
+          selectedId === item.id
+            ? 'bg-secondary text-secondary-foreground ring-1 ring-secondary-border'
+            : '',
+        ]"
       >
+        <div
+          v-if="layout === 'grid' && item.type === 'audio-file'"
+          class="mb-1 flex h-20 w-full items-center justify-center overflow-hidden rounded-sm bg-accent"
+        >
+          <img
+            v-if="item.coverUrl"
+            :src="item.coverUrl"
+            :alt="`${getItemName(item)} 封面`"
+            class="size-full object-cover"
+          />
+          <AudioLines v-else class="size-7 text-muted-foreground" />
+        </div>
         <component
+          v-else
           :is="getIcon(item.type)"
-          class="size-4 text-muted-foreground mr-2.5 group-hover:text-foreground transition-colors shrink-0"
-          :class="{ 'text-primary': selectedId === item.id }"
+          class="text-muted-foreground group-hover:text-foreground transition-colors shrink-0"
+          :class="[
+            layout === 'grid' ? 'mb-1 size-5' : 'mr-2.5 size-4',
+            { 'text-primary': selectedId === item.id },
+          ]"
         />
         <!-- 名称显示/编辑 -->
-        <div class="flex-1 min-w-0 mr-2">
+        <div :class="layout === 'grid' ? 'w-full min-w-0 pr-10' : 'mr-2 min-w-0 flex-1'">
           <!-- 编辑模式 -->
           <Input
             v-if="editingId === item.id"
@@ -198,7 +227,10 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
             {{ getItemName(item) }}
           </div>
         </div>
-        <div class="w-14 text-center text-muted-foreground/70 shrink-0">
+        <div
+          v-if="layout === 'list'"
+          class="w-14 text-center text-muted-foreground/70 shrink-0"
+        >
           <span
             class="px-1.5 py-0.5 rounded-sm text-[10px] bg-accent"
             :class="{
@@ -212,14 +244,33 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
           </span>
         </div>
         <div
+          v-if="layout === 'list'"
           class="w-14 text-right text-muted-foreground/70 font-mono shrink-0"
         >
           {{ formatDuration(getItemDuration(item)) }}
         </div>
-        <!-- 编辑按钮 (改为添加到轨道) -->
+        <div
+          v-else
+          class="flex w-full items-center justify-between gap-2 text-muted-foreground/70"
+        >
+          <span
+            class="rounded-sm bg-accent px-1.5 py-0.5 text-[10px]"
+            :class="{
+              'bg-blue-500/20 text-blue-400': item.type === 'text',
+              'bg-orange-500/20 text-orange-400': item.type === 'button',
+              'bg-green-500/20 text-green-400': item.type === 'path',
+              'bg-purple-500/20 text-purple-400': item.type === 'audio-file',
+            }"
+          >
+            {{ getItemTypeLabel(item.type) }}
+          </span>
+          <span class="font-mono text-[10px]">{{ formatDuration(getItemDuration(item)) }}</span>
+        </div>
+        <!-- 添加到轨道按钮 -->
         <button
           @click="addToNewTrack(item, $event)"
-          class="ml-1 size-6 rounded-sm inline-flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-accent text-muted-foreground hover:text-foreground transition-all"
+          class="size-6 rounded-sm inline-flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-accent text-muted-foreground hover:text-foreground transition-all"
+          :class="layout === 'grid' ? 'absolute right-8 top-2' : 'ml-1'"
           title="添加到新轨道"
         >
           <Plus class="size-3" />
@@ -228,6 +279,7 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
         <button
           @click="handleDeleteItem(item, $event)"
           class="size-6 rounded-sm inline-flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-destructive/15 text-destructive transition-all"
+          :class="layout === 'grid' ? 'absolute right-2 top-2' : ''"
           title="删除"
         >
           <Trash2 class="size-3.5" />
@@ -236,11 +288,12 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
 
       <div
         v-if="items.length === 0"
-        class="flex flex-col items-center justify-center h-32 text-muted-foreground"
+        class="flex h-36 flex-col items-center justify-center border border-dashed border-border text-muted-foreground"
+        :class="layout === 'grid' ? '' : 'mx-2'"
       >
         <Folder class="size-8 mb-2 opacity-20" />
-        <span>暂无项目</span>
-        <span class="text-xs mt-1">点击上方按钮添加</span>
+        <span>暂无资源</span>
+        <span class="mt-1 text-xs">拖放音频文件到这里，或点击上方按钮上传</span>
       </div>
     </div>
   </div>

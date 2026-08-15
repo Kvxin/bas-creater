@@ -16,26 +16,10 @@ defineProps<{
 const emit = defineEmits<{
   (e: "update:searchQuery", value: string): void;
   (e: "add-danmu", type: DanmuType): void;
-  (
-    e: "upload-audio",
-    payload: { file: File; duration: number; url: string }
-  ): void;
+  (e: "upload-audio", file: File): void;
 }>();
 
 const audioInputRef = ref<HTMLInputElement | null>(null);
-
-const getAudioDuration = (file: File): Promise<number> => {
-  return new Promise((resolve) => {
-    const audio = document.createElement("audio");
-    const url = URL.createObjectURL(file);
-    audio.src = url;
-    audio.onloadedmetadata = () => {
-      resolve(audio.duration * 1000);
-      URL.revokeObjectURL(url);
-    };
-    audio.onerror = () => resolve(0);
-  });
-};
 
 const triggerAudioUpload = () => {
   audioInputRef.value?.click();
@@ -45,10 +29,7 @@ const handleAudioUpload = async (event: Event) => {
   const input = event.target as HTMLInputElement;
   if (input.files && input.files[0]) {
     const file = input.files[0];
-    const url = URL.createObjectURL(file);
-    const duration = await getAudioDuration(file);
-
-    emit("upload-audio", { file, duration, url });
+    emit("upload-audio", file);
 
     // 重置 input 以便重复上传同一文件
     input.value = "";

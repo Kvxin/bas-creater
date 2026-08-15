@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@dantheman827/taglib-ts':
+        specifier: ^0.1.5
+        version: 0.1.5
       '@tailwindcss/vite':
         specifier: ^4.1.17
         version: 4.1.17(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(lightningcss@1.30.2)(yaml@2.8.2))
@@ -457,6 +460,9 @@ packages:
   '@cspell/url@9.4.0':
     resolution: {integrity: sha512-nt88P6m20AaVbqMxsyPf8KqyWPaFEW2UANi0ijBxc2xTkD2KiUovxfZUYW6NMU9XBYZlovT5LztkEhst2yBcSA==}
     engines: {node: '>=20'}
+
+  '@dantheman827/taglib-ts@0.1.5':
+    resolution: {integrity: sha512-uOMzKccEE0AUsMZ6rTPSUB0ZqAvuRxih9ECn8N62lMNi0UsXQumuKN86F3CxNaF4y3LOkvtp45vplTjwEEUOlQ==}
 
   '@daybrush/utils@1.13.0':
     resolution: {integrity: sha512-ALK12C6SQNNHw1enXK+UO8bdyQ+jaWNQ1Af7Z3FNxeAwjYhQT7do+TRE4RASAJ3ObaS2+TJ7TXR3oz2Gzbw0PQ==}
@@ -2265,6 +2271,8 @@ snapshots:
   '@cspell/strong-weak-map@9.4.0': {}
 
   '@cspell/url@9.4.0': {}
+
+  '@dantheman827/taglib-ts@0.1.5': {}
 
   '@daybrush/utils@1.13.0': {}
 
