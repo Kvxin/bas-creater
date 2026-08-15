@@ -5,7 +5,7 @@ test('Video Editor UI Loads and Interacts', async ({ page }) => {
   await page.goto('http://localhost:5173');
 
   // 2. Check for main layout elements
-  await expect(page.getByText('Lumina Cut')).toBeVisible();
+  await expect(page.getByText('DanmakuCut')).toBeVisible();
   await expect(page.getByText('Resources')).toBeVisible();
   await expect(page.getByText('Properties')).toBeVisible();
   await expect(page.getByText('PREVIEW')).toBeVisible();

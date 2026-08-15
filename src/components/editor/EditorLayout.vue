@@ -81,7 +81,7 @@ useEventListener("mouseleave", stopResize);
           <Video class="size-5" />
         </div>
         <h1 class="h-8 px-2 rounded-sm flex items-center text-[0.9rem] font-medium tracking-normal truncate hover:bg-accent">
-          Lumina <span class="ml-1 text-muted-foreground font-normal">Cut</span>
+          DanmakuCut
         </h1>
       </div>
 

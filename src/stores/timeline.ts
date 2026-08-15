@@ -561,6 +561,8 @@ export const useTimelineStore = defineStore("timeline", () => {
       ...rest,
       id: `clip_${Math.random().toString(36).slice(2, 9)}`,
       trackId: targetTrackId,
+      resourceId: updates.resourceId ?? sourceClip.resourceId,
+      name: updates.name ?? sourceClip.name,
       startTime: Math.max(0, updates.startTime ?? sourceClip.startTime),
     };
 

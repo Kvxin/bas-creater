@@ -2,6 +2,7 @@ import { computed, reactive, ref } from "vue"
 import { defineStore } from "pinia"
 import type { AnyDanmu, DanmuType } from "@/types/danmu"
 import { createDanmuByKey } from "@/utils/danmuFactory"
+import { getItemName } from "@/utils/resourceUtils"
 
 const clamp = (val: number, min: number, max: number) => Math.min(max, Math.max(min, val))
 
@@ -28,6 +29,23 @@ export const useDanmuStore = defineStore("danmu", () => {
 
   function add(type: DanmuType, payload: Partial<AnyDanmu> = {}) {
     const dm = createDanmuByKey(type, payload)
+    danmus.value.push(dm)
+    select(dm.id)
+    return dm
+  }
+
+  /** 创建可独立编辑的弹幕资源副本。 */
+  function duplicate(id: string) {
+    const source = danmus.value.find((dm) => dm.id === id)
+    if (!source) return null
+
+    const sourceData = JSON.parse(JSON.stringify(source)) as AnyDanmu
+    const { id: _id, type: _type, name: _name, ...payload } = sourceData
+    const dm = createDanmuByKey(source.type, {
+      ...payload,
+      name: `${getItemName(source)} 副本`,
+    })
+
     danmus.value.push(dm)
     select(dm.id)
     return dm
@@ -91,6 +109,7 @@ export const useDanmuStore = defineStore("danmu", () => {
     selected,
     viewport,
     add,
+    duplicate,
     remove,
     select,
     updateSelected,

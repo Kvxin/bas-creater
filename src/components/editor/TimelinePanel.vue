@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, reactive, onMounted, onUnmounted } from "vue";
+import { ref, computed, watch, reactive, onMounted, onUnmounted, nextTick } from "vue";
 import { useElementSize } from "@vueuse/core";
 import {
   Clock,
@@ -149,6 +149,7 @@ const handleAnimationClick = (clip: any, anim: AnimationSegment, e: MouseEvent) 
 };
 
 const TIMELINE_END_PADDING_MS = 10000;
+const MAX_TIMELINE_ZOOM = 500;
 
 // 像素/秒 计算
 const pixelsPerSecond = computed(() => timelineStore.zoomScale * 2);
@@ -176,13 +177,35 @@ const handleScroll = (e: Event) => {
   }
 };
 
-// 缩放控制
+// 缩放控制：缩放前后保持 Playhead 在视口中的横向位置不变。
+const setTimelineZoom = async (nextZoom: number) => {
+  const container = timelineContentRef.value;
+  const previousPixelsPerSecond = pixelsPerSecond.value;
+  const currentScrollLeft = container?.scrollLeft ?? scrollLeft.value;
+  const playheadOffset =
+    (timelineStore.currentTime / 1000) * previousPixelsPerSecond - currentScrollLeft;
+  const clampedZoom = Math.max(10, Math.min(MAX_TIMELINE_ZOOM, nextZoom));
+
+  if (clampedZoom === timelineStore.zoomScale) return;
+
+  timelineStore.zoomScale = clampedZoom;
+  await nextTick();
+
+  if (!container) return;
+
+  const nextScrollLeft =
+    (timelineStore.currentTime / 1000) * pixelsPerSecond.value - playheadOffset;
+  const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
+  container.scrollLeft = Math.max(0, Math.min(nextScrollLeft, maxScrollLeft));
+  scrollLeft.value = container.scrollLeft;
+};
+
 const zoomIn = () => {
-  timelineStore.zoomScale = Math.min(100, timelineStore.zoomScale + 10);
+  void setTimelineZoom(timelineStore.zoomScale + 10);
 };
 
 const zoomOut = () => {
-  timelineStore.zoomScale = Math.max(10, timelineStore.zoomScale - 10);
+  void setTimelineZoom(timelineStore.zoomScale - 10);
 };
 
 // 格式化当前时间显示
@@ -636,9 +659,36 @@ const stopDragClip = () => {
     const targetTrackId = dragTargetTrackId.value ?? originalClipTrackId.value;
     const targetTrack = timelineStore.tracks.find(track => track.id === targetTrackId);
 
-    // Alt + 跨轨道拖拽 = 复制到目标轨道
+    // Alt + 跨轨道拖拽 = 复制到目标轨道。弹幕会同时复制资源，
+    // 使两个片段之后能独立编辑；音频仍复用同一文件资源。
     if (isAltDragCopy.value && targetTrackId && targetTrackId !== originalClipTrackId.value && targetTrack) {
-      timelineStore.copyClipToTrack(draggedClipId.value, targetTrackId, { startTime: tempState.startTime });
+      const sourceClip = timelineStore.tracks
+        .flatMap((track) => track.clips)
+        .find((clip) => clip.id === draggedClipId.value);
+      const sourceDanmu = sourceClip
+        ? danmuStore.danmus.find((danmu) => danmu.id === sourceClip.resourceId)
+        : undefined;
+
+      if (sourceDanmu) {
+        const duplicatedDanmu = danmuStore.duplicate(sourceDanmu.id);
+        const copiedClip = duplicatedDanmu && timelineStore.copyClipToTrack(
+          draggedClipId.value,
+          targetTrackId,
+          {
+            startTime: tempState.startTime,
+            resourceId: duplicatedDanmu.id,
+            name: getItemName(duplicatedDanmu),
+          },
+        );
+
+        if (!copiedClip && duplicatedDanmu) {
+          danmuStore.remove(duplicatedDanmu.id);
+        }
+      } else {
+        timelineStore.copyClipToTrack(draggedClipId.value, targetTrackId, {
+          startTime: tempState.startTime,
+        });
+      }
     } else {
       const moved =
         Boolean(targetTrackId) &&
