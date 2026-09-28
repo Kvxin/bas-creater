@@ -1,14 +1,28 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { useEventListener, useDark, useToggle } from "@vueuse/core";
-import { Moon, Sun, Video, MonitorPlay } from "lucide-vue-next";
+import {
+  Moon,
+  Sun,
+  Video,
+  Check,
+  Cloud,
+  Loader2,
+} from "lucide-vue-next";
 import ResourcesPanel from "./ResourcesPanel.vue";
 import PreviewPanel from "./PreviewPanel.vue";
 import PropertiesPanel from "./PropertiesPanel.vue";
 import TimelinePanel from "./TimelinePanel.vue";
 import { useI18n } from "vue-i18n";
 import { SUPPORTED_LOCALES } from "@/i18n";
+import { useProjectAutoSave } from "@/composables/useProjectAutoSave";
+
 const { t, locale } = useI18n();
+const autoSave = useProjectAutoSave();
+
+onMounted(async () => {
+  await autoSave.restoreProject();
+});
 
 // Theme
 const isDark = useDark({ initialValue: "dark" });
@@ -79,13 +93,32 @@ useEventListener("mouseleave", stopResize);
     <header
       class="h-[3.4rem] bg-background flex items-center justify-between px-3 pt-0.5 shrink-0 z-20"
     >
-      <div class="flex items-center gap-1.5 min-w-0">
+      <div class="flex items-center gap-2 min-w-0">
         <div class="size-8 rounded-sm hover:bg-accent flex items-center justify-center text-foreground">
           <Video class="size-5" />
         </div>
         <h1 class="h-8 px-2 rounded-sm flex items-center text-[0.9rem] font-medium tracking-normal truncate hover:bg-accent">
           DanmakuCut
         </h1>
+
+        <!-- 自动保存状态指示徽章 -->
+        <div
+          class="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-muted-foreground select-none"
+          :title="autoSave.lastSavedTime.value ? `上次保存时间: ${autoSave.lastSavedTime.value.toLocaleTimeString()}` : ''"
+        >
+          <Loader2 v-if="autoSave.saveStatus.value === 'saving'" class="size-3.5 animate-spin text-primary" />
+          <Check v-else-if="autoSave.saveStatus.value === 'saved' && !autoSave.isDirty.value" class="size-3.5 text-constructive" />
+          <Cloud v-else class="size-3.5 text-muted-foreground/60" />
+          <span class="text-[11px]">
+            {{
+              autoSave.saveStatus.value === 'saving'
+                ? t('app.saving')
+                : autoSave.isDirty.value
+                ? t('app.unsaved')
+                : t('app.saved')
+            }}
+          </span>
+        </div>
       </div>
 
       <div class="flex items-center gap-2">
@@ -97,7 +130,7 @@ useEventListener("mouseleave", stopResize);
         <select
           v-model="locale"
           :aria-label="t('app.language')"
-          class="h-8 rounded-sm border border-border bg-background px-2 text-xs"
+          class="h-8 rounded-sm border border-border bg-background px-2 text-xs cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
         >
           <option v-for="item in SUPPORTED_LOCALES" :key="item.value" :value="item.value">{{ item.label }}</option>
         </select>
