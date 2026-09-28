@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, nextTick } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   Folder,
   MessageSquareText,
@@ -36,6 +37,8 @@ const emit = defineEmits<{
 }>();
 
 const timelineStore = useTimelineStore();
+
+const { t } = useI18n();
 
 // 编辑状态
 const editingId = ref<string | null>(null);
@@ -149,9 +152,9 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
       v-if="layout === 'list'"
       class="flex items-center px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border/70 bg-background"
     >
-      <div class="flex-1">名称</div>
-      <div class="w-16 text-center">类型</div>
-      <div class="w-16 text-right">时长</div>
+      <div class="flex-1">{{ t('common.name') }}</div>
+      <div class="w-16 text-center">{{ t('common.type') }}</div>
+      <div class="w-16 text-right">{{ t('common.duration') }}</div>
       <div class="w-8"></div>
     </div>
 
@@ -188,7 +191,7 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
           <img
             v-if="item.coverUrl"
             :src="item.coverUrl"
-            :alt="`${getItemName(item)} 封面`"
+            :alt="t('resources.coverAlt', { name: getItemName(item) })"
             class="size-full object-cover"
           />
           <AudioLines v-else class="size-7 text-muted-foreground" />
@@ -222,7 +225,7 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
             class="truncate font-medium text-foreground group-hover:text-accent-foreground"
             :class="{ 'text-muted-foreground': !item.name }"
             @dblclick="startEdit(item, $event)"
-            :title="getItemName(item) + ' (双击编辑)'"
+            :title="t('resources.itemTooltip', { name: getItemName(item) })"
           >
             {{ getItemName(item) }}
           </div>
@@ -271,7 +274,7 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
           @click="addToNewTrack(item, $event)"
           class="size-6 rounded-sm inline-flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-accent text-muted-foreground hover:text-foreground transition-all"
           :class="layout === 'grid' ? 'absolute right-8 top-2' : 'ml-1'"
-          title="添加到新轨道"
+          :title="t('resources.addToNewTrack')"
         >
           <Plus class="size-3" />
         </button>
@@ -280,7 +283,7 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
           @click="handleDeleteItem(item, $event)"
           class="size-6 rounded-sm inline-flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-destructive/15 text-destructive transition-all"
           :class="layout === 'grid' ? 'absolute right-2 top-2' : ''"
-          title="删除"
+          :title="t('common.delete')"
         >
           <Trash2 class="size-3.5" />
         </button>
@@ -292,8 +295,8 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
         :class="layout === 'grid' ? '' : 'mx-2'"
       >
         <Folder class="size-8 mb-2 opacity-20" />
-        <span>暂无资源</span>
-        <span class="mt-1 text-xs">拖放音频文件到这里，或点击上方按钮上传</span>
+        <span>{{ t('resources.empty') }}</span>
+        <span class="mt-1 text-xs">{{ t('resources.emptyHint') }}</span>
       </div>
     </div>
   </div>

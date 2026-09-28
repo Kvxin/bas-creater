@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { Settings, Plus, Trash2, FileText, Move, Palette, Sparkles, Music2, Volume2 } from "lucide-vue-next";
 import { useDanmuStore } from "@/stores/danmu";
 import { useTimelineStore } from "@/stores/timeline";
@@ -23,6 +24,8 @@ import {
   pickKeyframePropertiesForResource,
   resolveKeyframeProperties,
 } from "@/utils/keyframes";
+
+const { t } = useI18n();
 
 const danmuStore = useDanmuStore();
 const timelineStore = useTimelineStore();
@@ -89,12 +92,14 @@ type PropertyTabId = "identity" | "transform" | "style" | "animation";
 
 const activeTab = ref<PropertyTabId>("identity");
 
-const propertyTabs = [
-  { id: "identity", label: "内容", title: "内容与标识", icon: FileText },
-  { id: "transform", label: "变换", title: "几何变换", icon: Move },
-  { id: "style", label: "样式", title: "样式与外观", icon: Palette },
-  { id: "animation", label: "动画", title: "动画与关键帧", icon: Sparkles },
-] as const;
+// Labels come from the message tree, so the list has to be computed: a plain
+// array would freeze the strings of the locale active at setup time.
+const propertyTabs = computed(() => [
+  { id: "identity", label: t("properties.tabs.identity.label"), title: t("properties.tabs.identity.title"), icon: FileText },
+  { id: "transform", label: t("properties.tabs.transform.label"), title: t("properties.tabs.transform.title"), icon: Move },
+  { id: "style", label: t("properties.tabs.style.label"), title: t("properties.tabs.style.title"), icon: Palette },
+  { id: "animation", label: t("properties.tabs.animation.label"), title: t("properties.tabs.animation.title"), icon: Sparkles },
+] as const);
 
 const clipKeyframes = computed(() => {
   const clip = selectedClip.value;
@@ -141,7 +146,7 @@ const keyframeRows = computed(() => {
     {
       id: BASE_KEYFRAME_ID,
       index: 1,
-      label: "基态",
+      label: t("common.keyframeBase"),
       timeMs: 0,
       isBase: true,
       properties: getBaseKeyframeProperties(resolvedSelected.value),
@@ -149,7 +154,7 @@ const keyframeRows = computed(() => {
     ...clipKeyframes.value.map((keyframe, index) => ({
       id: keyframe.id,
       index: index + 2,
-      label: `关键帧 ${index + 2}`,
+      label: t("common.keyframeLabel", { n: index + 2 }),
       timeMs: keyframe.timeMs,
       isBase: false,
       properties: keyframe.properties,
@@ -268,11 +273,11 @@ watch(selectedClip, (clip) => {
 
 // ... (Existing helpers remain the same) ...
 // 类型名称映射
-const typeNames: Record<string, string> = {
-  text: "文本弹幕",
-  button: "按钮弹幕",
-  path: "路径弹幕",
-};
+const typeNames = computed<Record<string, string>>(() => ({
+  text: t("danmu.type.text"),
+  button: t("danmu.type.button"),
+  path: t("danmu.type.path"),
+}));
 
 const updateResourceField = (key: string, value: unknown) => {
   danmuStore.updateSelected({ [key]: value } as Partial<AnyDanmu>);
@@ -531,7 +536,7 @@ const getButtonAV = (item: any): number | undefined => {
       class="h-11 border-b border-border flex items-center px-3 font-medium text-foreground justify-between shrink-0 bg-background"
     >
       <div class="flex items-center gap-2">
-          <span>属性设置</span>
+          <span>{{ t('properties.title') }}</span>
       </div>
       <Settings class="size-4 text-muted-foreground" />
     </div>
@@ -549,52 +554,52 @@ const getButtonAV = (item: any): number | undefined => {
         <div class="flex items-center justify-between select-none">
             <Label class="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2 cursor-pointer">
             <span class="w-1 h-3 bg-primary rounded-full"></span>
-            内容与标识
+            {{ t('properties.tabs.identity.title') }}
             </Label>
         </div>
         
         <div class="space-y-3 pt-1">
           <!-- 公共：自定义名称 -->
           <div class="space-y-1">
-            <span class="text-[10px] text-muted-foreground uppercase font-medium">资源名称 (Identity Name)</span>
+            <span class="text-[10px] text-muted-foreground uppercase font-medium">{{ t('properties.identity.name') }}</span>
             <Input
               :model-value="selected.name"
               @update:model-value="(v) => updateField('name', v)"
-              placeholder="用于资源列表显示的名称"
+              :placeholder="t('properties.identity.namePlaceholder')"
               class="h-8 text-xs"
             />
           </div>
 
           <!-- 文本特有：内容 -->
           <div v-if="selected.type === 'text'" class="space-y-1">
-            <span class="text-[10px] text-muted-foreground uppercase font-medium">文本内容 (Content)</span>
+            <span class="text-[10px] text-muted-foreground uppercase font-medium">{{ t('properties.identity.content') }}</span>
             <Textarea
               :model-value="(resolvedSelected as any)?.content"
               @update:model-value="(v) => updateField('content', v)"
               class="min-h-20 text-xs resize-y leading-extended"
-              placeholder="请输入弹幕文本..."
+              :placeholder="t('properties.identity.contentPlaceholder')"
             />
           </div>
 
           <!-- 按钮特有：文本与跳转 -->
           <template v-if="selected.type === 'button'">
             <div class="space-y-1">
-              <span class="text-[10px] text-muted-foreground uppercase font-medium">按钮文字 (Display Text)</span>
+              <span class="text-[10px] text-muted-foreground uppercase font-medium">{{ t('properties.identity.buttonText') }}</span>
               <Input
                 :model-value="(resolvedSelected as any)?.text"
                 @update:model-value="(v) => updateField('text', v)"
                 class="h-8 text-xs"
-                placeholder="按钮上显示的文字"
+                :placeholder="t('properties.identity.buttonTextPlaceholder')"
               />
             </div>
             <div class="space-y-1">
-              <span class="text-[10px] text-muted-foreground uppercase font-medium">跳转 AV 号 (Target AV)</span>
+              <span class="text-[10px] text-muted-foreground uppercase font-medium">{{ t('properties.identity.targetAv') }}</span>
               <Input
                 type="number"
                 :model-value="getButtonAV(selected)"
                 @update:model-value="updateButtonAV"
                 class="h-8 text-xs font-mono"
-                placeholder="例如: 1714157"
+                :placeholder="t('properties.identity.targetAvPlaceholder')"
               />
             </div>
           </template>
@@ -602,7 +607,7 @@ const getButtonAV = (item: any): number | undefined => {
           <!-- 路径特有：路径与画布 -->
           <template v-if="selected.type === 'path'">
             <div class="space-y-1">
-              <span class="text-[10px] text-muted-foreground uppercase font-medium">SVG 路径 (Path Data - d)</span>
+              <span class="text-[10px] text-muted-foreground uppercase font-medium">{{ t('properties.identity.pathData') }}</span>
               <Textarea
                 :model-value="(resolvedSelected as any)?.d"
                 @update:model-value="(v) => updateField('d', v)"
@@ -611,7 +616,7 @@ const getButtonAV = (item: any): number | undefined => {
               />
             </div>
             <div class="space-y-1">
-              <span class="text-[10px] text-muted-foreground uppercase font-medium">画布范围 (ViewBox)</span>
+              <span class="text-[10px] text-muted-foreground uppercase font-medium">{{ t('properties.identity.viewBox') }}</span>
               <Input
                 :model-value="(resolvedSelected as any)?.viewBox"
                 @update:model-value="(v) => updateField('viewBox', v)"
@@ -633,64 +638,64 @@ const getButtonAV = (item: any): number | undefined => {
         <div class="flex items-center justify-between select-none">
             <Label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 cursor-pointer">
             <span class="w-1 h-3 bg-muted-foreground/50 rounded-full"></span>
-            几何变换
+            {{ t('properties.tabs.transform.title') }}
             </Label>
         </div>
         
         <div class="space-y-3 pt-1">
             <div class="grid grid-cols-2 gap-x-4 gap-y-3">
             <div class="space-y-1">
-                <span class="text-[10px] text-muted-foreground uppercase">X 坐标</span>
+                <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.x') }}</span>
                 <div class="flex gap-2">
                   <Input :model-value="getPercentageInputValue('x')" @update:model-value="(v) => updatePercentageValue('x', v)" class="h-7 min-w-0 flex-1 text-xs font-mono bg-accent" />
-                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比定位"><Switch :model-value="isPercentageValue('x')" @update:model-value="setPercentageMode('x', $event)" />%</label>
+                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" :title="t('properties.transform.xPercentHint')"><Switch :model-value="isPercentageValue('x')" @update:model-value="setPercentageMode('x', $event)" />%</label>
                 </div>
             </div>
             <div class="space-y-1">
-                <span class="text-[10px] text-muted-foreground uppercase">Y 坐标</span>
+                <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.y') }}</span>
                 <div class="flex gap-2">
                   <Input :model-value="getPercentageInputValue('y')" @update:model-value="(v) => updatePercentageValue('y', v)" class="h-7 min-w-0 flex-1 text-xs font-mono bg-accent" />
-                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布高度的百分比定位"><Switch :model-value="isPercentageValue('y')" @update:model-value="setPercentageMode('y', $event)" />%</label>
+                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" :title="t('properties.transform.yPercentHint')"><Switch :model-value="isPercentageValue('y')" @update:model-value="setPercentageMode('y', $event)" />%</label>
                 </div>
             </div>
             <div class="space-y-1">
-                <span class="text-[10px] text-muted-foreground uppercase">缩放 (Scale)</span>
+                <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.scale') }}</span>
                 <Input type="number" step="0.1" :model-value="resolvedSelected?.scale" @update:model-value="(v) => updateField('scale', v, true)" class="h-7 text-xs font-mono" />
             </div>
             <div class="space-y-1">
-                <span class="text-[10px] text-muted-foreground uppercase">层级 (Z-Index)</span>
+                <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.zIndex') }}</span>
                 <Input type="number" step="1" :model-value="resolvedSelected?.zIndex" @update:model-value="(v) => updateField('zIndex', v, true)" class="h-7 text-xs font-mono" />
             </div>
             </div>
 
             <div v-if="selected.type === 'text'" class="grid grid-cols-2 gap-4 pt-1">
             <div class="space-y-1">
-                <span class="text-[10px] text-muted-foreground uppercase">锚点 X</span>
+                <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.anchorX') }}</span>
                 <div class="flex gap-2">
                   <Input type="number" :step="anchorPercentageMode.x ? 1 : 0.01" :model-value="getAnchorValue('x')" @update:model-value="(v) => updateAnchorValue('x', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
-                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="以百分比编辑锚点；BAS 会保存为 0–1 的归一化值"><Switch v-model="anchorPercentageMode.x" />%</label>
+                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" :title="t('properties.transform.anchorHint')"><Switch v-model="anchorPercentageMode.x" />%</label>
                 </div>
             </div>
             <div class="space-y-1">
-                <span class="text-[10px] text-muted-foreground uppercase">锚点 Y</span>
+                <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.anchorY') }}</span>
                 <div class="flex gap-2">
                   <Input type="number" :step="anchorPercentageMode.y ? 1 : 0.01" :model-value="getAnchorValue('y')" @update:model-value="(v) => updateAnchorValue('y', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
-                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="以百分比编辑锚点；BAS 会保存为 0–1 的归一化值"><Switch v-model="anchorPercentageMode.y" />%</label>
+                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" :title="t('properties.transform.anchorHint')"><Switch v-model="anchorPercentageMode.y" />%</label>
                 </div>
             </div>
             </div>
 
             <div v-if="selected.type === 'text'" class="grid grid-cols-3 gap-2 pt-1">
             <div class="space-y-1">
-                <span class="text-[10px] text-muted-foreground uppercase">旋转 X</span>
+                <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.rotateX') }}</span>
                 <Input type="number" :model-value="resolvedSelected?.rotateX" @update:model-value="(v) => updateField('rotateX', v, true)" class="h-7 text-xs font-mono" />
             </div>
             <div class="space-y-1">
-                <span class="text-[10px] text-muted-foreground uppercase">旋转 Y</span>
+                <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.rotateY') }}</span>
                 <Input type="number" :model-value="resolvedSelected?.rotateY" @update:model-value="(v) => updateField('rotateY', v, true)" class="h-7 text-xs font-mono" />
             </div>
             <div class="space-y-1">
-                <span class="text-[10px] text-muted-foreground uppercase">旋转 Z</span>
+                <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.rotateZ') }}</span>
                 <Input type="number" :model-value="resolvedSelected?.rotateZ" @update:model-value="(v) => updateField('rotateZ', v, true)" class="h-7 text-xs font-mono" />
             </div>
             </div>
@@ -707,7 +712,7 @@ const getButtonAV = (item: any): number | undefined => {
         <div class="flex items-center justify-between select-none">
             <Label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 cursor-pointer">
             <span class="w-1 h-3 bg-muted-foreground/50 rounded-full"></span>
-            样式与外观
+            {{ t('properties.tabs.style.title') }}
             </Label>
         </div>
 
@@ -716,7 +721,7 @@ const getButtonAV = (item: any): number | undefined => {
             <div class="grid grid-cols-2 gap-4">
             <div v-if="selected.type === 'text'" class="space-y-1">
                 <div class="flex justify-between items-center mb-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">不透明度</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.opacity') }}</span>
                     <span class="text-[10px] text-muted-foreground font-mono">{{ ((resolvedSelected?.opacity ?? 1) * 100).toFixed(0) }}%</span>
                 </div>
                 <Slider
@@ -726,7 +731,7 @@ const getButtonAV = (item: any): number | undefined => {
                 />
                 </div>
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">持续时间 (ms)</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.durationMs') }}</span>
                     <Input type="number" step="100" :model-value="selected.durationMs" @update:model-value="updateDuration" class="h-7 text-xs font-mono" />
                 </div>
             </div>
@@ -735,18 +740,18 @@ const getButtonAV = (item: any): number | undefined => {
             <div v-if="selected.type === 'text'" class="space-y-4 pt-2">
             <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">字号</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.fontSize') }}</span>
                     <div class="flex gap-2">
-                      <Input :model-value="getPercentageInputValue('fontSize')" @update:model-value="(v) => updatePercentageValue('fontSize', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" placeholder="BAS 默认 25px" />
-                      <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置字号"><Switch :model-value="isPercentageValue('fontSize')" @update:model-value="setPercentageMode('fontSize', $event)" />%</label>
+                      <Input :model-value="getPercentageInputValue('fontSize')" @update:model-value="(v) => updatePercentageValue('fontSize', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" :placeholder="t('properties.style.fontSizePlaceholder')" />
+                      <label class="flex items-center gap-1 text-[10px] text-muted-foreground" :title="t('properties.style.fontSizePercentHint')"><Switch :model-value="isPercentageValue('fontSize')" @update:model-value="setPercentageMode('fontSize', $event)" />%</label>
                     </div>
                 </div>
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">字体</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.fontFamily') }}</span>
                     <Input :model-value="(resolvedSelected as any)?.fontFamily" @update:model-value="(v) => updateField('fontFamily', v)" class="h-7 text-xs" />
                 </div>
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">文字颜色</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.textColor') }}</span>
                     <div class="flex gap-2">
                         <Input type="color" :model-value="toHtmlColor((resolvedSelected as any)?.color)" @input="(e: Event) => updateColor('color', (e.target as HTMLInputElement).value, false)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
                         <Input :model-value="(resolvedSelected as any)?.color" @update:model-value="(v) => updateField('color', v)" class="h-7 text-[10px] font-mono flex-1" />
@@ -754,7 +759,7 @@ const getButtonAV = (item: any): number | undefined => {
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">粗体</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.bold') }}</span>
                     <div class="h-7 flex items-center">
                         <button
                             type="button"
@@ -772,7 +777,7 @@ const getButtonAV = (item: any): number | undefined => {
                     </div>
                 </div>
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">阴影</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.textShadow') }}</span>
                     <div class="h-7 flex items-center">
                         <button
                             type="button"
@@ -793,14 +798,14 @@ const getButtonAV = (item: any): number | undefined => {
             </div>
             <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">描边颜色</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.strokeColor') }}</span>
                     <div class="flex gap-2">
                         <Input type="color" :model-value="toHtmlColor((resolvedSelected as any)?.strokeColor)" @input="(e: Event) => updateColor('strokeColor', (e.target as HTMLInputElement).value, false)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
                         <Input :model-value="(resolvedSelected as any)?.strokeColor" @update:model-value="(v) => updateField('strokeColor', v)" class="h-7 text-[10px] font-mono flex-1" />
                     </div>
                 </div>
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">描边宽度</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.strokeWidth') }}</span>
                     <Input type="number" step="0.5" :model-value="(resolvedSelected as any)?.strokeWidth" @update:model-value="(v) => updateField('strokeWidth', v, true)" class="h-7 text-xs font-mono" />
                 </div>
             </div>
@@ -810,21 +815,21 @@ const getButtonAV = (item: any): number | undefined => {
             <div v-if="selected.type === 'button'" class="space-y-4 pt-2">
             <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">字号</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.fontSize') }}</span>
                     <div class="flex gap-2">
-                      <Input :model-value="getPercentageInputValue('fontSize')" @update:model-value="(v) => updatePercentageValue('fontSize', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" placeholder="BAS 默认 25px" />
-                      <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置字号"><Switch :model-value="isPercentageValue('fontSize')" @update:model-value="setPercentageMode('fontSize', $event)" />%</label>
+                      <Input :model-value="getPercentageInputValue('fontSize')" @update:model-value="(v) => updatePercentageValue('fontSize', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" :placeholder="t('properties.style.fontSizePlaceholder')" />
+                      <label class="flex items-center gap-1 text-[10px] text-muted-foreground" :title="t('properties.style.fontSizePercentHint')"><Switch :model-value="isPercentageValue('fontSize')" @update:model-value="setPercentageMode('fontSize', $event)" />%</label>
                     </div>
                 </div>
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">文字颜色</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.textColor') }}</span>
                     <div class="flex items-center gap-2">
                     <Input type="color" :model-value="toHtmlColor((resolvedSelected as any)?.textColor)" @input="(e: Event) => updateColor('textColor', (e.target as HTMLInputElement).value, true)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
                     <span class="text-[10px] font-mono uppercase">{{ toHtmlColor((resolvedSelected as any)?.textColor) }}</span>
                     </div>
                 </div>
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">填充颜色</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.fillColor') }}</span>
                     <div class="flex items-center gap-2">
                     <Input type="color" :model-value="toHtmlColor((resolvedSelected as any)?.fillColor)" @input="(e: Event) => updateColor('fillColor', (e.target as HTMLInputElement).value, true)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
                     <span class="text-[10px] font-mono uppercase">{{ toHtmlColor((resolvedSelected as any)?.fillColor) }}</span>
@@ -832,11 +837,11 @@ const getButtonAV = (item: any): number | undefined => {
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">文字透</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.buttonTextAlpha') }}</span>
                     <Input type="number" step="0.1" :min="0" :max="1" :model-value="(resolvedSelected as any)?.textAlpha" @update:model-value="(v) => updateField('textAlpha', v, true)" class="h-7 text-[10px] font-mono" />
                 </div>
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">填充透</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.buttonFillAlpha') }}</span>
                     <Input type="number" step="0.1" :min="0" :max="1" :model-value="(resolvedSelected as any)?.fillAlpha" @update:model-value="(v) => updateField('fillAlpha', v, true)" class="h-7 text-[10px] font-mono" />
                 </div>
                 </div>
@@ -847,34 +852,34 @@ const getButtonAV = (item: any): number | undefined => {
             <div v-if="selected.type === 'path'" class="space-y-4 pt-2">
             <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">宽度 (Width)</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.width') }}</span>
                     <div class="flex gap-2">
                       <Input :model-value="getPercentageInputValue('width')" @update:model-value="(v) => updatePercentageValue('width', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
-                      <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置；需要 ViewBox"><Switch :model-value="isPercentageValue('width')" @update:model-value="setPercentageMode('width', $event)" />%</label>
+                      <label class="flex items-center gap-1 text-[10px] text-muted-foreground" :title="t('properties.style.widthPercentHint')"><Switch :model-value="isPercentageValue('width')" @update:model-value="setPercentageMode('width', $event)" />%</label>
                     </div>
                 </div>
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">高度 (Height)</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.height') }}</span>
                     <div class="flex gap-2">
                       <Input :model-value="getPercentageInputValue('height')" @update:model-value="(v) => updatePercentageValue('height', v)" class="h-7 min-w-0 flex-1 text-xs font-mono" />
-                      <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布高度的百分比设置；需要 ViewBox"><Switch :model-value="isPercentageValue('height')" @update:model-value="setPercentageMode('height', $event)" />%</label>
+                      <label class="flex items-center gap-1 text-[10px] text-muted-foreground" :title="t('properties.style.heightPercentHint')"><Switch :model-value="isPercentageValue('height')" @update:model-value="setPercentageMode('height', $event)" />%</label>
                     </div>
                 </div>
             </div>
             <div class="grid grid-cols-2 gap-4">
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">填充颜色</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.fillColor') }}</span>
                     <div class="flex items-center gap-2">
                     <Input type="color" :model-value="toHtmlColor((resolvedSelected as any)?.fillColor)" @input="(e: Event) => updateColor('fillColor', (e.target as HTMLInputElement).value, true)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
                     <span class="text-[10px] font-mono uppercase">{{ toHtmlColor((resolvedSelected as any)?.fillColor) }}</span>
                     </div>
                 </div>
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">填充透明度</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.pathFillAlpha') }}</span>
                     <Input type="number" step="0.1" :min="0" :max="1" :model-value="(resolvedSelected as any)?.fillAlpha" @update:model-value="(v) => updateField('fillAlpha', v, true)" class="h-7 text-xs font-mono" />
                 </div>
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">描边颜色</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.strokeColor') }}</span>
                     <div class="flex items-center gap-2">
                     <Input type="color" :model-value="toHtmlColor((resolvedSelected as any)?.borderColor)" @input="(e: Event) => updateColor('borderColor', (e.target as HTMLInputElement).value, true)" class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0" />
                     <span class="text-[10px] font-mono uppercase">{{ toHtmlColor((resolvedSelected as any)?.borderColor) }}</span>
@@ -882,11 +887,11 @@ const getButtonAV = (item: any): number | undefined => {
                 </div>
                 <div class="grid grid-cols-2 gap-2">
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">描边宽</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.borderWidth') }}</span>
                     <Input type="number" step="0.5" :model-value="(resolvedSelected as any)?.borderWidth" @update:model-value="(v) => updateField('borderWidth', v, true)" class="h-7 text-[10px] font-mono" />
                 </div>
                 <div class="space-y-1">
-                    <span class="text-[10px] text-muted-foreground uppercase">描边透</span>
+                    <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.borderAlpha') }}</span>
                     <Input type="number" step="0.1" :min="0" :max="1" :model-value="(resolvedSelected as any)?.borderAlpha" @update:model-value="(v) => updateField('borderAlpha', v, true)" class="h-7 text-[10px] font-mono" />
                 </div>
                 </div>
@@ -905,21 +910,21 @@ const getButtonAV = (item: any): number | undefined => {
           <div class="flex items-center justify-between select-none">
             <Label class="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2 cursor-pointer">
               <span class="w-1 h-3 bg-primary rounded-full"></span>
-              动画与关键帧
+              {{ t('properties.tabs.animation.title') }}
             </Label>
             <label class="inline-flex items-center gap-1.5 text-[10px] text-muted-foreground">
               <Switch
                 :model-value="timelineStore.autoKeyframe"
                 @update:model-value="timelineStore.setAutoKeyframe"
               />
-              自动
+              {{ t('properties.animation.autoKeyframe') }}
             </label>
           </div>
 
           <div v-if="selectedClip" class="space-y-4 pt-1">
             <div class="grid grid-cols-[1fr_auto] gap-2">
               <div class="rounded-sm border border-border bg-accent/40 px-2.5 py-2">
-                <div class="text-[10px] text-muted-foreground uppercase">播放头局部时间</div>
+                <div class="text-[10px] text-muted-foreground uppercase">{{ t('properties.animation.localTime') }}</div>
                 <div class="mt-1 font-mono text-xs text-foreground">
                   {{ formatAnimationTime(currentClipLocalTime) }}
                 </div>
@@ -927,8 +932,8 @@ const getButtonAV = (item: any): number | undefined => {
               <button
                 @click="addKeyframe"
                 class="h-full min-w-9 rounded-sm border border-border bg-accent hover:bg-primary/10 hover:text-primary transition-colors inline-flex items-center justify-center"
-                title="在播放头添加关键帧"
-                aria-label="在播放头添加关键帧"
+                :title="t('properties.animation.addKeyframe')"
+                :aria-label="t('properties.animation.addKeyframe')"
               >
                 <Plus class="size-4" />
               </button>
@@ -936,7 +941,7 @@ const getButtonAV = (item: any): number | undefined => {
 
             <div class="space-y-2">
               <div class="flex items-center justify-between">
-                <span class="text-[10px] text-muted-foreground uppercase font-medium">关键帧</span>
+                <span class="text-[10px] text-muted-foreground uppercase font-medium">{{ t('properties.animation.keyframes') }}</span>
                 <span class="text-[10px] text-muted-foreground font-mono">{{ keyframeRows.length }}</span>
               </div>
 
@@ -965,7 +970,7 @@ const getButtonAV = (item: any): number | undefined => {
                   </span>
                 </div>
                 <div class="mt-1 truncate text-[10px] text-muted-foreground">
-                  {{ Object.keys(keyframe.properties).join(', ') || '基础状态' }}
+                  {{ Object.keys(keyframe.properties).join(', ') || t('properties.animation.baseState') }}
                 </div>
               </button>
             </div>
@@ -973,13 +978,13 @@ const getButtonAV = (item: any): number | undefined => {
             <div class="space-y-4 border-t border-border/70 pt-4">
               <div class="flex items-center justify-between">
                 <Label class="text-xs font-semibold text-primary uppercase tracking-wider">
-                  {{ activeKeyframeId === BASE_KEYFRAME_ID ? '基态属性' : '关键帧属性' }}
+                  {{ activeKeyframeId === BASE_KEYFRAME_ID ? t('properties.animation.baseProperties') : t('properties.animation.keyframeProperties') }}
                 </Label>
                 <button
                   v-if="activeKeyframeId !== BASE_KEYFRAME_ID"
                   @click="removeSelectedKeyframe"
                   class="text-destructive hover:bg-destructive/10 size-7 rounded-sm inline-flex items-center justify-center transition-colors"
-                  title="删除关键帧"
+                  :title="t('properties.animation.removeKeyframe')"
                 >
                   <Trash2 class="size-4" />
                 </button>
@@ -987,7 +992,7 @@ const getButtonAV = (item: any): number | undefined => {
 
               <div class="grid gap-3" :class="selected.type === 'text' ? 'grid-cols-2' : 'grid-cols-1'">
                 <div class="space-y-1">
-                  <Label class="text-[10px] text-muted-foreground uppercase">时间 (ms)</Label>
+                  <Label class="text-[10px] text-muted-foreground uppercase">{{ t('properties.animation.timeMs') }}</Label>
                   <Input
                     type="number"
                     step="100"
@@ -998,7 +1003,7 @@ const getButtonAV = (item: any): number | undefined => {
                   />
                 </div>
                 <div v-if="selected.type === 'text'" class="space-y-1">
-                  <Label class="text-[10px] text-muted-foreground uppercase">不透明度</Label>
+                  <Label class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.opacity') }}</Label>
                   <Input
                     type="number"
                     step="0.1"
@@ -1013,7 +1018,7 @@ const getButtonAV = (item: any): number | undefined => {
 
               <div v-if="selected.type === 'text' || selected.type === 'button'" class="space-y-1">
                 <Label class="text-[10px] text-muted-foreground uppercase">
-                  {{ selected.type === 'text' ? '文本内容' : '按钮文字' }}
+                  {{ selected.type === 'text' ? t('properties.animation.textContent') : t('properties.animation.buttonText') }}
                 </Label>
                 <Input
                   :model-value="activeKeyframeText"
@@ -1024,24 +1029,24 @@ const getButtonAV = (item: any): number | undefined => {
 
               <div class="grid grid-cols-2 gap-3">
                 <div class="space-y-1">
-                  <Label class="text-[10px] text-muted-foreground uppercase">X 坐标</Label>
+                  <Label class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.x') }}</Label>
                   <div class="flex gap-2">
                     <Input :model-value="getKeyframePercentageInputValue('x')" @update:model-value="(v) => updateKeyframePercentageValue('x', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" />
-                    <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置关键帧"><Switch :model-value="isKeyframePercentageValue('x')" @update:model-value="setKeyframePercentageMode('x', $event)" />%</label>
+                    <label class="flex items-center gap-1 text-[10px] text-muted-foreground" :title="t('properties.animation.xPercentHint')"><Switch :model-value="isKeyframePercentageValue('x')" @update:model-value="setKeyframePercentageMode('x', $event)" />%</label>
                   </div>
                 </div>
                 <div class="space-y-1">
-                  <Label class="text-[10px] text-muted-foreground uppercase">Y 坐标</Label>
+                  <Label class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.y') }}</Label>
                   <div class="flex gap-2">
                     <Input :model-value="getKeyframePercentageInputValue('y')" @update:model-value="(v) => updateKeyframePercentageValue('y', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" />
-                    <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布高度的百分比设置关键帧"><Switch :model-value="isKeyframePercentageValue('y')" @update:model-value="setKeyframePercentageMode('y', $event)" />%</label>
+                    <label class="flex items-center gap-1 text-[10px] text-muted-foreground" :title="t('properties.animation.yPercentHint')"><Switch :model-value="isKeyframePercentageValue('y')" @update:model-value="setKeyframePercentageMode('y', $event)" />%</label>
                   </div>
                 </div>
               </div>
 
               <div v-if="selected.type === 'text'" class="grid grid-cols-1 gap-3">
                 <div class="space-y-1">
-                  <Label class="text-[10px] text-muted-foreground uppercase">缩放</Label>
+                  <Label class="text-[10px] text-muted-foreground uppercase">{{ t('properties.animation.scale') }}</Label>
                   <Input
                     type="number"
                     step="0.1"
@@ -1053,30 +1058,30 @@ const getButtonAV = (item: any): number | undefined => {
               </div>
 
               <div v-if="selected.type === 'text' || selected.type === 'button'" class="space-y-1">
-                <Label class="text-[10px] text-muted-foreground uppercase">字号</Label>
+                <Label class="text-[10px] text-muted-foreground uppercase">{{ t('properties.style.fontSize') }}</Label>
                 <div class="flex gap-2">
-                  <Input :model-value="getKeyframePercentageInputValue('fontSize')" @update:model-value="(v) => updateKeyframePercentageValue('fontSize', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" placeholder="继承 BAS 默认 25px" />
-                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" title="按画布宽度的百分比设置关键帧字号"><Switch :model-value="isKeyframePercentageValue('fontSize')" @update:model-value="setKeyframePercentageMode('fontSize', $event)" />%</label>
+                  <Input :model-value="getKeyframePercentageInputValue('fontSize')" @update:model-value="(v) => updateKeyframePercentageValue('fontSize', v)" class="h-8 min-w-0 flex-1 text-xs font-mono" :placeholder="t('properties.animation.fontSizePlaceholder')" />
+                  <label class="flex items-center gap-1 text-[10px] text-muted-foreground" :title="t('properties.animation.fontSizePercentHint')"><Switch :model-value="isKeyframePercentageValue('fontSize')" @update:model-value="setKeyframePercentageMode('fontSize', $event)" />%</label>
                 </div>
               </div>
 
               <div v-if="selected.type === 'text'" class="grid grid-cols-3 gap-2">
                 <div class="space-y-1">
-                  <span class="text-[10px] text-muted-foreground uppercase">旋转 X</span>
+                  <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.rotateX') }}</span>
                   <Input type="number" :model-value="activeKeyframeProperties.rotateX" @update:model-value="(v) => updateKeyframeProperty('rotateX', v)" class="h-8 text-xs font-mono" />
                 </div>
                 <div class="space-y-1">
-                  <span class="text-[10px] text-muted-foreground uppercase">旋转 Y</span>
+                  <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.rotateY') }}</span>
                   <Input type="number" :model-value="activeKeyframeProperties.rotateY" @update:model-value="(v) => updateKeyframeProperty('rotateY', v)" class="h-8 text-xs font-mono" />
                 </div>
                 <div class="space-y-1">
-                  <span class="text-[10px] text-muted-foreground uppercase">旋转 Z</span>
+                  <span class="text-[10px] text-muted-foreground uppercase">{{ t('properties.transform.rotateZ') }}</span>
                   <Input type="number" :model-value="activeKeyframeProperties.rotateZ" @update:model-value="(v) => updateKeyframeProperty('rotateZ', v)" class="h-8 text-xs font-mono" />
                 </div>
               </div>
 
               <div v-if="selected.type === 'text'" class="space-y-1">
-                <Label class="text-[10px] text-muted-foreground uppercase">文本颜色</Label>
+                <Label class="text-[10px] text-muted-foreground uppercase">{{ t('properties.animation.textColor') }}</Label>
                 <div class="flex items-center gap-2">
                   <Input
                     type="color"
@@ -1098,7 +1103,7 @@ const getButtonAV = (item: any): number | undefined => {
             v-else
             class="rounded-sm border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground"
           >
-            将资源添加到时间轴后可以编辑动画
+            {{ t('properties.animation.noClipHint') }}
           </div>
         </div>
       </div>
@@ -1106,7 +1111,7 @@ const getButtonAV = (item: any): number | undefined => {
       <div
         class="w-14 shrink-0 border-l border-border bg-background/95 p-1.5 flex flex-col items-center gap-1"
         role="tablist"
-        aria-label="属性分类"
+        :aria-label="t('properties.tabs.ariaLabel')"
       >
         <button
           v-for="tab in propertyTabs"
@@ -1136,7 +1141,7 @@ const getButtonAV = (item: any): number | undefined => {
       <div class="flex items-center justify-between select-none">
         <Label class="text-xs font-semibold text-primary uppercase tracking-wider flex items-center gap-2">
           <span class="w-1 h-3 bg-primary rounded-full"></span>
-          音频片段属性
+          {{ t('properties.audio.title') }}
         </Label>
       </div>
 
@@ -1145,13 +1150,13 @@ const getButtonAV = (item: any): number | undefined => {
         <div class="rounded-sm border border-border bg-accent/40 px-3 py-3 space-y-2">
           <div class="flex items-center gap-2 text-xs text-muted-foreground">
             <Music2 class="size-3.5" />
-            <span class="truncate font-medium text-foreground">{{ selectedAudioClip.name || '音频片段' }}</span>
+            <span class="truncate font-medium text-foreground">{{ selectedAudioClip.name || t('properties.audio.clipFallbackName') }}</span>
           </div>
           <div v-if="selectedAudioResource" class="text-[10px] text-muted-foreground/70 truncate">
             {{ selectedAudioResource.file?.name ?? selectedAudioResource.name }}
           </div>
           <div class="text-[10px] text-muted-foreground/70">
-            时长: {{ (selectedAudioClip.duration / 1000).toFixed(2) }}s
+            {{ t('properties.audio.duration', { value: (selectedAudioClip.duration / 1000).toFixed(2) }) }}
           </div>
         </div>
 
@@ -1160,7 +1165,7 @@ const getButtonAV = (item: any): number | undefined => {
           <div class="flex items-center justify-between">
             <Label class="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2">
               <Volume2 class="size-3" />
-              音量
+              {{ t('properties.audio.volume') }}
             </Label>
             <span class="text-xs font-mono text-muted-foreground">{{ formatNumberForDisplay(audioVolumeDb, 1) }} dB</span>
           </div>
@@ -1181,7 +1186,7 @@ const getButtonAV = (item: any): number | undefined => {
 
         <!-- 静音切换 -->
         <div class="rounded-sm border border-border bg-accent/40 px-3 py-2.5 flex items-center justify-between">
-          <span class="text-xs text-muted-foreground">静音此片段</span>
+          <span class="text-xs text-muted-foreground">{{ t('properties.audio.muteClip') }}</span>
           <button
             type="button"
             role="switch"
@@ -1204,8 +1209,8 @@ const getButtonAV = (item: any): number | undefined => {
       <div class="size-12 rounded-sm bg-accent flex items-center justify-center mb-3">
         <Settings class="size-6 opacity-50" />
       </div>
-      <span class="font-medium">未选中</span>
-      <span class="text-xs mt-1">在左侧列表中选择一个项目进行编辑</span>
+      <span class="font-medium">{{ t('properties.empty.title') }}</span>
+      <span class="text-xs mt-1">{{ t('properties.empty.hint') }}</span>
     </div>
   </div>
 </template>

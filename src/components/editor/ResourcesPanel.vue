@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { useDanmuStore } from "@/stores/danmu";
 import { useTimelineStore } from "@/stores/timeline";
 import { useAudioStore } from "@/stores/audio";
@@ -18,6 +19,7 @@ const danmuStore = useDanmuStore();
 const timelineStore = useTimelineStore();
 const audioStore = useAudioStore();
 const contextMenu = useContextMenuStore();
+const { t } = useI18n();
 const activeTab = ref("all");
 const searchQuery = ref("");
 const resourceLayout = ref<"list" | "grid">("list");
@@ -209,7 +211,7 @@ const toggleResourceLayout = () => {
         v-if="isAudioFileDrag"
         class="absolute inset-1 z-10 flex items-center justify-center border border-dashed border-primary bg-primary/10 text-primary pointer-events-none"
       >
-        <span class="text-sm font-medium">释放以上传音频文件</span>
+        <span class="text-sm font-medium">{{ t('resources.dropOverlay') }}</span>
       </div>
       <!-- Header -->
       <ResourcesHeader
@@ -235,19 +237,19 @@ const toggleResourceLayout = () => {
         class="h-8 border-t border-border flex items-center justify-between gap-3 px-3 text-xs text-muted-foreground bg-background shrink-0"
       >
         <div class="flex min-w-0 items-center gap-3">
-          <span
-            >共
-            {{ danmuStore.danmus.length + audioStore.audioResources.length }}
-            个项目</span
-          >
+          <span>{{
+            t('resources.itemCount', {
+              n: danmuStore.danmus.length + audioStore.audioResources.length,
+            })
+          }}</span>
           <span v-if="danmuStore.selected" class="truncate text-primary">
-            已选中: {{ getItemName(danmuStore.selected) }}
+            {{ t('resources.selected', { name: getItemName(danmuStore.selected) }) }}
           </span>
         </div>
         <button
           class="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          :title="resourceLayout === 'list' ? '切换为网格布局' : '切换为列表布局'"
-          :aria-label="resourceLayout === 'list' ? '切换为网格布局' : '切换为列表布局'"
+          :title="resourceLayout === 'list' ? t('resources.viewGrid') : t('resources.viewList')"
+          :aria-label="resourceLayout === 'list' ? t('resources.viewGrid') : t('resources.viewList')"
           @click="toggleResourceLayout"
         >
           <LayoutGrid v-if="resourceLayout === 'list'" class="size-3.5" />

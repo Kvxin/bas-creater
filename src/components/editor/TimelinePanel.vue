@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, reactive, onMounted, onUnmounted, nextTick } from "vue";
+import { useI18n } from "vue-i18n";
 import { useElementSize } from "@vueuse/core";
 import {
   Clock,
@@ -33,6 +34,8 @@ import AudioWaveform from "./audio/AudioWaveform.vue";
 import AudioVolumeLine from "./audio/AudioVolumeLine.vue";
 import { dBToLinear } from "@/utils/audio/audio-math";
 import { WAVEFORM_GAIN_SAMPLE_COUNT } from "@/utils/audio/constants";
+
+const { t } = useI18n();
 
 const timelineStore = useTimelineStore();
 const danmuStore = useDanmuStore();
@@ -277,9 +280,9 @@ const getClipTimelineType = (clip: TimelineClip): TimelineTrackType => {
 
 const getTrackTypeLabel = (track: TimelineTrack) => {
   const type = getTrackType(track);
-  if (type === "audio") return "音频轨道";
-  if (type === "danmu") return "弹幕轨道";
-  return "空轨道";
+  if (type === "audio") return t("timeline.track.type.audio");
+  if (type === "danmu") return t("timeline.track.type.danmu");
+  return t("timeline.track.type.empty");
 };
 
 const getTrackTypeIcon = (track: TimelineTrack) => {
@@ -297,9 +300,9 @@ const getTrackPrimaryIcon = (track: TimelineTrack) => {
 
 const getTrackPrimaryLabel = (track: TimelineTrack) => {
   if (getTrackType(track) === "audio") {
-    return track.muted ? "取消静音轨道" : "静音轨道";
+    return track.muted ? t("timeline.track.unmute") : t("timeline.track.mute");
   }
-  return track.visible ? "隐藏轨道" : "显示轨道";
+  return track.visible ? t("timeline.track.hide") : t("timeline.track.show");
 };
 
 const isTrackPrimaryActive = (track: TimelineTrack) => {
@@ -355,7 +358,7 @@ const getClipName = (clip: any) => {
   if (danmu) {
     return getItemName(danmu);
   }
-  return clip.name || "Unknown Clip";
+  return clip.name || t("common.unknown");
 };
 
 const getClipKeyframeMarkers = (clip: TimelineClip) => [
@@ -363,13 +366,13 @@ const getClipKeyframeMarkers = (clip: TimelineClip) => [
     id: BASE_KEYFRAME_ID,
     timeMs: 0,
     isBase: true,
-    label: "基态"
+    label: t("common.keyframeBase")
   },
   ...normalizeKeyframes(clip.keyframes, clip.duration).map((keyframe, index) => ({
     id: keyframe.id,
     timeMs: keyframe.timeMs,
     isBase: false,
-    label: `关键帧 ${index + 2}`
+    label: t("common.keyframeLabel", { n: index + 2 })
   }))
 ];
 
@@ -405,31 +408,43 @@ const handleKeyframeDblClick = (clip: TimelineClip, marker: { timeMs: number }) 
 };
 
 // 游标位置 (相对于内容区域)
+/** 吸附候选的语义种类；显示文本在渲染时通过 t() 解析。 */
+type PlayheadSemanticSnapKind = "clipStart" | "clipEnd" | "keyframe";
 type PlayheadSemanticSnapCandidate = {
   timeMs: number;
-  label: "片段开始" | "片段结束" | "关键帧";
+  kind: PlayheadSemanticSnapKind;
 };
 // 吸附像素大小
 const PLAYHEAD_SEMANTIC_SNAP_SCREEN_PX = 5;
-const playheadSnapLabel = ref<PlayheadSemanticSnapCandidate["label"] | null>(null);
+const playheadSnapKind = ref<PlayheadSemanticSnapKind | null>(null);
 const playheadTooltipClientX = ref(0);
 const playheadTooltipTop = ref(0);
 
+const getPlayheadSnapText = (kind: PlayheadSemanticSnapKind) => {
+  if (kind === "clipStart") return t("timeline.snap.clipStart");
+  if (kind === "clipEnd") return t("timeline.snap.clipEnd");
+  return t("timeline.snap.keyframe");
+};
+
+const playheadSnapText = computed(() =>
+  playheadSnapKind.value ? getPlayheadSnapText(playheadSnapKind.value) : ""
+);
+
 const playheadSemanticSnapCandidates = computed<PlayheadSemanticSnapCandidate[]>(() => {
   const candidates = new Map<string, PlayheadSemanticSnapCandidate>();
-  const addCandidate = (timeMs: number, label: PlayheadSemanticSnapCandidate["label"]) => {
+  const addCandidate = (timeMs: number, kind: PlayheadSemanticSnapKind) => {
     const clampedTime = Math.min(Math.max(0, timeMs), timelineStore.duration);
     if (!Number.isFinite(clampedTime)) return;
     const key = clampedTime.toFixed(3);
-    if (!candidates.has(key)) candidates.set(key, { timeMs: clampedTime, label });
+    if (!candidates.has(key)) candidates.set(key, { timeMs: clampedTime, kind });
   };
 
   for (const track of timelineStore.tracks) {
     for (const clip of track.clips) {
-      addCandidate(clip.startTime, "片段开始");
-      addCandidate(clip.startTime + clip.duration, "片段结束");
+      addCandidate(clip.startTime, "clipStart");
+      addCandidate(clip.startTime + clip.duration, "clipEnd");
       for (const keyframe of normalizeKeyframes(clip.keyframes, clip.duration)) {
-        addCandidate(clip.startTime + keyframe.timeMs, "关键帧");
+        addCandidate(clip.startTime + keyframe.timeMs, "keyframe");
       }
     }
   }
@@ -439,7 +454,7 @@ const playheadSemanticSnapCandidates = computed<PlayheadSemanticSnapCandidate[]>
 
 const resolvePlayheadSemanticSnap = (rawTimeMs: number, disabled = false) => {
   const clampedTime = Math.min(Math.max(0, rawTimeMs), timelineStore.duration);
-  if (disabled) return { timeMs: clampedTime, label: null };
+  if (disabled) return { timeMs: clampedTime, kind: null };
 
   const candidates = playheadSemanticSnapCandidates.value;
   let low = 0;
@@ -460,10 +475,10 @@ const resolvePlayheadSemanticSnap = (rawTimeMs: number, disabled = false) => {
 
   const thresholdMs = (PLAYHEAD_SEMANTIC_SNAP_SCREEN_PX / pixelsPerSecond.value) * 1000;
   if (nearest && Math.abs(nearest.timeMs - clampedTime) <= thresholdMs) {
-    return { timeMs: nearest.timeMs, label: nearest.label };
+    return { timeMs: nearest.timeMs, kind: nearest.kind };
   }
 
-  return { timeMs: clampedTime, label: null };
+  return { timeMs: clampedTime, kind: null };
 };
 
 const playheadTooltipStyle = computed(() => ({
@@ -512,7 +527,7 @@ const handleTimelineClick = (e: MouseEvent) => {
 
 const updateTime = (time: number, disableSnap = false) => {
   const resolved = resolvePlayheadSemanticSnap(time, disableSnap);
-  playheadSnapLabel.value = resolved.label;
+  playheadSnapKind.value = resolved.kind;
   timelineStore.setCurrentTime(resolved.timeMs);
   // 如果是暂停状态，也要同步 BAS 引擎时间，方便预览静态帧
   if (!timelineStore.isPlaying) {
@@ -1038,7 +1053,7 @@ const isDraggingPlayhead = ref(false);
 const startDragPlayhead = (e: MouseEvent) => {
   e.preventDefault();
   isDraggingPlayhead.value = true;
-  playheadSnapLabel.value = null;
+  playheadSnapKind.value = null;
   playheadTooltipClientX.value = e.clientX;
   playheadTooltipTop.value = (timelineContentRef.value?.getBoundingClientRect().top ?? 0) + 8;
   document.body.style.cursor = "ew-resize";
@@ -1054,7 +1069,7 @@ const onDragPlayhead = (e: MouseEvent) => {
   const rawTime = (moveX / pixelsPerSecond.value) * 1000;
   const resolved = resolvePlayheadSemanticSnap(rawTime, e.shiftKey);
 
-  playheadSnapLabel.value = resolved.label;
+  playheadSnapKind.value = resolved.kind;
   playheadTooltipClientX.value = e.clientX;
   timelineStore.setCurrentTime(resolved.timeMs);
   if (!timelineStore.isPlaying) {
@@ -1064,7 +1079,7 @@ const onDragPlayhead = (e: MouseEvent) => {
 
 const stopDragPlayhead = () => {
   isDraggingPlayhead.value = false;
-  playheadSnapLabel.value = null;
+  playheadSnapKind.value = null;
   document.body.style.cursor = "";
   window.removeEventListener("mousemove", onDragPlayhead);
   window.removeEventListener("mouseup", stopDragPlayhead);
@@ -1219,7 +1234,7 @@ function handleVolumeSelect(clipId: string) {
       <div
         class="w-56 shrink-0 border-r border-border bg-background flex items-center justify-between px-3 text-xs font-medium text-muted-foreground z-20"
       >
-        轨道列表
+        {{ t('timeline.trackList') }}
       </div>
 
       <!-- 右侧：时间刻度尺 (固定视口，内部 canvas 重绘) -->
@@ -1254,7 +1269,7 @@ function handleVolumeSelect(clipId: string) {
             <button
               @click="timelineStore.toggleTrackExpand(track.id)"
               class="size-5 hover:bg-accent rounded-sm transition-colors inline-flex items-center justify-center"
-              aria-label="展开轨道动画"
+              :aria-label="t('timeline.track.expand')"
             >
               <component :is="track.expanded ? ChevronDown : ChevronRight" class="size-3 text-muted-foreground" />
             </button>
@@ -1276,22 +1291,22 @@ function handleVolumeSelect(clipId: string) {
             </button>
             <span
               class="size-5 inline-flex items-center justify-center rounded-sm border border-border/70 bg-background/80 text-muted-foreground"
-              :aria-label="`${getTrackTypeLabel(track)}，轨道类型由首次放入的资源锁定`"
-              :title="`${getTrackTypeLabel(track)} · 首次放入资源后锁定类型`"
+              :aria-label="t('timeline.track.typeLockedAria', { type: getTrackTypeLabel(track) })"
+              :title="t('timeline.track.typeLockedTitle', { type: getTrackTypeLabel(track) })"
             >
               <component :is="getTrackTypeIcon(track)" class="size-3" />
             </span>
             <span
               class="size-5 inline-flex items-center justify-center rounded-sm border border-border/50 bg-background/50 text-muted-foreground/45"
-              title="视频轨道占位，暂未启用"
-              aria-label="视频轨道占位，暂未启用"
+              :title="t('timeline.track.videoPlaceholder')"
+              :aria-label="t('timeline.track.videoPlaceholder')"
             >
               <Video class="size-3" />
             </span>
             <button
               class="opacity-0 group-hover:opacity-100 size-5 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-opacity"
-              aria-label="删除轨道"
-              title="删除轨道"
+              :aria-label="t('timeline.track.remove')"
+              :title="t('timeline.track.remove')"
               @click.stop="handleRemoveTrack(track.id)"
             >
               <Trash2 class="size-3" />
@@ -1304,7 +1319,7 @@ function handleVolumeSelect(clipId: string) {
             class="h-16 bg-muted/30 border-b border-border/60 flex items-center justify-end px-3 text-[10px] text-muted-foreground shrink-0"
             :class="{ 'opacity-55': !track.visible }"
           >
-            <span class="opacity-70">动画关键帧</span>
+            <span class="opacity-70">{{ t('timeline.keyframes') }}</span>
           </div>
         </template>
 
@@ -1313,7 +1328,7 @@ function handleVolumeSelect(clipId: string) {
           class="w-full h-8 flex items-center justify-center gap-1 text-xs text-muted-foreground hover:text-primary hover:bg-accent transition-colors mt-1 shrink-0"
         >
           <Plus class="size-3" />
-          添加轨道
+          {{ t('timeline.addTrack') }}
         </button>
 
         <!-- 底部占位，防止内容被遮挡 -->
@@ -1479,7 +1494,7 @@ function handleVolumeSelect(clipId: string) {
           <div
             class="timeline-playhead timeline-playhead--content absolute top-0 bottom-0 w-px z-30 cursor-ew-resize"
             :style="playheadStyle"
-            title="拖动定位；Shift 暂时关闭片段与关键帧吸附"
+            :title="t('timeline.playhead.dragHint')"
             @mousedown.stop="startDragPlayhead"
           >
             <!-- 保持较宽的透明命中区域，视觉线条仍为 1px -->
@@ -1495,7 +1510,9 @@ function handleVolumeSelect(clipId: string) {
       :style="playheadTooltipStyle"
     >
       {{ formatTime(timelineStore.currentTime).str }}
-      <span v-if="playheadSnapLabel" class="ml-1 text-primary"> 吸附 · {{ playheadSnapLabel }} </span>
+      <span v-if="playheadSnapKind" class="ml-1 text-primary"> {{
+        t('timeline.snap.indicator', { label: playheadSnapText })
+      }} </span>
     </div>
 
     <!-- Drag/Resize Tooltip -->
@@ -1505,14 +1522,21 @@ function handleVolumeSelect(clipId: string) {
       :style="{ top: tooltipPosition.y + 'px', left: tooltipPosition.x + 'px' }"
     >
       <div v-if="isDraggingClip">
-        <template v-if="isAltDragCopy && dragTargetTrackId !== originalClipTrackId"
-          >Copy to: {{ formatTime(tempState.startTime).str }}</template
-        >
-        <template v-else>Start: {{ formatTime(tempState.startTime).str }}</template>
+        <template v-if="isAltDragCopy && dragTargetTrackId !== originalClipTrackId">{{
+          t('timeline.tooltip.copyTo', { time: formatTime(tempState.startTime).str })
+        }}</template>
+        <template v-else>{{
+          t('timeline.tooltip.start', { time: formatTime(tempState.startTime).str })
+        }}</template>
       </div>
       <div v-else-if="isResizingClip">
-        Start: {{ formatTime(tempState.startTime).str }} Duration: {{ formatTime(tempState.duration).str }} End:
-        {{ formatTime(tempState.startTime + tempState.duration).str }}
+        {{
+          t('timeline.tooltip.resize', {
+            start: formatTime(tempState.startTime).str,
+            duration: formatTime(tempState.duration).str,
+            end: formatTime(tempState.startTime + tempState.duration).str
+          })
+        }}
       </div>
     </div>
   </div>

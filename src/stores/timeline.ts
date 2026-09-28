@@ -11,6 +11,7 @@ import type {
 } from "@/types/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
+import { i18n } from "@/i18n";
 import { getItemName } from "@/utils/resourceUtils";
 import {
   BASE_KEYFRAME_ID,
@@ -22,10 +23,11 @@ import {
 } from "@/utils/keyframes";
 
 export const useTimelineStore = defineStore("timeline", () => {
+  // 默认轨道名是真实数据：创建时按当前语言生成快照，切换语言不会重写已有轨道名。
   const tracks = ref<TimelineTrack[]>([
     {
       id: "track_1",
-      name: "轨道 1",
+      name: i18n.global.t("timeline.defaultTrackName", { n: 1 }),
       clips: [],
       visible: true,
       muted: false,
@@ -298,7 +300,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     const id = `track_${Math.random().toString(36).slice(2, 9)}`;
     tracks.value.push({
       id,
-      name: name || `轨道 ${tracks.value.length + 1}`,
+      name: name || i18n.global.t("timeline.defaultTrackName", { n: tracks.value.length + 1 }),
       type,
       clips: [],
       visible: true,

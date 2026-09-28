@@ -1,18 +1,24 @@
+import { i18n } from "@/i18n";
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 
+// 纯模块（无组件实例）里通过 i18n.global.t 取词；这些函数都在渲染期间被调用，
+// 因此语言切换会自动触发重新渲染。
 export const getDefaultName = (item: AnyDanmu | AudioResource): string => {
   switch (item.type) {
     case "text":
-      return "文本弹幕";
+      return i18n.global.t("danmu.type.text");
     case "button":
-      return "按钮弹幕";
+      return i18n.global.t("danmu.type.button");
     case "path":
-      return "路径弹幕";
+      return i18n.global.t("danmu.type.path");
     case "audio-file":
-      return (item as AudioResource).file.name || "未命名音频";
+      return (
+        (item as AudioResource).file.name ||
+        i18n.global.t("resources.unnamedAudio")
+      );
     default:
-      return "未知项目";
+      return i18n.global.t("resources.unknownItem");
   }
 };
 
@@ -23,15 +29,15 @@ export const getItemName = (item: AnyDanmu | AudioResource): string => {
 export const getItemTypeLabel = (type: string): string => {
   switch (type) {
     case "text":
-      return "文本";
+      return i18n.global.t("danmu.short.text");
     case "button":
-      return "按钮";
+      return i18n.global.t("danmu.short.button");
     case "path":
-      return "路径";
+      return i18n.global.t("danmu.short.path");
     case "audio-file":
-      return "音频";
+      return i18n.global.t("danmu.short.audio");
     default:
-      return "未知";
+      return i18n.global.t("danmu.short.unknown");
   }
 };
 

@@ -1,3 +1,4 @@
+import { i18n } from "@/i18n";
 import type {
   AnyDanmu,
   ButtonDanmu,
@@ -100,7 +101,7 @@ export function createTextDanmu(ov: Partial<TextDanmu> = {}): TextDanmu {
   return {
     ...base,
     type: "text",
-    content: ov.content ?? "请输入内容",
+    content: ov.content ?? i18n.global.t("danmu.defaultText"),
     ...pickDefined(
       ov as Record<string, unknown>,
       TEXT_OPTIONAL_KEYS
@@ -113,7 +114,7 @@ export function createButtonDanmu(ov: Partial<ButtonDanmu> = {}): ButtonDanmu {
   return {
     ...base,
     type: "button",
-    text: ov.text ?? "按钮",
+    text: ov.text ?? i18n.global.t("danmu.defaultButtonText"),
     ...pickDefined(
       ov as Record<string, unknown>,
       BUTTON_OPTIONAL_KEYS

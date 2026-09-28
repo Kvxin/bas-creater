@@ -6,6 +6,9 @@ import ResourcesPanel from "./ResourcesPanel.vue";
 import PreviewPanel from "./PreviewPanel.vue";
 import PropertiesPanel from "./PropertiesPanel.vue";
 import TimelinePanel from "./TimelinePanel.vue";
+import { useI18n } from "vue-i18n";
+import { SUPPORTED_LOCALES } from "@/i18n";
+const { t, locale } = useI18n();
 
 // Theme
 const isDark = useDark({ initialValue: "dark" });
@@ -89,12 +92,19 @@ useEventListener("mouseleave", stopResize);
         <button
           class="h-8 px-3 rounded-sm bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors"
         >
-          Export
+          {{ t('app.export') }}
         </button>
+        <select
+          v-model="locale"
+          :aria-label="t('app.language')"
+          class="h-8 rounded-sm border border-border bg-background px-2 text-xs"
+        >
+          <option v-for="item in SUPPORTED_LOCALES" :key="item.value" :value="item.value">{{ item.label }}</option>
+        </select>
         <button
           @click="toggleDark()"
           class="size-8 rounded-sm hover:bg-accent hover:text-accent-foreground transition-colors focus:outline-none focus:ring-1 focus:ring-ring flex items-center justify-center"
-          aria-label="Toggle Theme"
+          :aria-label="t('app.toggleTheme')"
         >
           <Sun v-if="isDark" class="size-4" />
           <Moon v-else class="size-4" />
@@ -118,7 +128,7 @@ useEventListener("mouseleave", stopResize);
         <div
           class="w-[0.18rem] hover:w-1 bg-transparent hover:bg-primary/45 cursor-col-resize transition-all z-10 flex items-center justify-center group rounded-full"
           @mousedown="startResizeLeft"
-          aria-label="Resize resources panel"
+          :aria-label="t('app.resizeResources')"
         >
           <div
             class="h-8 w-px bg-border group-hover:bg-primary rounded-full"
@@ -134,7 +144,7 @@ useEventListener("mouseleave", stopResize);
         <div
           class="w-[0.18rem] hover:w-1 bg-transparent hover:bg-primary/45 cursor-col-resize transition-all z-10 flex items-center justify-center group rounded-full"
           @mousedown="startResizeRight"
-          aria-label="Resize properties panel"
+          :aria-label="t('app.resizeProperties')"
         >
           <div
             class="h-8 w-px bg-border group-hover:bg-primary rounded-full"
@@ -151,7 +161,7 @@ useEventListener("mouseleave", stopResize);
       <div
         class="mx-3 h-[0.18rem] hover:h-1 bg-transparent hover:bg-primary/45 cursor-row-resize transition-all z-10 flex justify-center items-center group rounded-full"
         @mousedown="startResizeBottom"
-        aria-label="Resize timeline panel"
+        :aria-label="t('app.resizeTimeline')"
       >
         <div
           class="w-12 h-px bg-border group-hover:bg-primary rounded-full"

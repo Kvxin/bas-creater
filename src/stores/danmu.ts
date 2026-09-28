@@ -1,6 +1,7 @@
 import { computed, reactive, ref } from "vue"
 import { defineStore } from "pinia"
 import type { AnyDanmu, DanmuType } from "@/types/danmu"
+import { i18n } from "@/i18n"
 import { createDanmuByKey } from "@/utils/danmuFactory"
 import { getItemName } from "@/utils/resourceUtils"
 
@@ -43,7 +44,7 @@ export const useDanmuStore = defineStore("danmu", () => {
     const { id: _id, type: _type, name: _name, ...payload } = sourceData
     const dm = createDanmuByKey(source.type, {
       ...payload,
-      name: `${getItemName(source)} 副本`,
+      name: i18n.global.t("common.duplicateName", { name: getItemName(source) }),
     })
 
     danmus.value.push(dm)

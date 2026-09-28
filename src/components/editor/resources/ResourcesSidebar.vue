@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   Folder,
   MessageSquareText,
@@ -15,13 +17,16 @@ const emit = defineEmits<{
   (e: "update:modelValue", value: string): void;
 }>();
 
-const tabs = [
-  { id: "all", icon: Folder, label: "全部" },
-  { id: "text", icon: MessageSquareText, label: "文本弹幕" },
-  { id: "button", icon: SquareMousePointer, label: "按钮弹幕" },
-  { id: "path", icon: Waypoints, label: "路径弹幕" },
-  { id: "audio", icon: AudioLines, label: "音频资源" },
-];
+const { t } = useI18n();
+
+// computed：标签需随语言切换重新求值，普通 const 会在首次渲染后冻结语言。
+const tabs = computed(() => [
+  { id: "all", icon: Folder, label: t("resources.tabAll") },
+  { id: "text", icon: MessageSquareText, label: t("danmu.type.text") },
+  { id: "button", icon: SquareMousePointer, label: t("danmu.type.button") },
+  { id: "path", icon: Waypoints, label: t("danmu.type.path") },
+  { id: "audio", icon: AudioLines, label: t("resources.tabAudio") },
+]);
 </script>
 
 <template>

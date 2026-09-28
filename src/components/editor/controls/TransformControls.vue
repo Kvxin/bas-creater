@@ -2,6 +2,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { CSSProperties } from 'vue'
 import type { AnyDanmu } from '@/types/danmu'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 const MIN_SCALE = 0.1
 const MIN_MEASURED_SIZE = 2
@@ -1374,7 +1377,7 @@ watch(
       class="transform-handle transform-handle--corner absolute"
       :class="`transform-handle--${entry.corner}`"
       :style="{ ...getHandlePositionStyle(entry.point), cursor: entry.cursor }"
-      :aria-label="`Scale ${entry.corner}`"
+      :aria-label="t('preview.transform.scaleHandle', { corner: entry.corner })"
       @pointerdown="(event) => onCornerPointerDown(event, entry.corner)"
     >
       <span :style="getHandleSizeStyle(HANDLE_SCREEN_SIZE)" />
@@ -1385,7 +1388,7 @@ watch(
       type="button"
       class="transform-handle transform-handle--rotate absolute"
       :style="getHandlePositionStyle(rotationHandlePoint)"
-      aria-label="Rotate"
+      :aria-label="t('preview.transform.rotateHandle')"
       @pointerdown="onRotatePointerDown"
     >
       <span :style="getHandleSizeStyle(18)" />
@@ -1396,7 +1399,7 @@ watch(
       type="button"
       class="transform-handle transform-handle--anchor absolute"
       :style="getHandlePositionStyle(anchorHandlePoint, 18)"
-      aria-label="Move transform anchor"
+      :aria-label="t('preview.transform.anchorHandle')"
       @pointerdown="onAnchorPointerDown"
     >
       <span :style="getHandleSizeStyle(8)" />

@@ -1,3 +1,4 @@
+import { i18n } from "@/i18n";
 import type { AnyDanmu, DanmuType } from "@/types/danmu";
 
 export const BAS_COMMON_DEFAULTS = {
@@ -9,7 +10,6 @@ export const BAS_COMMON_DEFAULTS = {
 } as const;
 
 export const BAS_TEXT_DEFAULTS = {
-  content: "请输入内容",
   opacity: 1,
   color: 0xffffff,
   anchorX: 0,
@@ -27,7 +27,6 @@ export const BAS_TEXT_DEFAULTS = {
 } as const;
 
 export const BAS_BUTTON_DEFAULTS = {
-  text: "请输入内容",
   fontSize: 25,
   textColor: 0x000000,
   textAlpha: 1,
@@ -51,7 +50,17 @@ export type BasDanmuDefaults = typeof BAS_COMMON_DEFAULTS &
     typeof BAS_TEXT_DEFAULTS &
       typeof BAS_BUTTON_DEFAULTS &
       typeof BAS_PATH_DEFAULTS
-  >;
+  > & {
+    /**
+     * Locale dependent placeholder content of a text danmaku. It is resolved on
+     * every call instead of being baked into the constants above, so a resource
+     * created in one language keeps the text it was created with and new
+     * resources follow the active language.
+     */
+    content?: string;
+    /** Locale dependent placeholder label of a button danmaku. */
+    text?: string;
+  };
 
 export type ResolvedDanmu<T extends AnyDanmu = AnyDanmu> = T & {
   x: number | string;
@@ -69,9 +78,24 @@ const BAS_DEFAULTS_BY_TYPE: Record<
   path: BAS_PATH_DEFAULTS,
 };
 
+/**
+ * Textual BAS defaults, translated with the active locale.
+ * The button default deliberately mirrors the text default (both used to be
+ * "请输入内容"): BAS only emits a property when it differs from these values, so
+ * changing it would alter the generated code for newly created buttons.
+ */
+const localizedTextDefaults = (
+  type: DanmuType
+): Partial<Pick<BasDanmuDefaults, "content" | "text">> => {
+  if (type === "text") return { content: i18n.global.t("danmu.defaultText") };
+  if (type === "button") return { text: i18n.global.t("danmu.defaultText") };
+  return {};
+};
+
 export const getBasDanmuDefaults = (type: DanmuType): BasDanmuDefaults => ({
   ...BAS_COMMON_DEFAULTS,
   ...BAS_DEFAULTS_BY_TYPE[type],
+  ...localizedTextDefaults(type),
 });
 
 export const resolveDanmuDefaults = <T extends AnyDanmu>(

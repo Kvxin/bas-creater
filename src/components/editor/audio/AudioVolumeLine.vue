@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
+import { useI18n } from "vue-i18n";
 import {
   getLinePosFromDb,
   getDbFromLinePos,
@@ -15,6 +16,8 @@ import {
   HIT_AREA_HEIGHT_PX,
   TOOLTIP_OFFSET_PX,
 } from "@/utils/audio/constants";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   clipId: string;
@@ -167,7 +170,7 @@ function onLostPointerCapture() {
       <div
         class="absolute inset-x-0 -translate-y-1/2 touch-none cursor-ns-resize pointer-events-auto"
         :style="{ top: lineTopPercent + '%', height: `${HIT_AREA_HEIGHT_PX}px` }"
-        title="拖动调整片段音量"
+        :title="t('audio.volumeDrag')"
         @pointerdown="onPointerDown"
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"

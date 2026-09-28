@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from "vue";
 import { onClickOutside } from "@vueuse/core";
+import { useI18n } from "vue-i18n";
 import {
   Check,
   ChevronDown,
@@ -30,6 +31,8 @@ import {
   normalizeKeyframes,
   pickKeyframePropertiesForResource,
 } from "@/utils/keyframes";
+
+const { t } = useI18n();
 
 const ZOOM_SENSITIVITY = 0.001;
 const MIN_SCALE = 0.1;
@@ -230,7 +233,7 @@ const isAtFit = computed(
     0.01
 );
 const zoomDisplayLabel = computed(() =>
-  isAtFit.value ? "Fit" : `${zoomPercent.value}%`
+  isAtFit.value ? t("preview.zoom.fit") : `${zoomPercent.value}%`
 );
 
 /** 自适应：将画布居中缩放至完整适配视口 */
@@ -852,7 +855,7 @@ const skipForward = () => {
         <button
           @click="nudgeViewportZoom(1)"
           class="inline-flex size-9 items-center justify-center rounded-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          title="放大"
+          :title="t('preview.zoom.in')"
         >
           <Plus class="size-4" />
         </button>
@@ -860,7 +863,7 @@ const skipForward = () => {
         <button
           @click="fitToScreen()"
           class="inline-flex h-9 min-w-9 items-center justify-center rounded-sm px-1 font-mono text-xs tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          title="点击适配窗口"
+          :title="t('preview.zoom.fitToWindow')"
         >
           {{ zoomDisplayLabel }}
         </button>
@@ -868,7 +871,7 @@ const skipForward = () => {
         <button
           @click="nudgeViewportZoom(-1)"
           class="inline-flex size-9 items-center justify-center rounded-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          title="缩小"
+          :title="t('preview.zoom.out')"
         >
           <Minus class="size-4" />
         </button>
@@ -878,7 +881,7 @@ const skipForward = () => {
         <button
           @click="toggleFullscreen"
           class="inline-flex size-9 items-center justify-center rounded-sm text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-          :title="isFullscreen ? '退出全屏' : '全屏'"
+          :title="isFullscreen ? t('preview.fullscreen.exit') : t('preview.fullscreen.enter')"
         >
           <Minimize v-if="isFullscreen" class="size-4" />
           <Maximize v-else class="size-4" />
@@ -922,21 +925,21 @@ const skipForward = () => {
         <button
           @click="playFromStart"
           class="inline-flex size-9 items-center justify-center rounded-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-          title="从头播放"
+          :title="t('preview.playback.fromStart')"
         >
           <RotateCcw class="size-4" />
         </button>
         <button
           @click="seekToStart"
           class="inline-flex size-9 items-center justify-center rounded-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-          title="回到开头"
+          :title="t('preview.playback.seekToStart')"
         >
           <SkipBack class="size-4" />
         </button>
         <button
           @click="togglePlay"
           class="inline-flex size-10 items-center justify-center rounded-sm text-primary transition-colors hover:bg-accent hover:text-accent-foreground"
-          :title="isPlaying ? '暂停' : '播放'"
+          :title="isPlaying ? t('preview.playback.pause') : t('preview.playback.play')"
         >
           <Pause v-if="isPlaying" class="size-5 fill-current" />
           <Play v-else class="size-5 fill-current" />
@@ -944,7 +947,7 @@ const skipForward = () => {
         <button
           @click="skipForward"
           class="inline-flex size-9 items-center justify-center rounded-sm transition-colors hover:bg-accent hover:text-accent-foreground"
-          title="快进"
+          :title="t('preview.playback.skipForward')"
         >
           <SkipForward class="size-4" />
         </button>
@@ -957,7 +960,7 @@ const skipForward = () => {
           <button
             @click.stop="isZoomMenuOpen = !isZoomMenuOpen; isResolutionMenuOpen = false"
             class="inline-flex h-9 min-w-[5.25rem] items-center justify-between gap-2 rounded-sm border border-border/70 bg-accent/35 px-3 font-mono text-xs tabular-nums text-foreground transition-colors hover:bg-accent"
-            title="视图缩放"
+            :title="t('preview.zoom.menu')"
           >
             <span>{{ zoomDisplayLabel }}</span>
             <ChevronDown class="size-3.5 text-muted-foreground" />
@@ -973,7 +976,7 @@ const skipForward = () => {
                 isAtFit ? 'bg-accent text-accent-foreground' : ''
               ]"
             >
-              <span>Fit</span>
+              <span>{{ t('preview.zoom.fit') }}</span>
               <Check v-if="isAtFit" class="size-4" />
             </button>
             <div class="my-1.5 h-px bg-border"></div>
@@ -997,7 +1000,7 @@ const skipForward = () => {
           <button
             @click.stop="isResolutionMenuOpen = !isResolutionMenuOpen; isZoomMenuOpen = false"
             class="inline-flex h-9 min-w-[7.5rem] items-center justify-between gap-2 rounded-sm border border-border/70 bg-accent/35 px-3 font-mono text-xs tabular-nums text-foreground transition-colors hover:bg-accent"
-            title="画布分辨率"
+            :title="t('preview.resolution.menu')"
           >
             <span>{{ canvasSizeLabel }}</span>
             <ChevronDown class="size-3.5 text-muted-foreground" />
@@ -1034,28 +1037,28 @@ const skipForward = () => {
             <!-- 自定义宽高 -->
             <div class="grid grid-cols-[1fr_auto_1fr_2.25rem] items-end gap-2">
               <label class="min-w-0">
-                <span class="mb-1 block text-xs text-muted-foreground">宽</span>
+                <span class="mb-1 block text-xs text-muted-foreground">{{ t('preview.resolution.width') }}</span>
                 <input
                   v-model.number="editWidth"
                   type="number"
                   :min="CANVAS_MIN_SIZE"
                   :max="CANVAS_MAX_SIZE"
                   inputmode="numeric"
-                  aria-label="画布宽度"
+                  :aria-label="t('preview.resolution.canvasWidth')"
                   class="h-9 w-full rounded-sm border border-border bg-input px-2 text-center font-mono text-xs tabular-nums text-foreground [appearance:textfield] focus:border-ring focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   @keydown.enter.stop="applyCustomResolution()"
                 />
               </label>
               <span class="pb-2 text-xs text-muted-foreground">×</span>
               <label class="min-w-0">
-                <span class="mb-1 block text-xs text-muted-foreground">高</span>
+                <span class="mb-1 block text-xs text-muted-foreground">{{ t('preview.resolution.height') }}</span>
                 <input
                   v-model.number="editHeight"
                   type="number"
                   :min="CANVAS_MIN_SIZE"
                   :max="CANVAS_MAX_SIZE"
                   inputmode="numeric"
-                  aria-label="画布高度"
+                  :aria-label="t('preview.resolution.canvasHeight')"
                   class="h-9 w-full rounded-sm border border-border bg-input px-2 text-center font-mono text-xs tabular-nums text-foreground [appearance:textfield] focus:border-ring focus:outline-none [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   @keydown.enter.stop="applyCustomResolution()"
                 />
@@ -1063,7 +1066,7 @@ const skipForward = () => {
               <button
                 @click.stop="applyCustomResolution()"
                 class="inline-flex size-9 items-center justify-center rounded-sm bg-primary text-primary-foreground transition-colors hover:brightness-110"
-                title="应用自定义尺寸"
+                :title="t('preview.resolution.applyCustomSize')"
               >
                 <Check class="size-4" />
               </button>

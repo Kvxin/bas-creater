@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Copy, Check } from 'lucide-vue-next'
 import {
   Dialog,
@@ -14,6 +15,8 @@ import { useTimelineStore } from '@/stores/timeline'
 import { useDanmuStore } from '@/stores/danmu'
 import { compileClipToBas } from '@/utils/compiler'
 import { resolveDanmuDefaults } from '@/utils/danmuDefaults'
+
+const { t } = useI18n()
 
 const store = useClipDetailsStore()
 const timelineStore = useTimelineStore()
@@ -82,18 +85,18 @@ const updateResourceColor = (val: string | number) => {
   <Dialog :open="store.visible" @update:open="handleOpenChange">
     <DialogContent class="sm:max-w-[800px]">
       <DialogHeader>
-        <DialogTitle>弹幕详情与编辑</DialogTitle>
+        <DialogTitle>{{ t('dialogs.title') }}</DialogTitle>
       </DialogHeader>
       
       <div class="grid grid-cols-2 gap-6 py-4">
         <!-- Left: Code Preview -->
         <div class="flex flex-col gap-2">
             <div class="flex items-center justify-between">
-                <Label>BAS 代码预览</Label>
+                <Label>{{ t('dialogs.codePreview') }}</Label>
                 <button 
                     @click="handleCopy"
                     class="p-1 hover:bg-muted-foreground/10 rounded-md transition-colors cursor-pointer"
-                    title="复制完整代码"
+                    :title="t('dialogs.copyCode')"
                 >
                     <Check v-if="copied" class="w-4 h-4 text-green-500" />
                     <Copy v-else class="w-4 h-4 text-muted-foreground" />
@@ -108,44 +111,44 @@ const updateResourceColor = (val: string | number) => {
         <div class="flex flex-col gap-4 h-[400px] overflow-y-auto pr-2">
             <div v-if="currentClip && currentResource">
                 
-                <h3 class="font-semibold text-sm mb-2 text-primary">时间轴属性 (Clip)</h3>
+                <h3 class="font-semibold text-sm mb-2 text-primary">{{ t('dialogs.clipSection') }}</h3>
                 <div class="grid grid-cols-2 gap-4 mb-4">
                     <div class="space-y-1">
-                        <Label>开始时间 (ms)</Label>
+                        <Label>{{ t('dialogs.startTime') }}</Label>
                         <Input type="number" :model-value="currentClip.startTime" @update:model-value="v => updateClip('startTime', v)" />
                     </div>
                     <div class="space-y-1">
-                        <Label>持续时长 (ms)</Label>
+                        <Label>{{ t('dialogs.duration') }}</Label>
                         <Input type="number" :model-value="currentClip.duration" @update:model-value="v => updateClip('duration', v)" />
                     </div>
                 </div>
 
-                <h3 class="font-semibold text-sm mb-2 text-primary">弹幕属性 (Resource)</h3>
+                <h3 class="font-semibold text-sm mb-2 text-primary">{{ t('dialogs.resourceSection') }}</h3>
                 <div class="space-y-4">
                     <!-- ID / Name -->
                      <div class="space-y-1">
-                        <Label>名称 (Alias)</Label>
+                        <Label>{{ t('dialogs.alias') }}</Label>
                         <Input :model-value="currentResource.name" @update:model-value="v => updateResource('name', v)" />
                     </div>
                     
                     <!-- Content based on type -->
                     <div v-if="currentResource.type === 'text'" class="space-y-1">
-                        <Label>内容 (Content)</Label>
+                        <Label>{{ t('dialogs.content') }}</Label>
                         <Input :model-value="(resolvedCurrentResource as any)?.content" @update:model-value="v => updateResource('content', v)" />
                     </div>
                     <div v-if="currentResource.type === 'button'" class="space-y-1">
-                        <Label>文本 (Text)</Label>
+                        <Label>{{ t('dialogs.text') }}</Label>
                         <Input :model-value="(resolvedCurrentResource as any)?.text" @update:model-value="v => updateResource('text', v)" />
                     </div>
 
                     <!-- Position -->
                     <div class="grid grid-cols-2 gap-4">
                         <div class="space-y-1">
-                            <Label>X 坐标</Label>
+                            <Label>{{ t('dialogs.x') }}</Label>
                             <Input :model-value="resolvedCurrentResource?.x" @update:model-value="v => updateResource('x', isNaN(Number(v)) ? v : Number(v))" />
                         </div>
                          <div class="space-y-1">
-                            <Label>Y 坐标</Label>
+                            <Label>{{ t('dialogs.y') }}</Label>
                             <Input :model-value="resolvedCurrentResource?.y" @update:model-value="v => updateResource('y', isNaN(Number(v)) ? v : Number(v))" />
                         </div>
                     </div>
@@ -153,18 +156,18 @@ const updateResourceColor = (val: string | number) => {
                      <!-- Style -->
                     <div class="grid grid-cols-2 gap-4">
                          <div v-if="currentResource.type === 'text' || currentResource.type === 'button'" class="space-y-1">
-                            <Label>字号 (FontSize)</Label>
+                            <Label>{{ t('dialogs.fontSize') }}</Label>
                              <Input :model-value="(resolvedCurrentResource as any)?.fontSize" @update:model-value="v => updateResource('fontSize', isNaN(Number(v)) ? v : Number(v))" />
                         </div>
                         <div v-if="currentResource.type === 'text'" class="space-y-1">
-                             <Label>透明度 (Opacity)</Label>
+                             <Label>{{ t('dialogs.opacity') }}</Label>
                              <Input type="number" step="0.1" min="0" max="1" :model-value="resolvedCurrentResource?.opacity ?? 1" @update:model-value="v => updateResource('opacity', Number(v))" />
                         </div>
                     </div>
                     
                      <div class="grid grid-cols-2 gap-4">
                          <div class="space-y-1">
-                            <Label>颜色 (Color/Hex)</Label>
+                            <Label>{{ t('dialogs.color') }}</Label>
                             <Input :model-value="resolvedResourceColor" @update:model-value="updateResourceColor" placeholder="0xFFFFFF" />
                         </div>
                     </div>
@@ -172,7 +175,7 @@ const updateResourceColor = (val: string | number) => {
 
             </div>
             <div v-else class="text-muted-foreground text-sm">
-                无法加载弹幕数据
+                {{ t('dialogs.loadFailed') }}
             </div>
         </div>
       </div>
