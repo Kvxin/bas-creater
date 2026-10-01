@@ -16,6 +16,8 @@ import {
   VolumeX,
   Captions,
   Music2,
+  Scissors,
+  ScissorsLineDashed,
   Video
 } from "lucide-vue-next";
 import TimeRuler from "./TimeRuler.vue";
@@ -64,6 +66,8 @@ const handleContextMenu = (e: MouseEvent, type: "track" | "clip" | "background",
   if (type === "track") {
     contextMenu.show(e, "track-header", { id: data });
   } else if (type === "clip") {
+    timelineStore.setSelectedClip(data.id);
+    danmuStore.select(data.resourceId);
     // 音频片段使用独立的右键菜单（不包含"查看详情"等弹幕专属功能）
     const menuId = isAudioClip(data) ? "timeline-audio-clip" : "timeline-clip";
     contextMenu.show(e, menuId, data);
@@ -1091,6 +1095,15 @@ const stopDragPlayhead = () => {
 
 // 键盘事件处理 (删除片段)
 const handleKeyDown = (e: KeyboardEvent) => {
+  const activeElement = document.activeElement as HTMLElement | null;
+  if (activeElement?.matches("input, textarea, select") || activeElement?.isContentEditable) return;
+  if (e.code === "KeyS" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !e.repeat) {
+    if (timelineStore.canSplitClip(timelineStore.selectedClipId)) {
+      e.preventDefault();
+      timelineStore.splitClip(timelineStore.selectedClipId);
+    }
+    return;
+  }
   if (e.key === "Delete" || e.key === "Backspace") {
     // 如果焦点在输入框中，不触发删除
     const activeTag = document.activeElement?.tagName.toLowerCase();
@@ -1206,6 +1219,39 @@ function handleVolumeSelect(clipId: string) {
       <div class="flex items-center gap-2">
         <Clock class="size-3.5" />
         <span class="font-mono text-foreground/80">{{ currentTimeDisplay }}</span>
+        <button
+          type="button"
+          class="size-7 inline-flex items-center justify-center rounded-sm hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+          data-ui="split-element"
+          :title="t('menus.splitElement')"
+          :aria-label="t('menus.splitElement')"
+          :disabled="!timelineStore.canSplitClip(timelineStore.selectedClipId)"
+          @click="timelineStore.splitClip(timelineStore.selectedClipId)"
+        >
+          <Scissors class="size-3.5" />
+        </button>
+        <button
+          type="button"
+          class="size-7 inline-flex items-center justify-center rounded-sm hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+          data-ui="split-left"
+          :title="t('menus.splitLeft')"
+          :aria-label="t('menus.splitLeft')"
+          :disabled="!timelineStore.canSplitClip(timelineStore.selectedClipId)"
+          @click="timelineStore.splitClipLeft(timelineStore.selectedClipId)"
+        >
+          <ScissorsLineDashed class="size-3.5 rotate-180" />
+        </button>
+        <button
+          type="button"
+          class="size-7 inline-flex items-center justify-center rounded-sm hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
+          data-ui="split-right"
+          :title="t('menus.splitRight')"
+          :aria-label="t('menus.splitRight')"
+          :disabled="!timelineStore.canSplitClip(timelineStore.selectedClipId)"
+          @click="timelineStore.splitClipRight(timelineStore.selectedClipId)"
+        >
+          <ScissorsLineDashed class="size-3.5" />
+        </button>
       </div>
 
       <div class="flex items-center gap-2">

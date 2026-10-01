@@ -13,6 +13,8 @@ import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 import { i18n } from "@/i18n";
 import { getItemName } from "@/utils/resourceUtils";
+import { useDanmuStore } from "@/stores/danmu";
+import { splitClipAnimation } from "@/utils/splitClip";
 import {
   BASE_KEYFRAME_ID,
   KEYFRAME_TOLERANCE_MS,
@@ -591,6 +593,74 @@ export const useTimelineStore = defineStore("timeline", () => {
     return newClip;
   };
 
+  const canSplitClip = (clipId: string | null, timeMs = currentTime.value) => {
+    if (!clipId || !Number.isFinite(timeMs)) return false;
+    const location = findClipLocation(clipId);
+    if (!location || location.track.locked || location.track.type === "audio") return false;
+    const { clip } = location;
+    const offsetMs = Math.round(timeMs - clip.startTime);
+    return Number.isFinite(clip.duration) && offsetMs > 0 && offsetMs < clip.duration &&
+      useDanmuStore().danmus.some((resource) => resource.id === clip.resourceId);
+  };
+
+  const splitClip = (clipId: string | null, timeMs = currentTime.value): TimelineClip | null => {
+    if (!canSplitClip(clipId, timeMs)) return null;
+    const { track, clip } = findClipLocation(clipId!)!;
+    const danmuStore = useDanmuStore();
+    const resource = danmuStore.danmus.find((item) => item.id === clip.resourceId)!;
+    const source = JSON.parse(JSON.stringify(clip)) as TimelineClip;
+    const offsetMs = Math.round(timeMs - clip.startTime);
+    const split = splitClipAnimation(source, resource, offsetMs);
+    const rightResource = danmuStore.duplicate(resource.id)!;
+    danmuStore.updateDanmu(rightResource.id, split.rightProperties as Partial<AnyDanmu>);
+
+    const rightClip: TimelineClip = {
+      ...source,
+      id: `clip_${crypto.randomUUID()}`,
+      resourceId: rightResource.id,
+      name: getItemName(rightResource),
+      startTime: clip.startTime + offsetMs,
+      duration: clip.duration - offsetMs,
+      keyframes: split.rightKeyframes,
+      animations: split.rightAnimations
+    };
+    clip.duration = offsetMs;
+    clip.keyframes = split.leftKeyframes;
+    clip.animations = split.leftAnimations;
+    track.clips.push(rightClip);
+    track.clips.sort((a, b) => a.startTime - b.startTime);
+    recalculateDuration();
+    selectedClipId.value = rightClip.id;
+    selectedAnimationId.value = null;
+    selectedKeyframeId.value = BASE_KEYFRAME_ID;
+    return rightClip;
+  };
+
+  const splitClipLeft = (clipId: string | null, timeMs = currentTime.value): TimelineClip | null => {
+    const leftResourceId = clipId ? findClipLocation(clipId)?.clip.resourceId : undefined;
+    const rightClip = splitClip(clipId, timeMs);
+    if (!rightClip || !clipId) return null;
+    removeClip(clipId);
+    // 共用资源仍被其他片段引用时，保留它以免影响其他元素。
+    if (leftResourceId && !tracks.value.some((track) => track.clips.some((clip) => clip.resourceId === leftResourceId))) {
+      useDanmuStore().remove(leftResourceId);
+    }
+    return rightClip;
+  };
+
+  const splitClipRight = (clipId: string | null, timeMs = currentTime.value): TimelineClip | null => {
+    const rightClip = splitClip(clipId, timeMs);
+    if (!rightClip || !clipId) return null;
+    removeClip(rightClip.id);
+    useDanmuStore().remove(rightClip.resourceId);
+    selectedClipId.value = clipId;
+    selectedAnimationId.value = null;
+    selectedKeyframeId.value = BASE_KEYFRAME_ID;
+    const leftClip = findClipLocation(clipId)?.clip ?? null;
+    if (leftClip) useDanmuStore().select(leftClip.resourceId);
+    return leftClip;
+  };
+
   // 更新当前时间
   const setCurrentTime = (time: number) => {
     currentTime.value = Math.max(0, Math.min(time, duration.value));
@@ -851,6 +921,10 @@ export const useTimelineStore = defineStore("timeline", () => {
     updateClip,
     moveClipToTrack,
     copyClipToTrack,
+    canSplitClip,
+    splitClip,
+    splitClipLeft,
+    splitClipRight,
     setCurrentTime,
     setSelectedClip,
     setSelectedAnimation,

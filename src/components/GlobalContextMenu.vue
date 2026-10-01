@@ -41,7 +41,7 @@ const currentMenu = computed(() => {
         <ContextMenuItem
           v-else
           :class="item.class"
-          :disabled="item.disabled"
+          :disabled="typeof item.disabled === 'function' ? item.disabled(store.data) : item.disabled"
           @click="item.action && store.execute(item.action)"
         >
           {{ t(item.labelKey) }}

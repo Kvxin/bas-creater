@@ -271,7 +271,16 @@ const estimateElementSize = (danmu: AnyDanmu): ElementRect => {
     }
   }
 
-  const text = danmu.text ?? ''
+  if (danmu.type === 'button') {
+    const text = danmu.text ?? ''
+    const fontSize = resolveFontSizePx(danmu)
+    return {
+      width: Math.max(60, text.length * fontSize + 40),
+      height: Math.max(32, fontSize + 20),
+    }
+  }
+
+  const text = (danmu as any).text ?? ''
   return {
     width: Math.max(80, text.length * 14 + 40),
     height: 36,
@@ -326,11 +335,11 @@ const createDraft = (danmu: AnyDanmu, rect: ElementRect): DraftTransform => ({
   width: rect.width,
   height: rect.height,
   scale: clampScale(danmu.scale ?? 1),
-  rotateX: danmu.rotateX ?? 0,
-  rotateY: danmu.rotateY ?? 0,
-  rotateZ: danmu.rotateZ ?? 0,
-  anchorX: clamp(danmu.anchorX ?? 0, 0, 1),
-  anchorY: clamp(danmu.anchorY ?? 0, 0, 1),
+  rotateX: danmu.type === 'button' ? 0 : (danmu.rotateX ?? 0),
+  rotateY: danmu.type === 'button' ? 0 : (danmu.rotateY ?? 0),
+  rotateZ: danmu.type === 'button' ? 0 : (danmu.rotateZ ?? 0),
+  anchorX: danmu.type === 'button' ? 0 : clamp(danmu.anchorX ?? 0, 0, 1),
+  anchorY: danmu.type === 'button' ? 0 : clamp(danmu.anchorY ?? 0, 0, 1),
 })
 
 function getDraft(clipId: string) {
@@ -585,7 +594,8 @@ const setOverlayElement = (clipId: string, element: unknown) => {
 }
 
 const findDanmakuElement = (clipId: string) => {
-  return document.querySelector(`.bas-danmaku-item--obj_${sanitizeClipId(clipId)}`) as HTMLElement | null
+  const container = overlayRootRef.value?.parentElement ?? document
+  return container.querySelector(`.bas-danmaku-item--obj_${sanitizeClipId(clipId)}`) as HTMLElement | null
 }
 
 const buildInnerTransform = (anchorX: number, anchorY: number) => {
@@ -653,14 +663,18 @@ const syncStageState = async () => {
 
   for (const item of props.items) {
     const actualElement = findDanmakuElement(item.clipId)
-    const measurementTarget = (actualElement?.querySelector('.bas-danmaku-item-inner') as HTMLElement | null) ?? actualElement
+    // 按钮弹幕在 BAS 中外层就是按钮容器（带 padding、背景、圆角），需直接测量 actualElement
+    const measurementTarget = item.danmu.type === 'button'
+      ? actualElement
+      : ((actualElement?.querySelector('.bas-danmaku-item-inner') as HTMLElement | null) ?? actualElement)
     const currentDraft = drafts.value[item.clipId]
     const rect = resolveElementRect(item, measurementTarget, currentDraft)
 
     if (actualElement) {
       nextActualElements.set(item.clipId, actualElement)
     }
-    if (measurementTarget instanceof HTMLElement) {
+    // 仅 text 弹幕需要记录 actualInnerElements 应用 anchorX/anchorY 相对偏移
+    if (item.danmu.type === 'text' && measurementTarget instanceof HTMLElement) {
       nextActualInnerElements.set(item.clipId, measurementTarget)
     }
 
@@ -1322,6 +1336,7 @@ watch(
     if (!selectedClipIds.value.includes(clipId)) {
       emitSelection([clipId], clipId)
     }
+    scheduleStageSync()
   },
   { immediate: true }
 )

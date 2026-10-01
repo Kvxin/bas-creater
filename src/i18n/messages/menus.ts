@@ -21,6 +21,9 @@ const zhCN = {
   trackDelete: '删除轨道',
   /** Group labels of the registry entries (rendered as the menu header). */
   clipActions: '片段操作',
+  splitElement: '拆分元素',
+  splitLeft: '拆分并删除左侧',
+  splitRight: '拆分并删除右侧',
   audioClipActions: '音频片段操作',
   timelineActions: '时间轴',
   addTrack: '添加轨道',
@@ -33,6 +36,9 @@ const zhCN = {
 const en: typeof zhCN = {
   trackDelete: 'Delete track',
   clipActions: 'Clip actions',
+  splitElement: 'Split element',
+  splitLeft: 'Split left',
+  splitRight: 'Split right',
   audioClipActions: 'Audio clip actions',
   timelineActions: 'Timeline',
   addTrack: 'Add track',
@@ -44,6 +50,9 @@ const en: typeof zhCN = {
 const ja: typeof zhCN = {
   trackDelete: 'トラックを削除',
   clipActions: 'クリップの操作',
+  splitElement: '要素を分割',
+  splitLeft: '分割して左側を削除',
+  splitRight: '分割して右側を削除',
   audioClipActions: '音声クリップの操作',
   timelineActions: 'タイムライン',
   addTrack: 'トラックを追加',

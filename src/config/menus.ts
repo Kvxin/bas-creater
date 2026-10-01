@@ -62,7 +62,7 @@ export interface MenuItem {
   id: string;
   labelKey: string; // 显示文字对应的 i18n 消息键 (渲染时翻译，分隔线用空字符串)
   action?: string; // 要执行的命令键 (如果有子菜单，通常不需要 action)
-  disabled?: boolean;
+  disabled?: boolean | ((data: any) => boolean);
   separator?: boolean;
   class?: string;
   children?: MenuItem[]; // 支持嵌套菜单结构
@@ -92,6 +92,24 @@ export const MENU_REGISTRY: Record<string, MenuConfig> = {
     labelKey: "menus.clipActions",
     items: [
       { id: "detail", labelKey: "common.details", action: "clip.viewDetails" },
+      {
+        id: "split",
+        labelKey: "menus.splitElement",
+        action: "clip.split",
+        disabled: (clip) => !useTimelineStore().canSplitClip(clip?.id)
+      },
+      {
+        id: "split-left",
+        labelKey: "menus.splitLeft",
+        action: "clip.splitLeft",
+        disabled: (clip) => !useTimelineStore().canSplitClip(clip?.id)
+      },
+      {
+        id: "split-right",
+        labelKey: "menus.splitRight",
+        action: "clip.splitRight",
+        disabled: (clip) => !useTimelineStore().canSplitClip(clip?.id)
+      },
       { id: "sep0", separator: true, labelKey: "" },
       { id: "copy", labelKey: "common.copy", action: "clip.copy" },
       { id: "cut", labelKey: "common.cut", disabled: true, action: "clip.cut" },
@@ -165,6 +183,15 @@ export const GLOBAL_COMMANDS: Record<string, (data: any) => void> = {
   "clip.delete": (clip) => {
     const store = useTimelineStore();
     store.removeClip(clip.id);
+  },
+  "clip.split": (clip) => {
+    useTimelineStore().splitClip(clip?.id);
+  },
+  "clip.splitLeft": (clip) => {
+    useTimelineStore().splitClipLeft(clip?.id);
+  },
+  "clip.splitRight": (clip) => {
+    useTimelineStore().splitClipRight(clip?.id);
   },
   "clip.copy": (clip) => {
     const store = useTimelineStore();
