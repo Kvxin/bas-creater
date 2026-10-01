@@ -5,6 +5,7 @@
  * of the editor layout (EditorLayout.vue).
  */
 const zhCN = {
+  github: '在 GitHub 上查看项目',
   export: '导出',
   language: '语言',
   toggleTheme: '切换主题',
@@ -23,6 +24,7 @@ const zhCN = {
 }
 
 const en: typeof zhCN = {
+  github: 'View project on GitHub',
   export: 'Export',
   language: 'Language',
   toggleTheme: 'Toggle theme',
@@ -41,6 +43,7 @@ const en: typeof zhCN = {
 }
 
 const ja: typeof zhCN = {
+  github: 'GitHubでプロジェクトを見る',
   export: '書き出し',
   language: '言語',
   toggleTheme: 'テーマを切り替え',

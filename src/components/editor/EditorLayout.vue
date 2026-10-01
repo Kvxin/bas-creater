@@ -8,6 +8,7 @@ import {
   Check,
   Cloud,
   Loader2,
+  Github,
 } from "lucide-vue-next";
 import ResourcesPanel from "./ResourcesPanel.vue";
 import PreviewPanel from "./PreviewPanel.vue";
@@ -122,6 +123,16 @@ useEventListener("mouseleave", stopResize);
       </div>
 
       <div class="flex items-center gap-2">
+        <a
+          href="https://github.com/Kvxin/bas-creater"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="size-8 rounded-sm hover:bg-accent hover:text-accent-foreground transition-colors focus:outline-none focus:ring-1 focus:ring-ring flex items-center justify-center"
+          :aria-label="t('app.github')"
+          :title="t('app.github')"
+        >
+          <Github class="size-4" />
+        </a>
         <button
           class="h-8 px-3 rounded-sm bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors"
         >
