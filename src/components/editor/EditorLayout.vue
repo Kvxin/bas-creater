@@ -17,9 +17,38 @@ import TimelinePanel from "./TimelinePanel.vue";
 import { useI18n } from "vue-i18n";
 import { SUPPORTED_LOCALES } from "@/i18n";
 import { useProjectAutoSave } from "@/composables/useProjectAutoSave";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useTimelineStore } from "@/stores/timeline";
+import { useDanmuStore } from "@/stores/danmu";
+import { compileTimelineToBas } from "@/utils/compiler";
 
 const { t, locale } = useI18n();
 const autoSave = useProjectAutoSave();
+const timelineStore = useTimelineStore();
+const danmuStore = useDanmuStore();
+const isExportDialogOpen = ref(false);
+const exportFileName = ref("bas-creater-timeline");
+
+const openExportDialog = () => {
+  isExportDialogOpen.value = true;
+};
+
+const exportTimelineAsTxt = () => {
+  const content = compileTimelineToBas(timelineStore.tracks, danmuStore.danmus);
+  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  const safeName = exportFileName.value.trim().replace(/[\\/:*?"<>|]/g, "_") || "bas-creater-timeline";
+  link.download = `${safeName}.txt`;
+  isExportDialogOpen.value = false;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+};
 
 onMounted(async () => {
   await autoSave.restoreProject();
@@ -134,6 +163,8 @@ useEventListener("mouseleave", stopResize);
           <Github class="size-4" />
         </a>
         <button
+          type="button"
+          @click="openExportDialog"
           class="h-8 px-3 rounded-sm bg-foreground text-background text-sm font-medium hover:bg-foreground/90 transition-colors"
         >
           {{ t('app.export') }}
@@ -158,6 +189,24 @@ useEventListener("mouseleave", stopResize);
         ></div>
       </div>
     </header>
+
+    <Dialog :open="isExportDialogOpen" @update:open="isExportDialogOpen = $event">
+      <DialogContent class="sm:max-w-[460px]">
+        <DialogHeader>
+          <DialogTitle>{{ t("app.exportTitle") }}</DialogTitle>
+          <DialogDescription>{{ t("app.exportDescription") }}</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-2">
+          <Label for="export-file-name">{{ t("app.exportFileName") }}</Label>
+          <Input id="export-file-name" v-model="exportFileName" :placeholder="t('app.exportFileNamePlaceholder')" autocomplete="off" @keydown.enter="exportTimelineAsTxt" />
+          <p class="text-xs text-muted-foreground">{{ t("app.exportFileExtensionHint") }}</p>
+        </div>
+        <DialogFooter>
+          <button type="button" class="h-9 px-3 rounded-sm border border-border hover:bg-accent transition-colors" @click="isExportDialogOpen = false">{{ t("app.cancel") }}</button>
+          <button type="button" class="h-9 px-3 rounded-sm bg-foreground text-background font-medium hover:bg-foreground/90 transition-colors" @click="exportTimelineAsTxt">{{ t("app.exportConfirm") }}</button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- Main Content -->
     <div class="flex-1 flex flex-col min-h-0 relative gap-[0.18rem] pb-3">
