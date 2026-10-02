@@ -40,18 +40,33 @@ export interface TimelineClipParams {
   muted?: boolean; // 元素级静音
 }
 
-export interface TimelineClip {
+export interface TimelineClipBase {
   id: string;
-  resourceId: string; // 关联到资源库中的 ID
   name?: string;      // 显示名称，默认跟随资源
   startTime: number;  // 在时间轴上的开始时间 (ms)
   duration: number;   // 持续时间 (ms)，默认跟随资源的 durationMs
   trackId: string;    // 所属轨道 ID
+}
+
+export interface TimelineResourceClip extends TimelineClipBase {
+  kind: 'resource';
+  resourceId: string;
   params?: TimelineClipParams; // 音频/视频参数（音量、静音等）
 
   animations?: AnimationSegment[]; // 动画片段列表
   keyframes?: TimelineKeyframe[]; // AE/视频编辑器式关键帧，优先用于新动画系统
 }
+
+export interface TimelineGroupClip extends TimelineClipBase {
+  kind: 'group';
+  tracks: TimelineTrack[];
+  resourceId?: never;
+  params?: never;
+  animations?: never;
+  keyframes?: never;
+}
+
+export type TimelineClip = TimelineResourceClip | TimelineGroupClip;
 
 export type TimelineTrackType = 'danmu' | 'audio';
 

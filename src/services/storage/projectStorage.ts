@@ -2,8 +2,9 @@ import type { AudioResource } from "@/types/resource";
 import type { BasProjectData } from "@/types/storage";
 import { idbGet, idbSet, idbDelete, STORES } from "./indexedDB";
 import { mediaStorage } from "./mediaStorage";
+import { normalizeProjectData, PROJECT_VERSION } from "./projectSchema";
 
-const CURRENT_VERSION = 1;
+const CURRENT_VERSION = PROJECT_VERSION;
 const ACTIVE_DRAFT_KEY = "active_draft";
 
 export async function requestStoragePersistence(): Promise<boolean> {
@@ -51,8 +52,9 @@ export async function loadProjectDraft(): Promise<{
   project: BasProjectData;
   audioResources: AudioResource[];
 } | null> {
-  const project = await idbGet<BasProjectData>(STORES.PROJECTS, ACTIVE_DRAFT_KEY);
-  if (!project) return null;
+  const storedProject = await idbGet<unknown>(STORES.PROJECTS, ACTIVE_DRAFT_KEY);
+  if (!storedProject) return null;
+  const project = normalizeProjectData(storedProject);
 
   // 还原音频资源：从物理存储拉取 File，并重建会话有效的 ObjectURL
   const audioResources: AudioResource[] = [];
@@ -109,26 +111,5 @@ export function exportProjectFile(projectData: BasProjectData): void {
  */
 export async function parseProjectFile(file: File): Promise<BasProjectData> {
   const text = await file.text();
-  const data = JSON.parse(text) as Partial<BasProjectData>;
-
-  if (!data || typeof data !== "object") {
-    throw new Error("Invalid project file structure");
-  }
-
-  if (!Array.isArray(data.danmus) || !Array.isArray(data.tracks)) {
-    throw new Error("Missing danmaku or tracks definition in project file");
-  }
-
-  return {
-    version: data.version ?? CURRENT_VERSION,
-    id: data.id ?? Math.random().toString(36).slice(2),
-    name: data.name ?? file.name.replace(/\.[^/.]+$/, ""),
-    createdAt: data.createdAt ?? Date.now(),
-    updatedAt: Date.now(),
-    canvas: data.canvas ?? { width: 800, height: 450 },
-    timeline: data.timeline ?? { duration: 0 },
-    danmus: data.danmus,
-    tracks: data.tracks,
-    audioMeta: data.audioMeta ?? [],
-  };
+  return normalizeProjectData(JSON.parse(text), file.name.replace(/\.[^/.]+$/, ""));
 }

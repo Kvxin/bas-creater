@@ -140,8 +140,9 @@ const handleDragStart = (
 
 const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
   event.stopPropagation();
+  if (item.type === "audio-file" && timelineStore.activeGroupPath.length) return;
   const trackId = timelineStore.addTrack();
-  timelineStore.addClip(item, trackId, 0);
+  if (trackId) timelineStore.addClip(item, trackId, 0);
 };
 </script>
 

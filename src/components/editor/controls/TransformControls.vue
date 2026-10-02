@@ -113,6 +113,7 @@ interface SnapLine {
 const props = defineProps<{
   items: TransformOverlayItem[]
   selectedClipId: string | null
+  selectedClipIds: string[]
   containerWidth: number
   containerHeight: number
   canvasScale: number
@@ -1324,21 +1325,21 @@ onBeforeUnmount(() => {
 })
 
 watch(
-  () => props.selectedClipId,
-  (clipId) => {
+  () => props.selectedClipIds,
+  (clipIds) => {
     if (marquee.value || activeGesture.value) return
-    if (!clipId) {
-      if (selectedClipIds.value.length) {
-        emitSelection([], null)
-      }
-      return
-    }
-    if (!selectedClipIds.value.includes(clipId)) {
-      emitSelection([clipId], clipId)
+    const validIds = clipIds.filter((clipId) => itemByClipId.value.has(clipId))
+    const primaryClipId = props.selectedClipId && validIds.includes(props.selectedClipId)
+      ? props.selectedClipId
+      : validIds[0] ?? null
+    if (validIds.join("|") !== selectedClipIds.value.join("|") || primaryClipId !== primarySelectedClipId.value) {
+      selectedClipIds.value = primaryClipId
+        ? [primaryClipId, ...validIds.filter((clipId) => clipId !== primaryClipId)]
+        : []
     }
     scheduleStageSync()
   },
-  { immediate: true }
+  { immediate: true, deep: true }
 )
 
 watch(

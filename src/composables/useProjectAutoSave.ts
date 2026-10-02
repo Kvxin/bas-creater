@@ -3,6 +3,7 @@ import { useDanmuStore } from "@/stores/danmu";
 import { useTimelineStore } from "@/stores/timeline";
 import { useAudioStore } from "@/stores/audio";
 import type { AutoSaveStatus, BasProjectData, SerializedAudioMetadata } from "@/types/storage";
+import { PROJECT_VERSION } from "@/services/storage/projectSchema";
 import {
   saveProjectDraft,
   loadProjectDraft,
@@ -24,8 +25,53 @@ export function useProjectAutoSave() {
   const lastSavedTime = ref<Date | null>(null);
   const isDirty = ref(false);
   const isHydrating = ref(false);
+  /**
+   * 导入工程中暂时无法恢复物理文件的音频元数据。
+   *
+   * .basproj 只保存音频描述信息，不携带本地音频文件；保留这些元数据可以避免
+   * 自动保存时覆盖仍被时间轴引用的音频资源，确保工程之后仍能被校验和恢复。
+   */
+  const importedAudioMeta = ref<SerializedAudioMetadata[]>([]);
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * 构造当前工程需要持久化的音频元数据。
+   *
+   * 已加载的音频使用运行时资源信息；未加载但仍被任意嵌套时间轴引用的音频，
+   * 则沿用导入工程中的元数据，避免保存后产生悬空资源引用。
+   *
+   * @returns 当前工程需要写入持久化数据的音频元数据列表
+   */
+  const getSerializedAudioMetadata = (): SerializedAudioMetadata[] => {
+    const resources = new Map(audioStore.audioResources.map((resource) => [resource.id, resource]));
+    const referencedIds = new Set<string>();
+    const collectReferencedIds = (tracks: typeof timelineStore.rootTracks) => {
+      for (const track of tracks) {
+        for (const clip of track.clips) {
+          if (clip.kind === "resource") referencedIds.add(clip.resourceId);
+          else collectReferencedIds(clip.tracks);
+        }
+      }
+    };
+    collectReferencedIds(timelineStore.rootTracks);
+
+    const metadata: SerializedAudioMetadata[] = audioStore.audioResources.map((resource) => ({
+      id: resource.id,
+      name: resource.name,
+      duration: resource.duration,
+      coverUrl: resource.coverUrl,
+      size: resource.file?.size,
+      type: resource.file?.type,
+    }));
+    const knownIds = new Set(metadata.map((item) => item.id));
+    for (const item of importedAudioMeta.value) {
+      if (referencedIds.has(item.id) && !knownIds.has(item.id)) {
+        metadata.push(item);
+      }
+    }
+    return metadata;
+  };
 
   const clearTimer = () => {
     if (debounceTimer) {
@@ -44,19 +90,10 @@ export function useProjectAutoSave() {
     saveStatus.value = "saving";
     try {
       const audioFiles = new Map<string, File>();
-      const audioMeta: SerializedAudioMetadata[] = audioStore.audioResources.map((res) => {
-        if (res.file) {
-          audioFiles.set(res.id, res.file);
-        }
-        return {
-          id: res.id,
-          name: res.name,
-          duration: res.duration,
-          coverUrl: res.coverUrl,
-          size: res.file?.size,
-          type: res.file?.type,
-        };
-      });
+      for (const resource of audioStore.audioResources) {
+        if (resource.file) audioFiles.set(resource.id, resource.file);
+      }
+      const audioMeta = getSerializedAudioMetadata();
 
       await saveProjectDraft(
         {
@@ -68,10 +105,10 @@ export function useProjectAutoSave() {
             height: 450,
           },
           timeline: {
-            duration: timelineStore.duration,
+            duration: timelineStore.rootDuration,
           },
           danmus: JSON.parse(JSON.stringify(danmuStore.danmus)),
-          tracks: JSON.parse(JSON.stringify(timelineStore.tracks)),
+          tracks: JSON.parse(JSON.stringify(timelineStore.rootTracks)),
           audioMeta,
         },
         audioFiles
@@ -107,6 +144,7 @@ export function useProjectAutoSave() {
       }
 
       const { project, audioResources } = draft;
+      importedAudioMeta.value = project.audioMeta ?? [];
 
       if (project.name) {
         projectName.value = project.name;
@@ -124,12 +162,7 @@ export function useProjectAutoSave() {
       }
 
       // 3. 恢复时间轴与轨道
-      if (Array.isArray(project.tracks) && project.tracks.length > 0) {
-        timelineStore.tracks = project.tracks;
-      }
-      if (typeof project.timeline?.duration === "number") {
-        timelineStore.duration = project.timeline.duration;
-      }
+      timelineStore.loadTimeline(project.tracks);
 
       lastSavedTime.value = new Date(project.updatedAt || Date.now());
       saveStatus.value = "saved";
@@ -153,10 +186,11 @@ export function useProjectAutoSave() {
     isHydrating.value = true;
     try {
       await clearProjectDraft();
+      importedAudioMeta.value = [];
       danmuStore.danmus = [];
       danmuStore.select(null);
       audioStore.audioResources = [];
-      timelineStore.tracks = [
+      timelineStore.loadTimeline([
         {
           id: "track_1",
           name: "轨道 1",
@@ -165,9 +199,7 @@ export function useProjectAutoSave() {
           muted: false,
           locked: false,
         },
-      ];
-      timelineStore.duration = 0;
-      timelineStore.currentTime = 0;
+      ]);
       isDirty.value = false;
       saveStatus.value = "idle";
       lastSavedTime.value = null;
@@ -183,21 +215,16 @@ export function useProjectAutoSave() {
    */
   const exportBackup = () => {
     const projectData: BasProjectData = {
-      version: 1,
+      version: PROJECT_VERSION,
       id: "project_" + Math.random().toString(36).slice(2, 9),
       name: projectName.value,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       canvas: { width: 800, height: 450 },
-      timeline: { duration: timelineStore.duration },
+      timeline: { duration: timelineStore.rootDuration },
       danmus: JSON.parse(JSON.stringify(danmuStore.danmus)),
-      tracks: JSON.parse(JSON.stringify(timelineStore.tracks)),
-      audioMeta: audioStore.audioResources.map((res) => ({
-        id: res.id,
-        name: res.name,
-        duration: res.duration,
-        coverUrl: res.coverUrl,
-      })),
+      tracks: JSON.parse(JSON.stringify(timelineStore.rootTracks)),
+      audioMeta: getSerializedAudioMetadata(),
     };
     exportProjectFile(projectData);
   };
@@ -209,13 +236,13 @@ export function useProjectAutoSave() {
     isHydrating.value = true;
     try {
       const data = await parseProjectFile(file);
+      importedAudioMeta.value = data.audioMeta ?? [];
       projectName.value = data.name;
       danmuStore.danmus = data.danmus;
       if (data.danmus.length > 0) {
         danmuStore.select(data.danmus[0]?.id ?? null);
       }
-      timelineStore.tracks = data.tracks;
-      timelineStore.duration = data.timeline.duration;
+      timelineStore.loadTimeline(data.tracks);
 
       // 导入后立即保存为当前活动草稿
       isDirty.value = true;
@@ -237,7 +264,7 @@ export function useProjectAutoSave() {
   );
 
   watch(
-    () => timelineStore.tracks,
+    () => timelineStore.rootTracks,
     () => queueSave(),
     { deep: true }
   );

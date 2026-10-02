@@ -36,7 +36,7 @@ const openExportDialog = () => {
 };
 
 const exportTimelineAsTxt = () => {
-  const content = compileTimelineToBas(timelineStore.tracks, danmuStore.danmus);
+  const content = compileTimelineToBas(timelineStore.rootTracks, danmuStore.danmus);
   const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");

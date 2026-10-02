@@ -8,6 +8,7 @@ import preview from './preview'
 import properties from './properties'
 import resources from './resources'
 import timeline from './timeline'
+import groups from './groups'
 
 /**
  * Aggregates every namespace module into the per-locale message tree consumed
@@ -23,6 +24,7 @@ import timeline from './timeline'
  */
 export const messages = {
   'zh-CN': {
+    groups: groups['zh-CN'],
     common: common['zh-CN'],
     app: app['zh-CN'],
     danmu: danmu['zh-CN'],
@@ -35,6 +37,7 @@ export const messages = {
     dialogs: dialogs['zh-CN'],
   },
   en: {
+    groups: groups.en,
     common: common.en,
     app: app.en,
     danmu: danmu.en,
@@ -47,6 +50,7 @@ export const messages = {
     dialogs: dialogs.en,
   },
   ja: {
+    groups: groups.ja,
     common: common.ja,
     app: app.ja,
     danmu: danmu.ja,

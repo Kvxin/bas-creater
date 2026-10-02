@@ -10,6 +10,7 @@ import {
   pickKeyframePropertiesForResource,
 } from "@/utils/keyframes";
 import { isDanmuFieldBasDefault } from "@/utils/danmuDefaults";
+import { flattenTimelineClips } from "@/utils/timelineGroups";
 
 const PERCENTAGE_VALUE_KEYS = new Set(["x", "y", "fontSize", "width", "height"]);
 
@@ -345,6 +346,7 @@ const compileLegacyAnimationsToBas = (
 };
 
 export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string => {
+  if (clip.kind === "group") return "";
   const varName = `obj_${clip.id.replace(/[^a-zA-Z0-9]/g, "_")}`;
   const keyframes = normalizeKeyframes(clip.keyframes, clip.duration);
   const legacyAnimations = clip.animations ?? [];
@@ -380,16 +382,12 @@ export const compileTimelineToBas = (
 ): string => {
   let basCode = "";
 
-  tracks.forEach((track) => {
-    if (!track.visible) return;
-
-    track.clips.forEach((clip) => {
+  flattenTimelineClips(tracks).forEach((clip) => {
       const resource = resources.find((r) => r.id === clip.resourceId);
       if (!resource) return;
 
       basCode += compileClipToBas(clip, resource);
       basCode += "\n";
-    });
   });
 
   return basCode.replace(/^\s*[\r\n]/gm, "");

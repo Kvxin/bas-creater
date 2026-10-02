@@ -1,0 +1,70 @@
+const zhCN = {
+  create: "创建分组",
+  ungroup: "解除分组",
+  enter: "进入分组",
+  back: "返回上一级",
+  root: "主时间轴",
+  defaultName: "分组 {n}",
+  actions: "分组操作",
+  name: "分组名称",
+  start: "开始时间（ms）",
+  duration: "分组时长",
+  members: "{n} 个子片段",
+  selection: "已选择 {n} 个片段",
+  durationHint: "时长随组内内容自动更新，请进入分组编辑素材。",
+  dropInto: "放入分组",
+  dropIntoHint: "拖动到分组，分组将自动延长",
+  dropIntoUnavailable: "无法放入分组",
+  selectionHint: "可创建分组；多选时不支持批量修改属性。",
+  createHint: "创建分组（Ctrl/Cmd+G；仅支持未锁定的弹幕及分组）",
+  ungroupHint: "解除分组（Ctrl/Cmd+Shift+G）",
+  isolatedHint: "正在编辑分组；仅预览组内内容，不播放主时间轴音频。"
+};
+
+const en: typeof zhCN = {
+  create: "Create group",
+  ungroup: "Ungroup",
+  enter: "Enter group",
+  back: "Back to parent",
+  root: "Main timeline",
+  defaultName: "Group {n}",
+  actions: "Group actions",
+  name: "Group name",
+  start: "Start time (ms)",
+  duration: "Group duration",
+  members: "{n} child clips",
+  selection: "{n} clips selected",
+  durationHint: "Duration follows the contents. Enter the group to edit its clips.",
+  dropInto: "Drop into group",
+  dropIntoHint: "Drop into the group; its duration will extend automatically",
+  dropIntoUnavailable: "Cannot drop into group",
+  selectionHint: "Create a group; batch property editing is unavailable for multiple selections.",
+  createHint: "Create group (Ctrl/Cmd+G; unlocked danmaku and groups only)",
+  ungroupHint: "Ungroup (Ctrl/Cmd+Shift+G)",
+  isolatedHint: "Editing a group; only its contents are previewed, without main timeline audio."
+};
+
+const ja: typeof zhCN = {
+  create: "グループを作成",
+  ungroup: "グループを解除",
+  enter: "グループを編集",
+  back: "上の階層に戻る",
+  root: "メインタイムライン",
+  defaultName: "グループ {n}",
+  actions: "グループの操作",
+  name: "グループ名",
+  start: "開始時間（ms）",
+  duration: "グループの長さ",
+  members: "子クリップ {n} 個",
+  selection: "{n} 個のクリップを選択中",
+  durationHint: "長さは内部の内容に合わせて更新されます。グループ内で素材を編集してください。",
+  dropInto: "グループに入れる",
+  dropIntoHint: "グループにドロップすると、長さが自動的に延長されます",
+  dropIntoUnavailable: "グループに入れられません",
+  selectionHint: "グループを作成できます。複数選択時のプロパティ一括編集には対応していません。",
+  createHint: "グループを作成（Ctrl/Cmd+G；ロックされていない弾幕とグループのみ）",
+  ungroupHint: "グループを解除（Ctrl/Cmd+Shift+G）",
+  isolatedHint: "グループ内のみをプレビュー中です。メインタイムラインの音声は再生されません。"
+};
+
+export default { "zh-CN": zhCN, en, ja };

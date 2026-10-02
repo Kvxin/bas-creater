@@ -1,5 +1,5 @@
 import type { AnyDanmu } from "@/types/danmu";
-import type { AnimationSegment, TimelineClip, TimelineKeyframeProperties } from "@/types/timeline";
+import type { AnimationSegment, TimelineResourceClip, TimelineKeyframeProperties } from "@/types/timeline";
 import {
   createKeyframeId,
   getBaseKeyframeProperties,
@@ -10,7 +10,7 @@ import {
 } from "@/utils/keyframes";
 
 /** Slice animation data without changing the resource shared by other clips. */
-export function splitClipAnimation(clip: TimelineClip, resource: AnyDanmu, offsetMs: number) {
+export function splitClipAnimation(clip: TimelineResourceClip, resource: AnyDanmu, offsetMs: number) {
   const keyframes = normalizeKeyframes(clip.keyframes, clip.duration);
   if (keyframes.length > 0) {
     const rightProperties = getEffectiveKeyframePropertiesAtTime(resource, clip, offsetMs);

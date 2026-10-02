@@ -30,7 +30,7 @@ const { t } = useI18n();
 const danmuStore = useDanmuStore();
 const timelineStore = useTimelineStore();
 const audioStore = useAudioStore();
-const selected = computed(() => danmuStore.selected);
+const selected = computed(() => timelineStore.selectedClipIds.length > 1 ? null : danmuStore.selected);
 const resolvedSelected = computed(() =>
   selected.value ? resolveDanmuDefaults(selected.value) : null
 );
@@ -39,6 +39,7 @@ const resolvedSelected = computed(() =>
 
 /** 当前选中的且为音频类型的片段 */
 const selectedAudioClip = computed(() => {
+  if (timelineStore.selectedClipIds.length > 1) return null;
   if (!timelineStore.selectedClipId) return null;
   for (const track of timelineStore.tracks) {
     const clip = track.clips.find((c) => c.id === timelineStore.selectedClipId);
@@ -52,7 +53,7 @@ const selectedAudioClip = computed(() => {
 /** 音频片段对应的资源 */
 const selectedAudioResource = computed(() => {
   if (!selectedAudioClip.value) return null;
-  return audioStore.getById(selectedAudioClip.value.resourceId);
+  return audioStore.getById(selectedAudioClip.value.kind === "resource" ? selectedAudioClip.value.resourceId : "");
 });
 
 /** 音频片段的有效音量（dB） */
@@ -87,6 +88,17 @@ const selectedClip = computed(() => {
     }
     return null;
 });
+
+const selectedGroup = computed(() => selectedClip.value?.kind === "group" ? selectedClip.value : null);
+const isSelectedTrackLocked = computed(() => timelineStore.tracks.some((track) =>
+  track.id === selectedClip.value?.trackId && track.locked
+));
+const updateGroupStart = (value: string | number) => {
+  const startTime = Number(value);
+  if (selectedGroup.value && Number.isFinite(startTime)) {
+    timelineStore.updateClip(selectedGroup.value.id, { startTime });
+  }
+};
 
 type PropertyTabId = "identity" | "transform" | "style" | "animation";
 
@@ -542,7 +554,32 @@ const getButtonAV = (item: any): number | undefined => {
     </div>
 
     <!-- 常规资源编辑模式 -->
-    <div v-if="selected" class="flex-1 min-h-0 flex overflow-hidden">
+    <div v-if="timelineStore.selectedClipIds.length > 1" class="flex-1 overflow-y-auto p-3 space-y-3">
+      <p class="font-medium">{{ t('groups.selection', { n: timelineStore.selectedClipIds.length }) }}</p>
+      <p class="text-xs text-muted-foreground">{{ t('groups.selectionHint') }}</p>
+      <button type="button" class="rounded-sm border border-border px-3 py-2 hover:bg-accent disabled:opacity-40"
+        :disabled="!timelineStore.canCreateGroup()" @click="timelineStore.createGroup()">{{ t('groups.create') }}</button>
+    </div>
+    <div v-else-if="selectedGroup" class="flex-1 overflow-y-auto p-3 space-y-4" data-ui="group-properties">
+      <div class="space-y-2">
+        <Label for="group-name">{{ t('groups.name') }}</Label>
+        <Input id="group-name" :model-value="selectedGroup.name" :disabled="isSelectedTrackLocked"
+          @update:model-value="(value) => timelineStore.updateClip(selectedGroup!.id, { name: String(value) })" />
+      </div>
+      <div class="space-y-2">
+        <Label for="group-start">{{ t('groups.start') }}</Label>
+        <Input id="group-start" type="number" min="0" step="1" :model-value="selectedGroup.startTime"
+          :disabled="isSelectedTrackLocked" @update:model-value="updateGroupStart" />
+      </div>
+      <div class="space-y-2">
+        <Label>{{ t('groups.duration') }}</Label>
+        <p class="font-mono">{{ (selectedGroup.duration / 1000).toFixed(3) }} s</p>
+        <p class="text-xs text-muted-foreground">{{ t('groups.durationHint') }}</p>
+      </div>
+      <button type="button" class="rounded-sm border border-border px-3 py-2 hover:bg-accent"
+        @click="timelineStore.enterGroup(selectedGroup.id)">{{ t('groups.enter') }}</button>
+    </div>
+    <div v-else-if="selected" class="flex-1 min-h-0 flex overflow-hidden">
       <div class="min-w-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-hidden p-3">
         <!-- 第一阶段：内容与身份 (根据类型自适应) -->
         <div

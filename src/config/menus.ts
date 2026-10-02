@@ -92,22 +92,11 @@ export const MENU_REGISTRY: Record<string, MenuConfig> = {
     labelKey: "menus.clipActions",
     items: [
       { id: "detail", labelKey: "common.details", action: "clip.viewDetails" },
+      { id: "group", labelKey: "groups.create", action: "group.create", disabled: () => !useTimelineStore().canCreateGroup() },
       {
         id: "split",
         labelKey: "menus.splitElement",
         action: "clip.split",
-        disabled: (clip) => !useTimelineStore().canSplitClip(clip?.id)
-      },
-      {
-        id: "split-left",
-        labelKey: "menus.splitLeft",
-        action: "clip.splitLeft",
-        disabled: (clip) => !useTimelineStore().canSplitClip(clip?.id)
-      },
-      {
-        id: "split-right",
-        labelKey: "menus.splitRight",
-        action: "clip.splitRight",
         disabled: (clip) => !useTimelineStore().canSplitClip(clip?.id)
       },
       { id: "sep0", separator: true, labelKey: "" },
@@ -123,6 +112,17 @@ export const MENU_REGISTRY: Record<string, MenuConfig> = {
     ],
   },
   // 音频片段右键菜单（不包含"查看详情"——仅弹幕适用）
+  "timeline-group-clip": {
+    labelKey: "groups.actions",
+    items: [
+      { id: "enter", labelKey: "groups.enter", action: "group.enter" },
+      { id: "group", labelKey: "groups.create", action: "group.create", disabled: () => !useTimelineStore().canCreateGroup() },
+      { id: "ungroup", labelKey: "groups.ungroup", action: "group.ungroup", disabled: () => !useTimelineStore().canUngroupClip() },
+      { id: "rename", labelKey: "common.rename", action: "group.rename" },
+      { id: "copy", labelKey: "common.copy", action: "clip.copy" },
+      { id: "del", labelKey: "common.delete", action: "clip.delete", class: "text-destructive" }
+    ]
+  },
   "timeline-audio-clip": {
     labelKey: "menus.audioClipActions",
     items: [
@@ -149,7 +149,7 @@ export const MENU_REGISTRY: Record<string, MenuConfig> = {
   "resource-item": {
     labelKey: "menus.resourceActions",
     items: [
-      { id: "add", labelKey: "menus.addToTrack", action: "resource.addToTrack" },
+      { id: "add", labelKey: "menus.addToTrack", action: "resource.addToTrack", disabled: (item) => item?.type === "audio-file" && useTimelineStore().activeGroupPath.length > 0 },
       { id: "rename", labelKey: "common.rename", action: "resource.rename" },
       { id: "sep2", separator: true, labelKey: "" },
       {
@@ -165,6 +165,9 @@ export const MENU_REGISTRY: Record<string, MenuConfig> = {
 // --- 2. 全局命令处理程序 (逻辑) ---
 // 这些直接使用 Stores。本地组件状态 (如 React refs) 可以通过 show() 中的 'callbacks' 参数进行覆盖。
 export const GLOBAL_COMMANDS: Record<string, (data: any) => void> = {
+  "group.create": () => useTimelineStore().createGroup(),
+  "group.enter": (clip) => useTimelineStore().enterGroup(clip.id),
+  "group.ungroup": (clip) => useTimelineStore().ungroupClip(clip.id),
   // 轨道命令
   "track.delete": (data) => {
     const store = useTimelineStore();
@@ -182,7 +185,8 @@ export const GLOBAL_COMMANDS: Record<string, (data: any) => void> = {
   },
   "clip.delete": (clip) => {
     const store = useTimelineStore();
-    store.removeClip(clip.id);
+    if (store.selectedClipIds.includes(clip.id)) store.removeSelectedClips();
+    else store.removeClip(clip.id);
   },
   "clip.split": (clip) => {
     useTimelineStore().splitClip(clip?.id);
@@ -217,8 +221,9 @@ export const GLOBAL_COMMANDS: Record<string, (data: any) => void> = {
   // 资源命令
   "resource.addToTrack": (item) => {
     const store = useTimelineStore();
+    if (item.type === "audio-file" && store.activeGroupPath.length) return;
     const trackId = store.addTrack();
-    store.addClip(item, trackId, 0);
+    if (trackId) store.addClip(item, trackId, 0);
   },
   "resource.delete": (item) => {
     // 默认全局删除

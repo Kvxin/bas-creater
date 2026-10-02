@@ -24,6 +24,7 @@ import { getAudioEngine } from "@/utils/audio/audio-engine";
 import TransformControls from "./controls/TransformControls.vue";
 import type { AnyDanmu } from "@/types/danmu";
 import type { TimelineClip } from "@/types/timeline";
+import { flattenTimelineClips } from "@/utils/timelineGroups";
 import {
   BASE_KEYFRAME_ID,
   clampKeyframeTime,
@@ -168,10 +169,11 @@ const previewTransformItems = computed(() => {
     coordinatePercentageMode: { x: boolean; y: boolean };
   }> = [];
 
-  for (const track of timelineStore.tracks) {
-    if (!track.visible) continue;
+  const previewClips = timelineStore.tracks.flatMap((track) =>
+    track.visible ? track.clips.filter((clip): clip is Extract<TimelineClip, { kind: "resource" }> => clip.kind === "resource") : []
+  );
 
-    for (const clip of track.clips) {
+  for (const clip of previewClips) {
       const danmu = danmuStore.danmus.find((item) => item.id === clip.resourceId);
       if (!danmu) continue;
 
@@ -184,7 +186,7 @@ const previewTransformItems = computed(() => {
         selectedKeyframeId
       );
 
-      items.push({
+    items.push({
         clipId: clip.id,
         danmu: effectiveDanmu,
         coordinatePercentageMode: {
@@ -203,8 +205,7 @@ const previewTransformItems = computed(() => {
             "y"
           ),
         },
-      });
-    }
+    });
   }
 
   return items;
@@ -326,7 +327,7 @@ const handleTransformSelection = (payload: {
   primaryClipId: string | null;
   primaryDanmuId: string | null;
 }) => {
-  timelineStore.setSelectedClip(payload.primaryClipId);
+  timelineStore.setSelectedClips(payload.clipIds, payload.primaryClipId);
 
   if (!payload.primaryClipId) {
     timelineStore.setSelectedAnimation(null);
@@ -483,6 +484,7 @@ async function startAudioPlayback(startTimeMs: number) {
     if (track.muted || (track.type !== "audio" && !track.visible)) continue;
 
     for (const clip of track.clips) {
+      if (clip.kind !== "resource") continue;
       const resource = resourceById.get(clip.resourceId);
       if (!resource) continue;
 
@@ -660,6 +662,16 @@ const compileAndLoad = (seekToCurrent = true) => {
   needsRecompile.value = false;
   return true;
 };
+
+watch(
+  () => timelineStore.activeGroupPath.join("/"),
+  () => {
+    stopAudioPlayback();
+    timelineStore.isPlaying = false;
+    needsRecompile.value = true;
+    if (basInitialized.value && basService.isReady()) compileAndLoad(false);
+  }
+);
 
 // 自动刷新预览（当资源或时间轴改变时）
 watch(
@@ -906,6 +918,7 @@ const skipForward = () => {
             v-if="previewTransformItems.length && !isPlaying"
             :items="previewTransformItems"
             :selected-clip-id="timelineStore.selectedClipId"
+            :selected-clip-ids="timelineStore.selectedClipIds"
             :container-width="canvasWidth"
             :container-height="canvasHeight"
             :canvas-scale="scale"
