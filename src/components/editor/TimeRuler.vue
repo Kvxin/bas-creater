@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from "vue";
+import { useMutationObserver } from "@vueuse/core";
 import { getGridPixel, getGridSize, formatTime, getPixelsPerSecond } from "@/utils/timeline";
 
 type Props = {
@@ -48,7 +49,8 @@ let resizeObserver: ResizeObserver | null = null;
 
 // 颜色配置
 const getThemeColors = () => {
-  const styles = getComputedStyle(document.documentElement);
+  // 面板会覆盖主题变量，Canvas 应使用标尺所在面板的实际配色。
+  const styles = getComputedStyle(containerRef.value ?? document.documentElement);
   const foreground = styles.getPropertyValue("--foreground").trim() || "hsl(0 0% 87%)";
   const muted = styles.getPropertyValue("--muted-foreground").trim() || "hsl(0 0% 56%)";
 
@@ -180,6 +182,12 @@ const drawRuler = () => {
     ctx.stroke();
   }
 };
+
+// Canvas 不会随 CSS 主题自动更新，主题 class 改变时需要重新绘制。
+useMutationObserver(() => document.documentElement, drawRuler, {
+  attributes: true,
+  attributeFilter: ["class"]
+});
 
 // 监听属性变化重新绘制
 watch(() => [props.scale, props.scrollLeft, props.paddingLeft], drawRuler, {
