@@ -53,7 +53,7 @@ onBeforeUnmount(() => {
   <div class="flex h-full items-stretch" data-ui="window-controls">
     <button
       type="button"
-      class="w-11 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground transition-colors focus:outline-none focus-visible:bg-accent"
+      class="h-full w-11 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground transition-colors focus:outline-none focus-visible:bg-accent"
       :aria-label="t('app.windowMinimize')"
       :title="t('app.windowMinimize')"
       @click="minimizeWindow"
@@ -62,7 +62,7 @@ onBeforeUnmount(() => {
     </button>
     <button
       type="button"
-      class="w-11 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground transition-colors focus:outline-none focus-visible:bg-accent"
+      class="h-full w-11 flex items-center justify-center text-muted-foreground hover:bg-accent hover:text-foreground transition-colors focus:outline-none focus-visible:bg-accent"
       :aria-label="isMaximized ? t('app.windowRestore') : t('app.windowMaximize')"
       :title="isMaximized ? t('app.windowRestore') : t('app.windowMaximize')"
       @click="toggleMaximizeWindow"
@@ -72,7 +72,7 @@ onBeforeUnmount(() => {
     </button>
     <button
       type="button"
-      class="w-11 flex items-center justify-center text-muted-foreground hover:bg-[#e81123] hover:text-white transition-colors focus:outline-none focus-visible:bg-[#e81123] focus-visible:text-white"
+      class="h-full w-11 flex items-center justify-center text-muted-foreground hover:bg-[#e81123] hover:text-white transition-colors focus:outline-none focus-visible:bg-[#e81123] focus-visible:text-white"
       :aria-label="t('app.windowClose')"
       :title="t('app.windowClose')"
       @click="closeWindow"

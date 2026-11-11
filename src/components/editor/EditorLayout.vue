@@ -1,14 +1,13 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { useEventListener, useDark, useToggle } from "@vueuse/core";
+import { useEventListener, useDark } from "@vueuse/core";
 import {
-  Moon,
-  Sun,
   Video,
   Check,
   Cloud,
   Loader2,
-  Github,
+  Settings,
+  ArrowLeft,
 } from "lucide-vue-next";
 import ResourcesPanel from "./ResourcesPanel.vue";
 import PreviewPanel from "./PreviewPanel.vue";
@@ -17,7 +16,7 @@ import TimelinePanel from "./TimelinePanel.vue";
 import WindowControls from "./WindowControls.vue";
 import { useTitleBarDrag } from "@/composables/useTitleBarDrag";
 import { useI18n } from "vue-i18n";
-import { SUPPORTED_LOCALES } from "@/i18n";
+import SettingsView from "@/views/SettingsView.vue";
 import { useProjectAutoSave } from "@/composables/useProjectAutoSave";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -25,15 +24,15 @@ import { Label } from "@/components/ui/label";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { compileTimelineToBas } from "@/utils/compiler";
-import { isDesktopApp, isMacOS, openExternalUrl, saveTextFile } from "@/utils/desktop";
+import { isDesktopApp, isMacOS, saveTextFile } from "@/utils/desktop";
 
-const { t, locale } = useI18n();
+const { t } = useI18n();
 const autoSave = useProjectAutoSave();
 const timelineStore = useTimelineStore();
 const danmuStore = useDanmuStore();
 const isExportDialogOpen = ref(false);
 const exportFileName = ref("bas-creater-timeline");
-const REPOSITORY_URL = "https://github.com/Kvxin/bas-creater";
+const isSettingsOpen = ref(false);
 // 桌面端隐藏系统标题栏，由顶部 header 充当可拖动的深色标题栏
 const isDesktop = isDesktopApp();
 const hasCustomWindowControls = isDesktop && !isMacOS();
@@ -61,7 +60,6 @@ onMounted(async () => {
 
 // Theme
 const isDark = useDark({ initialValue: "dark" });
-const toggleDark = useToggle(isDark);
 
 // Layout State
 const leftWidth = ref(450);
@@ -126,7 +124,7 @@ useEventListener("mouseleave", stopResize);
   >
     <!-- Header -->
     <header
-      class="h-[3.4rem] bg-background text-foreground flex items-center justify-between pl-3 pt-0.5 shrink-0 z-20 select-none"
+      class="h-[3.4rem] bg-background text-foreground flex items-center justify-between pl-3 shrink-0 z-20 select-none"
       :class="{
         dark: isDesktop,
         'border-b border-border': isDesktop,
@@ -164,18 +162,7 @@ useEventListener("mouseleave", stopResize);
         </div>
       </div>
 
-      <div class="flex items-center gap-2">
-        <a
-          :href="REPOSITORY_URL"
-          target="_blank"
-          rel="noopener noreferrer"
-          @click.prevent="openExternalUrl(REPOSITORY_URL)"
-          class="size-8 rounded-sm hover:bg-accent hover:text-accent-foreground transition-colors focus:outline-none focus:ring-1 focus:ring-ring flex items-center justify-center"
-          :aria-label="t('app.github')"
-          :title="t('app.github')"
-        >
-          <Github class="size-4" />
-        </a>
+      <div class="flex h-full shrink-0 items-center gap-2">
         <button
           type="button"
           @click="openExportDialog"
@@ -183,25 +170,18 @@ useEventListener("mouseleave", stopResize);
         >
           {{ t('app.export') }}
         </button>
-        <select
-          v-model="locale"
-          :aria-label="t('app.language')"
-          class="h-8 rounded-sm border border-border bg-background px-2 text-xs cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring"
-        >
-          <option v-for="item in SUPPORTED_LOCALES" :key="item.value" :value="item.value">{{ item.label }}</option>
-        </select>
         <button
-          @click="toggleDark()"
+          type="button"
+          @click="isSettingsOpen = !isSettingsOpen"
           class="size-8 rounded-sm hover:bg-accent hover:text-accent-foreground transition-colors focus:outline-none focus:ring-1 focus:ring-ring flex items-center justify-center"
-          :aria-label="t('app.toggleTheme')"
+          :aria-label="isSettingsOpen ? t('app.backToEditor') : t('app.settings')"
+          :title="isSettingsOpen ? t('app.backToEditor') : t('app.settings')"
+          :aria-pressed="isSettingsOpen"
         >
-          <Sun v-if="isDark" class="size-4" />
-          <Moon v-else class="size-4" />
+          <ArrowLeft v-if="isSettingsOpen" class="size-4" />
+          <Settings v-else class="size-4" />
         </button>
-        <div
-          class="size-8 rounded-sm border border-border bg-linear-to-br from-primary/85 to-chart-2/75"
-        ></div>
-        <WindowControls v-if="hasCustomWindowControls" class="ml-1 -mt-0.5 h-[3.4rem]" />
+        <WindowControls v-if="hasCustomWindowControls" class="ml-1" />
       </div>
     </header>
 
@@ -224,7 +204,8 @@ useEventListener("mouseleave", stopResize);
     </Dialog>
 
     <!-- Main Content -->
-    <div class="flex-1 flex flex-col min-h-0 relative gap-[0.18rem] pb-3">
+    <SettingsView v-if="isSettingsOpen" v-model:is-dark="isDark" @close="isSettingsOpen = false" />
+    <div v-show="!isSettingsOpen" class="flex-1 flex flex-col min-h-0 relative gap-[0.18rem] pb-3">
       <!-- Top Section -->
       <div class="flex-1 flex min-h-0 gap-[0.19rem] px-3">
         <!-- Left Panel: Resources -->
