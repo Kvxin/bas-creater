@@ -1,4 +1,5 @@
 const zhCN = {
+  saveConflict: "项目文件已被外部修改，请返回项目列表重新打开。", savePermission: "没有项目文件写入权限，请重新授权或检查文件权限。", saveSpace: "存储空间不足，请释放空间后重试。",
   discardAfterSaveFailed: "保存失败。放弃未保存的更改并返回项目列表？选择取消以继续编辑并重试。",
   browserStorageNotice: "当前浏览器不支持选择项目文件夹，项目将保存在浏览器的应用内存储中。",
   copyAudio: "是否将音频复制到项目文件夹？选择取消将引用原文件。", copyAudioFailed: "音频复制失败，未添加素材。",
@@ -19,6 +20,7 @@ const zhCN = {
   listFailed: "项目列表加载失败，请刷新重试。", createFailed: "创建项目失败，请重试。", deleteFailed: "删除失败，请重试。"
 };
 const en: typeof zhCN = {
+  saveConflict: "Project changed externally. Return to the project list and reopen it.", savePermission: "Project write permission denied. Grant access or check file permissions.", saveSpace: "Storage is full. Free space and retry.",
   discardAfterSaveFailed: "Save failed. Discard unsaved changes and return to projects? Cancel to stay and retry.",
   browserStorageNotice: "This browser cannot select a project folder. Projects will be stored in browser app storage.",
   copyAudio: "Copy this audio into the project? Choose Cancel to reference the original file.", copyAudioFailed: "Audio copy failed; the resource was not added.",
@@ -39,6 +41,7 @@ const en: typeof zhCN = {
   listFailed: "Could not load projects. Refresh and try again.", createFailed: "Could not create project.", deleteFailed: "Could not delete projects."
 };
 const ja: typeof zhCN = {
+  saveConflict: "プロジェクトが外部で変更されました。一覧から開き直してください。", savePermission: "書き込み権限がありません。権限を確認してください。", saveSpace: "空き容量が不足しています。",
   discardAfterSaveFailed: "保存に失敗しました。未保存の変更を破棄して戻りますか？",
   browserStorageNotice: "このブラウザーではフォルダーを選択できないため、アプリ内に保存されます。",
   copyAudio: "音声をプロジェクトにコピーしますか？キャンセルすると元ファイルを参照します。", copyAudioFailed: "音声をコピーできませんでした。",

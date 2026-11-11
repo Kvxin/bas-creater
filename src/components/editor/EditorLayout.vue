@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEventListener, useDark } from "@vueuse/core";
 import {
@@ -31,6 +31,13 @@ const props = defineProps<{ projectId: string }>();
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
 const autoSave = useProjectAutoSave(props.projectId);
+const saveErrorMessage = computed(() => {
+  const message = autoSave.lastSaveError.value.toLowerCase();
+  if (message.includes("modified_externally")) return t("projects.saveConflict");
+  if (message.includes("permission") || message.includes("denied") || message.includes("notallowed")) return t("projects.savePermission");
+  if (message.includes("space") || message.includes("quota") || message.includes("disk full")) return t("projects.saveSpace");
+  return t("projects.saveFailed");
+});
 const isReady = ref(false);
 const loadFailed = ref(false);
 const isLeaving = ref(false);
@@ -68,7 +75,7 @@ const flushBeforeLeaving = async (): Promise<boolean> => {
   if (!isReady.value && !loadFailed.value) return false;
   if (!loadFailed.value) {
     while (autoSave.isDirty.value || autoSave.saveStatus.value === "saving") {
-      if (!(await autoSave.saveNow())) return window.confirm(t("projects.discardAfterSaveFailed"));
+      if (!(await autoSave.saveNow())) return window.confirm(`${saveErrorMessage.value}\n\n${t("projects.discardAfterSaveFailed")}`);
     }
   }
   return true;
@@ -193,7 +200,7 @@ useEventListener("mouseleave", stopResize);
         <!-- 自动保存状态指示徽章 -->
         <div
           class="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-muted-foreground select-none"
-          :title="autoSave.lastSavedTime.value ? `上次保存时间: ${autoSave.lastSavedTime.value.toLocaleTimeString()}` : ''"
+          :title="autoSave.saveStatus.value === 'error' ? saveErrorMessage : autoSave.lastSavedTime.value ? `上次保存时间: ${autoSave.lastSavedTime.value.toLocaleTimeString()}` : ''"
         >
           <Loader2 v-if="autoSave.saveStatus.value === 'saving'" class="size-3.5 animate-spin text-primary" />
           <Check v-else-if="autoSave.saveStatus.value === 'saved' && !autoSave.isDirty.value" class="size-3.5 text-constructive" />
@@ -203,7 +210,7 @@ useEventListener("mouseleave", stopResize);
               autoSave.saveStatus.value === 'saving'
                 ? t('app.saving')
                 : autoSave.saveStatus.value === 'error'
-                ? t('projects.saveFailed')
+                ? saveErrorMessage
                 : autoSave.isDirty.value
                 ? t('app.unsaved')
                 : t('app.saved')

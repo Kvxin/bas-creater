@@ -22,6 +22,7 @@ export function useProjectAutoSave(projectId: string) {
 
   const projectName = ref("默认工程");
   const saveStatus = ref<AutoSaveStatus>("idle");
+  const lastSaveError = ref("");
   const lastSavedTime = ref<Date | null>(null);
   const isDirty = ref(false);
   const isHydrating = ref(true);
@@ -81,6 +82,7 @@ export function useProjectAutoSave(projectId: string) {
     clearTimer();
     const savedRevision = revision;
     saveStatus.value = "saving";
+    lastSaveError.value = "";
     try {
       const audioFiles = new Map<string, File>();
       for (const resource of audioStore.audioResources) {
@@ -114,6 +116,7 @@ export function useProjectAutoSave(projectId: string) {
     } catch (err) {
       console.error("[AutoSave] Failed to save project:", err);
       saveStatus.value = "error";
+      lastSaveError.value = String(err);
       return false;
     }
   };
@@ -303,6 +306,7 @@ export function useProjectAutoSave(projectId: string) {
   return {
     projectName,
     saveStatus,
+    lastSaveError,
     lastSavedTime,
     isDirty,
     isHydrating,
