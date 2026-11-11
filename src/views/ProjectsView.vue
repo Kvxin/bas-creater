@@ -9,7 +9,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTitleBarDrag } from "@/composables/useTitleBarDrag";
-import { createProject, deleteProject, listProjects } from "@/services/storage/projectStorage";
+import { createProject, createFolderProject, deleteProject, listProjects, prepareProjectOpen } from "@/services/storage/projectStorage";
+import { pickProjectDirectory } from "@/services/storage/browserProjectFile";
 import type { BasProjectData } from "@/types/storage";
 import { isDesktopApp, isMacOS } from "@/utils/desktop";
 
@@ -30,6 +31,8 @@ const isCreating = ref(false);
 const isCreateOpen = ref(false);
 const isSettingsOpen = ref(false);
 const name = ref("");
+const directory = ref<FileSystemDirectoryHandle | null>(null);
+const supportsFolder = !isDesktop && "showDirectoryPicker" in window;
 const filtered = computed(() => projects.value.filter((project) => project.name.toLowerCase().includes(search.value.trim().toLowerCase()))
   .sort((a, b) => descending.value ? b.updatedAt - a.updatedAt : a.updatedAt - b.updatedAt));
 const allSelected = computed(() => filtered.value.length > 0 && filtered.value.every((p) => selected.value.includes(p.id)));
@@ -42,13 +45,22 @@ const refresh = async () => {
   finally { isLoading.value = false; }
 };
 onMounted(refresh);
-const showCreate = () => { name.value = ""; isCreateOpen.value = true; };
+const showCreate = () => { name.value = ""; directory.value = null; isCreateOpen.value = true; };
+const selectDirectory = async () => {
+  try { directory.value = await pickProjectDirectory(); }
+  catch (cause) { if (!(cause instanceof DOMException && cause.name === "AbortError")) { console.error(cause); window.alert(t("projects.folderFailed")); } }
+};
+const open = async (id: string) => {
+  try { await prepareProjectOpen(id); emit("open", id); }
+  catch (cause) { console.error("[Projects] Failed to open", cause); window.alert(t("projects.openFailed")); }
+};
 const create = async () => {
   const projectName = name.value.trim();
-  if (!projectName || isCreating.value) return;
+  if (!projectName || isCreating.value || (supportsFolder && !directory.value)) return;
   isCreating.value = true;
   try {
-    const project = await createProject(projectName, t("timeline.defaultTrackName", { n: 1 }));
+    const trackName = t("timeline.defaultTrackName", { n: 1 });
+    const project = directory.value ? await createFolderProject(projectName, trackName, directory.value) : await createProject(projectName, trackName);
     isCreateOpen.value = false;
     emit("open", project.id);
   } catch (cause) { console.error("[Projects] Failed to create", cause); window.alert(t("projects.createFailed")); }
@@ -106,10 +118,10 @@ const removeSelected = async () => {
           <div class="relative bg-accent flex justify-center items-center text-muted-foreground" :class="view === 'grid' ? 'h-36' : 'w-24 h-16 my-2 rounded-md shrink-0'">
             <input v-model="selected" type="checkbox" :value="project.id" :aria-label="`${t('projects.selectAll')}: ${project.name}`" class="absolute top-3 left-3" /><MessageSquareText class="size-8 opacity-60" />
           </div>
-          <button class="p-4 text-left min-w-0 flex-1 w-full" @click="emit('open', project.id)"><span class="block truncate font-medium">{{ project.name }}</span><span class="block mt-2 text-xs text-muted-foreground">{{ t("projects.modified") }} · {{ formatDate(project.updatedAt) }}</span></button>
+          <button class="p-4 text-left min-w-0 flex-1 w-full" @click="open(project.id)"><span class="block truncate font-medium">{{ project.name }}</span><span class="block mt-2 text-xs text-muted-foreground">{{ t("projects.modified") }} · {{ formatDate(project.updatedAt) }}</span></button>
         </article>
       </div>
     </main>
-    <Dialog :open="isCreateOpen" @update:open="isCreateOpen = $event"><DialogContent class="sm:max-w-[440px]"><DialogHeader><DialogTitle>{{ t("projects.createTitle") }}</DialogTitle><DialogDescription>{{ t("projects.createDescription") }}</DialogDescription></DialogHeader><form @submit.prevent="create"><Label for="project-name">{{ t("projects.name") }}</Label><Input id="project-name" v-model="name" class="mt-2" :placeholder="t('projects.placeholder')" maxlength="60" required /><DialogFooter class="mt-6"><button type="button" class="h-9 px-3 rounded-sm border border-border hover:bg-accent" @click="isCreateOpen = false">{{ t("app.cancel") }}</button><button type="submit" :disabled="isCreating || !name.trim()" class="h-9 px-3 rounded-sm bg-foreground text-background disabled:opacity-50">{{ t("projects.create") }}</button></DialogFooter></form></DialogContent></Dialog>
+    <Dialog :open="isCreateOpen" @update:open="isCreateOpen = $event"><DialogContent class="sm:max-w-[440px]"><DialogHeader><DialogTitle>{{ t("projects.createTitle") }}</DialogTitle><DialogDescription>{{ t("projects.createDescription") }}</DialogDescription></DialogHeader><form @submit.prevent="create"><Label for="project-name">{{ t("projects.name") }}</Label><Input id="project-name" v-model="name" class="mt-2" :placeholder="t('projects.placeholder')" maxlength="60" required /><div v-if="supportsFolder" class="mt-4"><button type="button" class="h-9 px-3 rounded-sm border border-border hover:bg-accent" @click="selectDirectory">{{ t("projects.selectFolder") }}</button><span class="ml-3 text-muted-foreground">{{ directory?.name || t("projects.emptyFolder") }}</span></div><DialogFooter class="mt-6"><button type="button" class="h-9 px-3 rounded-sm border border-border hover:bg-accent" @click="isCreateOpen = false">{{ t("app.cancel") }}</button><button type="submit" :disabled="isCreating || !name.trim() || (supportsFolder && !directory)" class="h-9 px-3 rounded-sm bg-foreground text-background disabled:opacity-50">{{ t("projects.create") }}</button></DialogFooter></form></DialogContent></Dialog>
   </div>
 </template>

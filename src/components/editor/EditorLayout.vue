@@ -176,6 +176,8 @@ useEventListener("mouseleave", stopResize);
             {{
               autoSave.saveStatus.value === 'saving'
                 ? t('app.saving')
+                : autoSave.saveStatus.value === 'error'
+                ? t('projects.saveFailed')
                 : autoSave.isDirty.value
                 ? t('app.unsaved')
                 : t('app.saved')
@@ -233,7 +235,7 @@ useEventListener("mouseleave", stopResize);
       <div class="flex-1 flex min-h-0 gap-[0.19rem] px-3">
         <!-- Left Panel: Resources -->
         <div class="shrink-0 flex min-w-0" :style="{ width: `${leftWidth}px` }">
-          <ResourcesPanel />
+          <ResourcesPanel :project-id="props.projectId" />
         </div>
 
         <!-- Resizer -->

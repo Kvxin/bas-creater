@@ -9,6 +9,10 @@ import type { AudioResource } from "@/types/resource";
 import { getItemName } from "@/utils/resourceUtils";
 import { extractAudioCover } from "@/utils/audio/audio-cover";
 import { LayoutGrid, List } from "lucide-vue-next";
+import { hasBrowserProjectSession } from "@/services/storage/projectStorage";
+import { rememberBrowserMedia } from "@/services/storage/browserMediaFile";
+
+const props = defineProps<{ projectId: string }>();
 
 import ResourcesSidebar from "./resources/ResourcesSidebar.vue";
 import ResourcesHeader from "./resources/ResourcesHeader.vue";
@@ -103,7 +107,7 @@ const getAudioDuration = (url: string): Promise<number> => {
 };
 
 // 点击选择和拖放音频均从这里创建资源，保证行为一致。
-const handleAudioUpload = async (file: File) => {
+const handleAudioUpload = async (file: File, handle?: FileSystemFileHandle) => {
   const url = URL.createObjectURL(file);
   const [duration, coverUrl] = await Promise.all([
     getAudioDuration(url),
@@ -118,6 +122,10 @@ const handleAudioUpload = async (file: File) => {
     file,
     duration,
   };
+  if (handle) {
+    try { await rememberBrowserMedia(props.projectId, resource.id, handle); }
+    catch (error) { URL.revokeObjectURL(url); console.error("Failed to remember audio", error); return; }
+  }
   audioStore.add(resource);
   console.log(
     `[ResourcesPanel] 上传音频文件: ${file.name}, 时长: ${duration}ms`
@@ -215,6 +223,7 @@ const toggleResourceLayout = () => {
       </div>
       <!-- Header -->
       <ResourcesHeader
+        :use-file-references="hasBrowserProjectSession(props.projectId)"
         v-model:searchQuery="searchQuery"
         @add-danmu="handleAddDanmu"
         @upload-audio="handleAudioUpload"

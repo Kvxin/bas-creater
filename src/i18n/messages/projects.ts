@@ -1,4 +1,5 @@
 const zhCN = {
+  selectFolder: "选择空文件夹", emptyFolder: "请选择已有的空文件夹", folderFailed: "无法选择文件夹，请重试。", openFailed: "无法打开项目，请检查文件夹权限和项目文件。",
   title: "项目", search: "搜索项目...", newProject: "新建项目", createFirst: "创建第一个项目",
   empty: "还没有项目", emptyDescription: "创建你的第一个项目，开始制作属于你的弹幕作品。",
   noResults: "没有找到项目", noResultsDescription: "换个关键词试试，或创建一个新项目。",
@@ -9,6 +10,7 @@ const zhCN = {
   listFailed: "项目列表加载失败，请刷新重试。", createFailed: "创建项目失败，请重试。", deleteFailed: "删除失败，请重试。"
 };
 const en: typeof zhCN = {
+  selectFolder: "Choose empty folder", emptyFolder: "Select an existing empty folder", folderFailed: "Unable to select folder.", openFailed: "Could not open project. Check the folder permission and project file.",
   title: "Projects", search: "Search projects...", newProject: "New project", createFirst: "Create your first project",
   empty: "No projects yet", emptyDescription: "Create your first project and start making danmaku.",
   noResults: "No projects found", noResultsDescription: "Try another search, or create a new project.",
@@ -19,6 +21,7 @@ const en: typeof zhCN = {
   listFailed: "Could not load projects. Refresh and try again.", createFailed: "Could not create project.", deleteFailed: "Could not delete projects."
 };
 const ja: typeof zhCN = {
+  selectFolder: "空のフォルダーを選択", emptyFolder: "既存の空フォルダーを選択", folderFailed: "フォルダーを選択できません。", openFailed: "プロジェクトを開けません。権限とファイルを確認してください。",
   title: "プロジェクト", search: "プロジェクトを検索...", newProject: "新規プロジェクト", createFirst: "最初のプロジェクトを作成",
   empty: "プロジェクトはまだありません", emptyDescription: "プロジェクトを作成して弾幕の制作を始めましょう。",
   noResults: "プロジェクトが見つかりません", noResultsDescription: "別のキーワードで検索するか、プロジェクトを作成してください。",
