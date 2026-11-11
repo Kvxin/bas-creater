@@ -103,19 +103,26 @@ export async function createBrowserProject(
 export async function saveBrowserProject(opened: BrowserProjectFile, project: BasProjectData): Promise<BrowserProjectFile> {
   validateFileName(opened.fileName);
   if (!(await ensureDirectoryPermission(opened.directory))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
-  const handle = await opened.directory.getFileHandle(opened.fileName);
-  const current = await (await handle.getFile()).text();
-  if ((await digest(current)) !== opened.fingerprint) throw new Error("PROJECT_MODIFIED_EXTERNALLY");
-  const normalized = normalizeProjectData(project);
-  if (normalized.id !== opened.project.id) throw new Error("PROJECT_ID_MISMATCH");
-  const contents = JSON.stringify(normalized, null, 2);
-  const writable = await handle.createWritable();
-  try {
-    await writable.write(contents);
-    await writable.close();
-  } catch (error) {
-    await writable.abort().catch(() => {});
-    throw error;
+  const save = async (): Promise<BrowserProjectFile> => {
+    const handle = await opened.directory.getFileHandle(opened.fileName);
+    const current = await (await handle.getFile()).text();
+    if ((await digest(current)) !== opened.fingerprint) throw new Error("PROJECT_MODIFIED_EXTERNALLY");
+    const normalized = normalizeProjectData(project);
+    if (normalized.id !== opened.project.id) throw new Error("PROJECT_ID_MISMATCH");
+    const contents = JSON.stringify(normalized, null, 2);
+    const writable = await handle.createWritable();
+    try {
+      await writable.write(contents);
+      await writable.close();
+    } catch (error) {
+      await writable.abort().catch(() => {});
+      throw error;
+    }
+    return { ...opened, project: normalized, fingerprint: await digest(contents) };
+  };
+  // 跨标签页串行化同一项目；外部程序仍可能在检查和写入之间更改文件。
+  if (typeof navigator !== "undefined" && navigator.locks) {
+    return navigator.locks.request(`danmakucut-project:${opened.project.id}`, { mode: "exclusive" }, save);
   }
-  return { ...opened, project: normalized, fingerprint: await digest(contents) };
+  return save();
 }

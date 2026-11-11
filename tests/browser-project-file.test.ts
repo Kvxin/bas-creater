@@ -60,3 +60,47 @@ test("does not read a media file until permission is granted", async () => {
   assert.equal(await ensureBrowserMediaPermission(file, true), true);
   assert.equal(await (await readBrowserMedia(file)).text(), "data");
 });
+
+test("does not write when directory permission is denied", async () => {
+  let wrote = false;
+  const directory = {
+    queryPermission: async () => "denied",
+    getFileHandle: async () => { wrote = true; throw new Error("unexpected write"); }
+  } as unknown as FileSystemDirectoryHandle;
+  await assert.rejects(openBrowserProject(directory, "project.basproj"), /DIRECTORY_PERMISSION_REQUIRED/);
+  assert.equal(wrote, false);
+});
+
+test("aborts the writable stream when writing fails", async () => {
+  let aborted = false;
+  const existing = JSON.stringify(project);
+  const fileHandle = {
+    getFile: async () => new File([existing], "project.basproj"),
+    createWritable: async () => ({
+      write: async () => { throw new Error("disk full"); },
+      close: async () => { throw new Error("unexpected close"); },
+      abort: async () => { aborted = true; }
+    })
+  };
+  const directory = { queryPermission: async () => "granted", getFileHandle: async () => fileHandle } as unknown as FileSystemDirectoryHandle;
+  const opened = await openBrowserProject(directory, "project.basproj");
+  await assert.rejects(saveBrowserProject(opened, project), /disk full/);
+  assert.equal(aborted, true);
+});
+
+test("serializes project saves with Web Locks when available", async () => {
+  const fs = directoryFixture(JSON.stringify(project));
+  const opened = await openBrowserProject(fs.directory, "project.basproj");
+  const original = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  let lockName = "";
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: { locks: {
+    request: async (name: string, _options: unknown, callback: () => Promise<unknown>) => { lockName = name; return callback(); }
+  } } });
+  try {
+    await saveBrowserProject(opened, project);
+    assert.equal(lockName, "danmakucut-project:project-1");
+  } finally {
+    if (original) Object.defineProperty(globalThis, "navigator", original);
+    else Reflect.deleteProperty(globalThis, "navigator");
+  }
+});
