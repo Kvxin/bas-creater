@@ -9,7 +9,7 @@ import type { AudioResource } from "@/types/resource";
 import { getItemName } from "@/utils/resourceUtils";
 import { extractAudioCover } from "@/utils/audio/audio-cover";
 import { LayoutGrid, List } from "lucide-vue-next";
-import { hasBrowserProjectSession } from "@/services/storage/projectStorage";
+import { hasBrowserProjectSession, hasDesktopProjectSession } from "@/services/storage/projectStorage";
 import { rememberBrowserMedia } from "@/services/storage/browserMediaFile";
 
 const props = defineProps<{ projectId: string }>();
@@ -107,7 +107,7 @@ const getAudioDuration = (url: string): Promise<number> => {
 };
 
 // 点击选择和拖放音频均从这里创建资源，保证行为一致。
-const handleAudioUpload = async (file: File, handle?: FileSystemFileHandle) => {
+const handleAudioUpload = async (file: File, handle?: FileSystemFileHandle, sourcePath?: string) => {
   const url = URL.createObjectURL(file);
   const [duration, coverUrl] = await Promise.all([
     getAudioDuration(url),
@@ -120,6 +120,7 @@ const handleAudioUpload = async (file: File, handle?: FileSystemFileHandle) => {
     url,
     coverUrl: coverUrl ?? undefined,
     file,
+    sourcePath,
     duration,
   };
   if (handle) {
@@ -224,6 +225,7 @@ const toggleResourceLayout = () => {
       <!-- Header -->
       <ResourcesHeader
         :use-file-references="hasBrowserProjectSession(props.projectId)"
+        :use-desktop-references="hasDesktopProjectSession(props.projectId)"
         v-model:searchQuery="searchQuery"
         @add-danmu="handleAddDanmu"
         @upload-audio="handleAudioUpload"

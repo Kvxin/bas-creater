@@ -1,11 +1,12 @@
 import type { AudioResource } from "@/types/resource";
 import type { BasProjectData } from "@/types/storage";
 import { idbGet, idbSet, idbDelete, idbGetAllKeys, STORES } from "./indexedDB";
+import { createDesktopProject, findDesktopProjectLocation, forgetDesktopProject, openDesktopProject, saveDesktopProject, readDesktopAudio, deleteDesktopProjectFile, type DesktopProjectSession } from "./desktopProjectFile";
 import { mediaStorage } from "./mediaStorage";
 import { getBrowserMediaHandle, readBrowserMedia } from "./browserMediaFile";
 import { normalizeProjectData, PROJECT_VERSION } from "./projectSchema";
 import { saveTextFile } from "@/utils/desktop";
-import { createBrowserProject, ensureDirectoryPermission, findBrowserProjectLocation, forgetBrowserProject, openBrowserProject, rememberBrowserProject, saveBrowserProject, type BrowserProjectFile } from "./browserProjectFile";
+import { createBrowserProject, deleteBrowserProjectFile, ensureDirectoryPermission, findBrowserProjectLocation, forgetBrowserProject, openBrowserProject, rememberBrowserProject, saveBrowserProject, type BrowserProjectFile } from "./browserProjectFile";
 
 const CURRENT_VERSION = PROJECT_VERSION;
 const ACTIVE_DRAFT_KEY = "active_draft";
@@ -13,6 +14,9 @@ const PROJECT_PREFIX = "project:";
 const LEGACY_PROJECT_ID = "legacy-draft";
 const projectMediaKey = (projectId: string, mediaId: string) => `${projectId}--${mediaId}`;
 const browserSessions = new Map<string, BrowserProjectFile>();
+const desktopSessions = new Map<string, DesktopProjectSession>();
+
+export function hasDesktopProjectSession(id: string): boolean { return desktopSessions.has(id); }
 
 export function hasBrowserProjectSession(id: string): boolean {
   return browserSessions.has(id);
@@ -67,8 +71,24 @@ export async function createFolderProject(name: string, trackName: string, direc
   return project;
 }
 
+/** 初始化桌面端用户选择的空目录。 */
+export async function createDesktopFolderProject(name: string, trackName: string, directory: string): Promise<BasProjectData> {
+  const now = Date.now();
+  const project: BasProjectData = {
+    version: CURRENT_VERSION, id: crypto.randomUUID(), name, createdAt: now, updatedAt: now,
+    canvas: { width: 800, height: 450 }, timeline: { duration: 0 }, danmus: [], audioMeta: [],
+    tracks: [{ id: "track_1", name: trackName, clips: [], visible: true, muted: false, locked: false }]
+  };
+  const session = await createDesktopProject(directory, project);
+  await idbSet(STORES.PROJECTS, PROJECT_PREFIX + project.id, project);
+  desktopSessions.set(project.id, session);
+  return project;
+}
+
 /** 在用户点击打开时恢复权限和文件内容；不允许静默使用过期缓存。 */
 export async function prepareProjectOpen(id: string): Promise<void> {
+  const desktopDirectory = await findDesktopProjectLocation(id);
+  if (desktopDirectory) { desktopSessions.set(id, await openDesktopProject(desktopDirectory, id)); return; }
   const location = await findBrowserProjectLocation(id);
   if (!location) return;
   if (!(await ensureDirectoryPermission(location.directory, true))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
@@ -78,8 +98,23 @@ export async function prepareProjectOpen(id: string): Promise<void> {
 }
 
 /** 媒体可能被其他工程引用，不在删除工程时清空共享媒体。 */
-export async function deleteProject(id: string): Promise<void> {
+export async function getProjectLocationLabel(id: string): Promise<string | null> {
+  const desktop = await findDesktopProjectLocation(id);
+  if (desktop) return desktop + "/project.basproj";
+  const browser = await findBrowserProjectLocation(id);
+  return browser ? browser.directory.name + "/" + browser.fileName : null;
+}
+
+export async function deleteProject(id: string, deleteFile = false): Promise<void> {
+  if (deleteFile) {
+    const desktop = await findDesktopProjectLocation(id);
+    const browser = await findBrowserProjectLocation(id);
+    if (desktop) await deleteDesktopProjectFile(desktop, id);
+    else if (browser) await deleteBrowserProjectFile(browser);
+  }
   await forgetBrowserProject(id);
+  await forgetDesktopProject(id);
+  desktopSessions.delete(id);
   browserSessions.delete(id);
   await idbDelete(STORES.PROJECTS, PROJECT_PREFIX + id);
 }
@@ -111,7 +146,7 @@ export async function saveProjectDraft(
   const mediaSaves: Promise<void>[] = [];
   for (const [id, file] of audioFiles.entries()) {
     const reference = await getBrowserMediaHandle(projectData.id, id);
-    if (!reference) mediaSaves.push(mediaStorage.save(projectMediaKey(projectData.id, id), file));
+    if (!reference && !projectData.audioMeta.some((item) => item.id === id && item.sourcePath)) mediaSaves.push(mediaStorage.save(projectMediaKey(projectData.id, id), file));
   }
   await Promise.all(mediaSaves);
 
@@ -121,6 +156,13 @@ export async function saveProjectDraft(
     version: CURRENT_VERSION,
     updatedAt: Date.now(),
   };
+
+  const desktopDirectory = await findDesktopProjectLocation(projectData.id);
+  if (desktopDirectory) {
+    const session = desktopSessions.get(projectData.id);
+    if (!session) throw new Error("PROJECT_NOT_OPEN");
+    desktopSessions.set(projectData.id, await saveDesktopProject(session, fullProject));
+  }
 
   const location = await findBrowserProjectLocation(projectData.id);
   if (location) {
@@ -141,7 +183,10 @@ export async function loadProjectDraft(id: string): Promise<{
   const location = await findBrowserProjectLocation(id);
   const session = browserSessions.get(id);
   if (location && !session) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
-  const storedProject = session?.project ?? await idbGet<unknown>(STORES.PROJECTS, PROJECT_PREFIX + id);
+  const desktopDirectory = await findDesktopProjectLocation(id);
+  const desktopSession = desktopSessions.get(id);
+  if (desktopDirectory && !desktopSession) throw new Error("PROJECT_NOT_OPEN");
+  const storedProject = desktopSession?.project ?? session?.project ?? await idbGet<unknown>(STORES.PROJECTS, PROJECT_PREFIX + id);
   if (!storedProject) return null;
   const project = normalizeProjectData(storedProject);
 
@@ -151,7 +196,7 @@ export async function loadProjectDraft(id: string): Promise<{
     for (const meta of project.audioMeta) {
       try {
         const handle = await getBrowserMediaHandle(id, meta.id);
-        const file = handle ? await readBrowserMedia(handle) : await mediaStorage.get(projectMediaKey(id, meta.id)) ??
+        const file = meta.sourcePath && desktopSession ? await readDesktopAudio(meta.sourcePath, meta.type) : handle ? await readBrowserMedia(handle) : await mediaStorage.get(projectMediaKey(id, meta.id)) ??
           (id === LEGACY_PROJECT_ID ? await mediaStorage.get(meta.id) : null);
         if (file) {
           const url = URL.createObjectURL(file);
@@ -162,6 +207,7 @@ export async function loadProjectDraft(id: string): Promise<{
             duration: meta.duration,
             coverUrl: meta.coverUrl,
             file,
+            sourcePath: meta.sourcePath,
             url,
           });
         }

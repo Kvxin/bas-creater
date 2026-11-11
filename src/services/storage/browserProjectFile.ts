@@ -126,3 +126,11 @@ export async function saveBrowserProject(opened: BrowserProjectFile, project: Ba
   }
   return save();
 }
+
+/** Removes only the matching project file, never the selected directory or referenced assets. */
+export async function deleteBrowserProjectFile(location: BrowserProjectLocation): Promise<void> {
+  if (!(await ensureDirectoryPermission(location.directory, true))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
+  const opened = await openBrowserProject(location.directory, location.fileName);
+  if (opened.project.id !== location.projectId) throw new Error("PROJECT_ID_MISMATCH");
+  await location.directory.removeEntry(location.fileName);
+}

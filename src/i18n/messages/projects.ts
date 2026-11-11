@@ -1,4 +1,5 @@
 const zhCN = {
+  removeTitle: "移除项目", removeDescription: "选择处理方式。引用的原始素材和项目文件夹不会被删除。", listOnly: "仅从列表移除", deleteFiles: "同时删除项目文件", confirmFileDelete: "确定永久删除显示的项目文件吗？此操作无法撤销。", storedInternally: "应用内存储",
   selectFolder: "选择空文件夹", emptyFolder: "请选择已有的空文件夹", folderFailed: "无法选择文件夹，请重试。", openFailed: "无法打开项目，请检查文件夹权限和项目文件。",
   title: "项目", search: "搜索项目...", newProject: "新建项目", createFirst: "创建第一个项目",
   empty: "还没有项目", emptyDescription: "创建你的第一个项目，开始制作属于你的弹幕作品。",
@@ -10,6 +11,7 @@ const zhCN = {
   listFailed: "项目列表加载失败，请刷新重试。", createFailed: "创建项目失败，请重试。", deleteFailed: "删除失败，请重试。"
 };
 const en: typeof zhCN = {
+  removeTitle: "Remove projects", removeDescription: "Choose what to remove. Original referenced media and folders will be kept.", listOnly: "Remove from list only", deleteFiles: "Also delete project files", confirmFileDelete: "Permanently delete the displayed project files? This cannot be undone.", storedInternally: "App storage",
   selectFolder: "Choose empty folder", emptyFolder: "Select an existing empty folder", folderFailed: "Unable to select folder.", openFailed: "Could not open project. Check the folder permission and project file.",
   title: "Projects", search: "Search projects...", newProject: "New project", createFirst: "Create your first project",
   empty: "No projects yet", emptyDescription: "Create your first project and start making danmaku.",
@@ -21,6 +23,7 @@ const en: typeof zhCN = {
   listFailed: "Could not load projects. Refresh and try again.", createFailed: "Could not create project.", deleteFailed: "Could not delete projects."
 };
 const ja: typeof zhCN = {
+  removeTitle: "プロジェクトを削除", removeDescription: "削除方法を選択してください。元の素材とフォルダーは削除されません。", listOnly: "一覧からのみ削除", deleteFiles: "プロジェクトファイルも削除", confirmFileDelete: "表示されたファイルを完全に削除しますか？元に戻せません。", storedInternally: "アプリ内ストレージ",
   selectFolder: "空のフォルダーを選択", emptyFolder: "既存の空フォルダーを選択", folderFailed: "フォルダーを選択できません。", openFailed: "プロジェクトを開けません。権限とファイルを確認してください。",
   title: "プロジェクト", search: "プロジェクトを検索...", newProject: "新規プロジェクト", createFirst: "最初のプロジェクトを作成",
   empty: "プロジェクトはまだありません", emptyDescription: "プロジェクトを作成して弾幕の制作を始めましょう。",
