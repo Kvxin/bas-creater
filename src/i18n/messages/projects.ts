@@ -1,4 +1,5 @@
 const zhCN = {
+  discardAfterSaveFailed: "保存失败。放弃未保存的更改并返回项目列表？选择取消以继续编辑并重试。",
   browserStorageNotice: "当前浏览器不支持选择项目文件夹，项目将保存在浏览器的应用内存储中。",
   copyAudio: "是否将音频复制到项目文件夹？选择取消将引用原文件。", copyAudioFailed: "音频复制失败，未添加素材。",
   selectAudioInstead: "请使用资源栏中的音频按钮选择原始文件，以便项目保留文件引用。",
@@ -18,6 +19,7 @@ const zhCN = {
   listFailed: "项目列表加载失败，请刷新重试。", createFailed: "创建项目失败，请重试。", deleteFailed: "删除失败，请重试。"
 };
 const en: typeof zhCN = {
+  discardAfterSaveFailed: "Save failed. Discard unsaved changes and return to projects? Cancel to stay and retry.",
   browserStorageNotice: "This browser cannot select a project folder. Projects will be stored in browser app storage.",
   copyAudio: "Copy this audio into the project? Choose Cancel to reference the original file.", copyAudioFailed: "Audio copy failed; the resource was not added.",
   selectAudioInstead: "Use the audio button to select the original file and preserve its reference.",
@@ -37,6 +39,7 @@ const en: typeof zhCN = {
   listFailed: "Could not load projects. Refresh and try again.", createFailed: "Could not create project.", deleteFailed: "Could not delete projects."
 };
 const ja: typeof zhCN = {
+  discardAfterSaveFailed: "保存に失敗しました。未保存の変更を破棄して戻りますか？",
   browserStorageNotice: "このブラウザーではフォルダーを選択できないため、アプリ内に保存されます。",
   copyAudio: "音声をプロジェクトにコピーしますか？キャンセルすると元ファイルを参照します。", copyAudioFailed: "音声をコピーできませんでした。",
   selectAudioInstead: "音声ボタンから元のファイルを選択してください。",

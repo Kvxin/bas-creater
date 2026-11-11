@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEventListener, useDark } from "@vueuse/core";
 import {
   MessageSquareText,
@@ -59,24 +60,49 @@ const exportTimelineAsTxt = async () => {
   });
 };
 
+let unlistenClose: (() => void) | undefined;
+let unmounted = false;
+let allowWindowClose = false;
+
+const flushBeforeLeaving = async (): Promise<boolean> => {
+  if (!isReady.value && !loadFailed.value) return false;
+  if (!loadFailed.value) {
+    while (autoSave.isDirty.value || autoSave.saveStatus.value === "saving") {
+      if (!(await autoSave.saveNow())) return window.confirm(t("projects.discardAfterSaveFailed"));
+    }
+  }
+  return true;
+};
+
 onMounted(async () => {
+  if (isDesktop) {
+    const appWindow = getCurrentWindow();
+    try {
+      const unlisten = await appWindow.onCloseRequested(async (event) => {
+        if (allowWindowClose) return;
+        event.preventDefault();
+        if (isLeaving.value) return;
+        isLeaving.value = true;
+        try {
+          if (await flushBeforeLeaving()) { allowWindowClose = true; await appWindow.close(); }
+        } catch (error) {
+          allowWindowClose = false;
+          console.error("[Editor] Failed to close window", error);
+        } finally { isLeaving.value = false; }
+      });
+      if (unmounted) unlisten(); else unlistenClose = unlisten;
+    } catch (error) { console.error("[Editor] Failed to register close handler", error); }
+  }
   isReady.value = await autoSave.restoreProject();
   loadFailed.value = !isReady.value;
 });
+onBeforeUnmount(() => { unmounted = true; unlistenClose?.(); });
 
 const closeProject = async () => {
-  if (isLeaving.value || (!isReady.value && !loadFailed.value)) return;
+  if (isLeaving.value) return;
   isLeaving.value = true;
-  if (!loadFailed.value) {
-    while (autoSave.isDirty.value || autoSave.saveStatus.value === "saving") {
-      if (!(await autoSave.saveNow())) {
-        isLeaving.value = false;
-        window.alert(t("projects.saveFailed"));
-        return;
-      }
-    }
-  }
-  emit("close");
+  try { if (await flushBeforeLeaving()) emit("close"); }
+  finally { isLeaving.value = false; }
 };
 
 // Theme
