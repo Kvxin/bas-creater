@@ -71,7 +71,8 @@ export async function idbSet<T>(storeName: StoreName, key: string, value: T): Pr
     const store = tx.objectStore(storeName);
     const request = store.put(value, key);
 
-    request.onsuccess = () => resolve();
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction aborted"));
     request.onerror = () => reject(request.error);
   });
 }
@@ -83,7 +84,8 @@ export async function idbDelete(storeName: StoreName, key: string): Promise<void
     const store = tx.objectStore(storeName);
     const request = store.delete(key);
 
-    request.onsuccess = () => resolve();
+    tx.oncomplete = () => resolve();
+    tx.onabort = () => reject(tx.error || new Error("IndexedDB transaction aborted"));
     request.onerror = () => reject(request.error);
   });
 }

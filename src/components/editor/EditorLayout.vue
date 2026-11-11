@@ -2,7 +2,7 @@
 import { onMounted, ref } from "vue";
 import { useEventListener, useDark } from "@vueuse/core";
 import {
-  Video,
+  MessageSquareText,
   Check,
   Cloud,
   Loader2,
@@ -26,8 +26,13 @@ import { useDanmuStore } from "@/stores/danmu";
 import { compileTimelineToBas } from "@/utils/compiler";
 import { isDesktopApp, isMacOS, saveTextFile } from "@/utils/desktop";
 
+const props = defineProps<{ projectId: string }>();
+const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
-const autoSave = useProjectAutoSave();
+const autoSave = useProjectAutoSave(props.projectId);
+const isReady = ref(false);
+const loadFailed = ref(false);
+const isLeaving = ref(false);
 const timelineStore = useTimelineStore();
 const danmuStore = useDanmuStore();
 const isExportDialogOpen = ref(false);
@@ -55,8 +60,24 @@ const exportTimelineAsTxt = async () => {
 };
 
 onMounted(async () => {
-  await autoSave.restoreProject();
+  isReady.value = await autoSave.restoreProject();
+  loadFailed.value = !isReady.value;
 });
+
+const closeProject = async () => {
+  if (isLeaving.value || (!isReady.value && !loadFailed.value)) return;
+  isLeaving.value = true;
+  if (!loadFailed.value) {
+    while (autoSave.isDirty.value || autoSave.saveStatus.value === "saving") {
+      if (!(await autoSave.saveNow())) {
+        isLeaving.value = false;
+        window.alert(t("projects.saveFailed"));
+        return;
+      }
+    }
+  }
+  emit("close");
+};
 
 // Theme
 const isDark = useDark({ initialValue: "dark" });
@@ -135,11 +156,12 @@ useEventListener("mouseleave", stopResize);
       data-ui="title-bar"
     >
       <div class="flex items-center gap-2 min-w-0">
+        <button type="button" class="size-8 flex items-center justify-center rounded-sm hover:bg-accent" :title="t('projects.back')" :aria-label="t('projects.back')" :disabled="isLeaving || (!isReady && !loadFailed)" @click="closeProject"><ArrowLeft class="size-4" /></button>
         <div class="size-8 rounded-sm hover:bg-accent flex items-center justify-center text-foreground">
-          <Video class="size-5" />
+          <MessageSquareText class="size-5" />
         </div>
         <h1 class="h-8 px-2 rounded-sm flex items-center text-[0.9rem] font-medium tracking-normal truncate hover:bg-accent">
-          DanmakuCut
+          {{ autoSave.projectName.value }}
         </h1>
 
         <!-- 自动保存状态指示徽章 -->
@@ -204,8 +226,9 @@ useEventListener("mouseleave", stopResize);
     </Dialog>
 
     <!-- Main Content -->
-    <SettingsView v-if="isSettingsOpen" v-model:is-dark="isDark" @close="isSettingsOpen = false" />
-    <div v-show="!isSettingsOpen" class="flex-1 flex flex-col min-h-0 relative gap-[0.18rem] pb-3">
+    <div v-if="loadFailed" class="flex-1 flex items-center justify-center text-destructive">{{ t("projects.loadFailed") }}</div>
+    <SettingsView v-else-if="isSettingsOpen && isReady" v-model:is-dark="isDark" @close="isSettingsOpen = false" />
+    <div v-show="!isSettingsOpen && isReady" class="flex-1 flex flex-col min-h-0 relative gap-[0.18rem] pb-3">
       <!-- Top Section -->
       <div class="flex-1 flex min-h-0 gap-[0.19rem] px-3">
         <!-- Left Panel: Resources -->
