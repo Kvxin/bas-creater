@@ -1,4 +1,5 @@
 import app from './app'
+import projects from './projects'
 import audio from './audio'
 import common from './common'
 import danmu from './danmu'
@@ -27,6 +28,7 @@ export const messages = {
     groups: groups['zh-CN'],
     common: common['zh-CN'],
     app: app['zh-CN'],
+    projects: projects['zh-CN'],
     danmu: danmu['zh-CN'],
     resources: resources['zh-CN'],
     properties: properties['zh-CN'],
@@ -40,6 +42,7 @@ export const messages = {
     groups: groups.en,
     common: common.en,
     app: app.en,
+    projects: projects.en,
     danmu: danmu.en,
     resources: resources.en,
     properties: properties.en,
@@ -53,6 +56,7 @@ export const messages = {
     groups: groups.ja,
     common: common.ja,
     app: app.ja,
+    projects: projects.ja,
     danmu: danmu.ja,
     resources: resources.ja,
     properties: properties.ja,

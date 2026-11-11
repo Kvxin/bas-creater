@@ -1,4 +1,4 @@
-import { ref, watch, onMounted, onBeforeUnmount } from "vue";
+import { ref, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useDanmuStore } from "@/stores/danmu";
 import { useTimelineStore } from "@/stores/timeline";
 import { useAudioStore } from "@/stores/audio";
@@ -15,7 +15,7 @@ import {
 
 const DEBOUNCE_DELAY_MS = 800;
 
-export function useProjectAutoSave() {
+export function useProjectAutoSave(projectId: string) {
   const danmuStore = useDanmuStore();
   const timelineStore = useTimelineStore();
   const audioStore = useAudioStore();
@@ -24,7 +24,10 @@ export function useProjectAutoSave() {
   const saveStatus = ref<AutoSaveStatus>("idle");
   const lastSavedTime = ref<Date | null>(null);
   const isDirty = ref(false);
-  const isHydrating = ref(false);
+  const isHydrating = ref(true);
+  const createdAt = ref(Date.now());
+  let revision = 0;
+  let saveChain: Promise<void> = Promise.resolve();
   /**
    * 导入工程中暂时无法恢复物理文件的音频元数据。
    *
@@ -83,10 +86,10 @@ export function useProjectAutoSave() {
   /**
    * 立即将当前状态保存到本地持久化存储（IndexedDB + OPFS）
    */
-  const saveNow = async () => {
-    if (isHydrating.value) return;
+  const saveNow = async (): Promise<boolean> => {
+    if (isHydrating.value) return false;
     clearTimer();
-
+    const savedRevision = revision;
     saveStatus.value = "saving";
     try {
       const audioFiles = new Map<string, File>();
@@ -95,11 +98,10 @@ export function useProjectAutoSave() {
       }
       const audioMeta = getSerializedAudioMetadata();
 
-      await saveProjectDraft(
-        {
-          id: "active_draft",
+      const snapshot = {
+          id: projectId,
           name: projectName.value,
-          createdAt: Date.now(),
+          createdAt: createdAt.value,
           canvas: {
             width: 800,
             height: 450,
@@ -110,22 +112,26 @@ export function useProjectAutoSave() {
           danmus: JSON.parse(JSON.stringify(danmuStore.danmus)),
           tracks: JSON.parse(JSON.stringify(timelineStore.rootTracks)),
           audioMeta,
-        },
-        audioFiles
-      );
+        };
+      const pending = saveChain.then(() => saveProjectDraft(snapshot, audioFiles));
+      saveChain = pending.catch(() => {});
+      await pending;
 
-      isDirty.value = false;
+      isDirty.value = revision !== savedRevision;
       saveStatus.value = "saved";
       lastSavedTime.value = new Date();
+      return true;
     } catch (err) {
       console.error("[AutoSave] Failed to save project:", err);
       saveStatus.value = "error";
+      return false;
     }
   };
 
   const queueSave = () => {
     if (isHydrating.value) return;
     isDirty.value = true;
+    revision++;
     clearTimer();
     debounceTimer = setTimeout(() => {
       void saveNow();
@@ -138,12 +144,13 @@ export function useProjectAutoSave() {
   const restoreProject = async () => {
     isHydrating.value = true;
     try {
-      const draft = await loadProjectDraft();
+      const draft = await loadProjectDraft(projectId);
       if (!draft) {
         return false;
       }
 
       const { project, audioResources } = draft;
+      createdAt.value = project.createdAt;
       importedAudioMeta.value = project.audioMeta ?? [];
 
       if (project.name) {
@@ -151,17 +158,17 @@ export function useProjectAutoSave() {
       }
 
       // 1. 恢复音频资源（已携带新生成的 Blob URL）
+      for (const resource of audioStore.audioResources) URL.revokeObjectURL(resource.url);
       audioStore.audioResources = audioResources;
 
       // 2. 恢复弹幕列表
       if (Array.isArray(project.danmus)) {
         danmuStore.danmus = project.danmus;
-        if (project.danmus.length > 0) {
-          danmuStore.select(project.danmus[0]?.id ?? null);
-        }
+        danmuStore.select(project.danmus[0]?.id ?? null);
       }
 
       // 3. 恢复时间轴与轨道
+      timelineStore.isPlaying = false;
       timelineStore.loadTimeline(project.tracks);
 
       lastSavedTime.value = new Date(project.updatedAt || Date.now());
@@ -172,10 +179,9 @@ export function useProjectAutoSave() {
       console.error("[AutoSave] Failed to restore project:", err);
       return false;
     } finally {
-      // 等待下一帧状态稳定后再放开自动保存监听
-      setTimeout(() => {
-        isHydrating.value = false;
-      }, 100);
+      // 等待恢复触发的响应式更新完成，避免将其当作用户修改。
+      await nextTick();
+      isHydrating.value = false;
     }
   };
 
@@ -185,7 +191,7 @@ export function useProjectAutoSave() {
   const resetProject = async () => {
     isHydrating.value = true;
     try {
-      await clearProjectDraft();
+      await clearProjectDraft(projectId);
       importedAudioMeta.value = [];
       danmuStore.danmus = [];
       danmuStore.select(null);
