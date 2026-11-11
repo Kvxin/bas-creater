@@ -327,7 +327,7 @@ export async function restoreProjectBackup(id: string, name: string): Promise<vo
         const raw: unknown = JSON.parse(current);
         if (raw && typeof raw === "object" && "id" in raw && typeof raw.id === "string" && raw.id !== id) throw new Error("PROJECT_ID_MISMATCH");
       } catch (error) { if (!(error instanceof SyntaxError)) throw error; }
-      await invoke("save_disk_project", { directory: desktop, expected: current, contents });
+      await invoke("save_disk_project", { directory: desktop, expected: current, contents, forceBackup: true });
     }
     const saved: DesktopProjectSession = { directory: desktop, contents, project: backup };
     desktopSessions.set(id, saved);

@@ -141,6 +141,8 @@ test("backup copies previous content at most once per interval", async () => {
   assert.deepEqual([...files.values()], ["old"]);
   await backupBrowserProject(dir, "new", 1_300_001);
   assert.deepEqual([...files.values()], ["old", "new"]);
+  await backupBrowserProject(dir, "before restore", 1_300_002, true);
+  assert.deepEqual([...files.values()], ["old", "new", "before restore"]);
 });
 
 test("project assets reject traversal and preserve copied audio", async () => {

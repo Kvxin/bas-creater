@@ -78,7 +78,7 @@ pub fn restore_missing_disk_project(directory: PathBuf, contents: String) -> Res
     Ok(())
 }
 
-fn backup_project(directory: &Path, contents: &str) -> Result<(), String> {
+fn backup_project(directory: &Path, contents: &str, force: bool) -> Result<(), String> {
     let backup_dir = directory.join(".danmakucut-backups");
     if backup_dir.exists() {
         if fs::symlink_metadata(&backup_dir)
@@ -112,9 +112,10 @@ fn backup_project(directory: &Path, contents: &str) -> Result<(), String> {
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis();
-    if backups
-        .first()
-        .is_some_and(|(time, _)| now.saturating_sub(*time) < 300_000)
+    if !force
+        && backups
+            .first()
+            .is_some_and(|(time, _)| now.saturating_sub(*time) < 300_000)
     {
         return Ok(());
     }
@@ -143,6 +144,7 @@ pub fn save_disk_project(
     directory: PathBuf,
     expected: String,
     contents: String,
+    force_backup: Option<bool>,
 ) -> Result<(), String> {
     let _guard = PROJECT_IO.lock().map_err(|e| e.to_string())?;
     let path = project_path(&directory)?;
@@ -156,7 +158,7 @@ pub fn save_disk_project(
     if fs::read_to_string(&path).map_err(|e| e.to_string())? != expected {
         return Err("PROJECT_MODIFIED_EXTERNALLY".into());
     }
-    backup_project(&directory, &expected)?;
+    backup_project(&directory, &expected, force_backup.unwrap_or(false))?;
     let temp = directory.join(format!(
         ".project-{}-{}.tmp",
         std::process::id(),
@@ -396,8 +398,8 @@ mod tests {
         create_disk_project(directory.clone(), "first".into()).unwrap();
         assert!(create_disk_project(directory.clone(), "other".into()).is_err());
         assert_eq!(read_disk_project(directory.clone()).unwrap(), "first");
-        save_disk_project(directory.clone(), "first".into(), "second".into()).unwrap();
-        assert!(save_disk_project(directory.clone(), "first".into(), "lost".into()).is_err());
+        save_disk_project(directory.clone(), "first".into(), "second".into(), None).unwrap();
+        assert!(save_disk_project(directory.clone(), "first".into(), "lost".into(), None).is_err());
         assert_eq!(read_disk_project(directory.clone()).unwrap(), "second");
         assert!(restore_missing_disk_project(directory.clone(), "replacement".into()).is_err());
         fs::remove_file(directory.join(PROJECT_FILE)).unwrap();

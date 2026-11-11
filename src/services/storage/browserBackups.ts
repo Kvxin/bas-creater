@@ -5,7 +5,7 @@ const BACKUP_NAME = /^backup-(\d+)-[a-f0-9-]+\.basproj$/;
 type IterableDirectory = FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> };
 
 /** Preserve the previous version before replacing it; only manage our own backup names. */
-export async function backupBrowserProject(directory: FileSystemDirectoryHandle, contents: string, now = Date.now()): Promise<void> {
+export async function backupBrowserProject(directory: FileSystemDirectoryHandle, contents: string, now = Date.now(), force = false): Promise<void> {
   const backups = await directory.getDirectoryHandle(".danmakucut-backups", { create: true });
   const entries: { name: string; time: number }[] = [];
   for await (const entry of (backups as IterableDirectory).values()) {
@@ -13,7 +13,7 @@ export async function backupBrowserProject(directory: FileSystemDirectoryHandle,
     if (match) entries.push({ name: entry.name, time: Number(match[1]) });
   }
   entries.sort((a, b) => b.time - a.time || b.name.localeCompare(a.name));
-  if (entries[0] && now - entries[0].time < BACKUP_INTERVAL_MS) return;
+  if (!force && entries[0] && now - entries[0].time < BACKUP_INTERVAL_MS) return;
   const name = `backup-${now}-${crypto.randomUUID()}.basproj`;
   const handle = await backups.getFileHandle(name, { create: true });
   const writer = await handle.createWritable();

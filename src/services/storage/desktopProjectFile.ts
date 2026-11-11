@@ -29,7 +29,7 @@ export async function openDesktopProject(directory: string, expectedId?: string)
 export async function saveDesktopProject(session: DesktopProjectSession, project: BasProjectData): Promise<DesktopProjectSession> {
   if (project.id !== session.project.id) throw new Error("PROJECT_ID_MISMATCH");
   const contents = JSON.stringify(normalizeProjectData(project), null, 2);
-  await invoke("save_disk_project", { directory: session.directory, expected: session.contents, contents });
+  await invoke("save_disk_project", { directory: session.directory, expected: session.contents, contents, forceBackup: false });
   return { ...session, contents, project };
 }
 

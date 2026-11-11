@@ -101,7 +101,7 @@ export async function createBrowserProject(
 }
 
 /** 检测外部更改后才写入；浏览器文件系统 API 不提供跨进程原子比较并交换。 */
-export async function saveBrowserProject(opened: BrowserProjectFile, project: BasProjectData): Promise<BrowserProjectFile> {
+export async function saveBrowserProject(opened: BrowserProjectFile, project: BasProjectData, forceBackup = false): Promise<BrowserProjectFile> {
   validateFileName(opened.fileName);
   if (!(await ensureDirectoryPermission(opened.directory))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
   const save = async (): Promise<BrowserProjectFile> => {
@@ -111,7 +111,7 @@ export async function saveBrowserProject(opened: BrowserProjectFile, project: Ba
     const normalized = normalizeProjectData(project);
     if (normalized.id !== opened.project.id) throw new Error("PROJECT_ID_MISMATCH");
     const contents = JSON.stringify(normalized, null, 2);
-    await backupBrowserProject(opened.directory, current);
+    await backupBrowserProject(opened.directory, current, Date.now(), forceBackup);
     if ((await digest(await (await handle.getFile()).text())) !== opened.fingerprint) throw new Error("PROJECT_MODIFIED_EXTERNALLY");
     const writable = await handle.createWritable();
     try {
@@ -164,5 +164,5 @@ export async function restoreBrowserProjectFile(location: BrowserProjectLocation
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
   }
-  return saveBrowserProject({ directory: location.directory, fileName: location.fileName, project: backup, fingerprint: await digest(contents) }, backup);
+  return saveBrowserProject({ directory: location.directory, fileName: location.fileName, project: backup, fingerprint: await digest(contents) }, backup, true);
 }
