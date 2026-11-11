@@ -117,6 +117,7 @@ test("disk removal validates project identity and removes only the project file"
   const directory = {
     queryPermission: async () => "granted",
     getFileHandle: async () => ({ getFile: async () => new File([contents], "project.basproj") }),
+    getDirectoryHandle: async () => { throw new DOMException("Missing", "NotFoundError"); },
     removeEntry: async (name: string) => { removed = name; }
   } as unknown as FileSystemDirectoryHandle;
   await assert.rejects(deleteBrowserProjectFile({ projectId: "other", directory, fileName: "project.basproj" }), /PROJECT_ID_MISMATCH/);

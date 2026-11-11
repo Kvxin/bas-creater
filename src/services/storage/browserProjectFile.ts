@@ -1,4 +1,4 @@
-import { backupBrowserProject } from "./browserBackups";
+import { backupBrowserProject, listBrowserBackups } from "./browserBackups";
 import type { BasProjectData } from "@/types/storage";
 import { idbDelete, idbGet, idbSet, STORES } from "./indexedDB";
 import { normalizeProjectData } from "./projectSchema";
@@ -135,5 +135,19 @@ export async function deleteBrowserProjectFile(location: BrowserProjectLocation)
   if (!(await ensureDirectoryPermission(location.directory, true))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
   const opened = await openBrowserProject(location.directory, location.fileName);
   if (opened.project.id !== location.projectId) throw new Error("PROJECT_ID_MISMATCH");
+  const assets = opened.project.audioMeta.filter((item) => item.relativePath).map((item) => item.relativePath!);
+  for (const name of assets) if (!/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(name) || name.includes("..")) throw new Error("INVALID_ASSET_NAME");
+  if (assets.length) {
+    const audio = await (await location.directory.getDirectoryHandle("assets")).getDirectoryHandle("audio");
+    for (const name of assets) {
+      try { await audio.removeEntry(name); }
+      catch (error) { if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error; }
+    }
+  }
+  const backups = await listBrowserBackups(location.directory);
+  if (backups.length) {
+    const backupDirectory = await location.directory.getDirectoryHandle(".danmakucut-backups");
+    for (const name of backups) await backupDirectory.removeEntry(name);
+  }
   await location.directory.removeEntry(location.fileName);
 }

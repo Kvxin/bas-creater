@@ -200,6 +200,26 @@ pub fn delete_disk_project_file(directory: PathBuf, project_id: String) -> Resul
     if data.get("id").and_then(|value| value.as_str()) != Some(project_id.as_str()) {
         return Err("PROJECT_ID_MISMATCH".into());
     }
+    if let Some(items) = data.get("audioMeta").and_then(|value| value.as_array()) {
+        for item in items {
+            if let Some(name) = item.get("relativePath").and_then(|value| value.as_str()) {
+                let asset = match asset_path(&directory, name, false) {
+                    Ok(asset) => asset,
+                    Err(error) if error == "ASSET_NOT_FOUND" => continue,
+                    Err(error) => return Err(error),
+                };
+                match fs::symlink_metadata(&asset) {
+                    Ok(meta) if meta.file_type().is_symlink() => return Err("ASSET_SYMLINK_NOT_ALLOWED".into()),
+                    Ok(_) => fs::remove_file(asset).map_err(|e| e.to_string())?,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
+                    Err(error) => return Err(error.to_string()),
+                }
+            }
+        }
+    }
+    for name in list_disk_backups(directory.clone())? {
+        fs::remove_file(directory.join(".danmakucut-backups").join(name)).map_err(|e| e.to_string())?;
+    }
     fs::remove_file(path).map_err(|e| e.to_string())
 }
 
@@ -270,7 +290,12 @@ pub fn read_disk_backup(directory: PathBuf, name: String) -> Result<String, Stri
 }
 
 fn asset_path(directory: &Path, name: &str, create: bool) -> Result<PathBuf, String> {
-    if !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.') || name.starts_with('.') || name.contains("..") {
+    if !name
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.')
+        || name.starts_with('.')
+        || name.contains("..")
+    {
         return Err("INVALID_ASSET_NAME".into());
     }
     let _ = project_path(directory)?;
@@ -279,18 +304,29 @@ fn asset_path(directory: &Path, name: &str, create: bool) -> Result<PathBuf, Str
     for dir in [&assets, &audio] {
         if dir.exists() {
             let metadata = fs::symlink_metadata(dir).map_err(|e| e.to_string())?;
-            if metadata.file_type().is_symlink() || !metadata.is_dir() { return Err("INVALID_ASSET_DIRECTORY".into()); }
-        } else if create { fs::create_dir(dir).map_err(|e| e.to_string())?; }
-        else { return Err("ASSET_NOT_FOUND".into()); }
+            if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                return Err("INVALID_ASSET_DIRECTORY".into());
+            }
+        } else if create {
+            fs::create_dir(dir).map_err(|e| e.to_string())?;
+        } else {
+            return Err("ASSET_NOT_FOUND".into());
+        }
     }
     Ok(audio.join(name))
 }
 
 #[tauri::command]
 pub fn write_project_audio(directory: PathBuf, name: String, bytes: Vec<u8>) -> Result<(), String> {
-    if bytes.len() > 512 * 1024 * 1024 { return Err("AUDIO_FILE_TOO_LARGE".into()); }
+    if bytes.len() > 512 * 1024 * 1024 {
+        return Err("AUDIO_FILE_TOO_LARGE".into());
+    }
     let path = asset_path(&directory, &name, true)?;
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&path).map_err(|e| e.to_string())?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
     if let Err(error) = file.write_all(&bytes).and_then(|()| file.sync_all()) {
         drop(file);
         let _ = fs::remove_file(path);
@@ -302,9 +338,17 @@ pub fn write_project_audio(directory: PathBuf, name: String, bytes: Vec<u8>) -> 
 #[tauri::command]
 pub fn read_project_audio(directory: PathBuf, name: String) -> Result<Vec<u8>, String> {
     let path = asset_path(&directory, &name, false)?;
-    if fs::symlink_metadata(&path).map_err(|e| e.to_string())?.file_type().is_symlink() { return Err("ASSET_SYMLINK_NOT_ALLOWED".into()); }
+    if fs::symlink_metadata(&path)
+        .map_err(|e| e.to_string())?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("ASSET_SYMLINK_NOT_ALLOWED".into());
+    }
     let size = fs::metadata(&path).map_err(|e| e.to_string())?.len();
-    if size > 512 * 1024 * 1024 { return Err("AUDIO_FILE_TOO_LARGE".into()); }
+    if size > 512 * 1024 * 1024 {
+        return Err("AUDIO_FILE_TOO_LARGE".into());
+    }
     fs::read(path).map_err(|e| e.to_string())
 }
 

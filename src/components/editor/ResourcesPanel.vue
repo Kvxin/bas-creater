@@ -192,6 +192,10 @@ const handleDrop = (event: DragEvent) => {
   audioDragDepth.value = 0;
   isAudioFileDrag.value = false;
 
+  if (hasBrowserProjectSession(props.projectId) || hasDesktopProjectSession(props.projectId)) {
+    window.alert(t("projects.selectAudioInstead"));
+    return;
+  }
   const audioFile = Array.from(event.dataTransfer?.files ?? []).find(isAudioFile);
   if (audioFile) {
     void handleAudioUpload(audioFile);
