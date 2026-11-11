@@ -1,4 +1,5 @@
 const zhCN = {
+  copyAudio: "是否将音频复制到项目文件夹？选择取消将引用原文件。", copyAudioFailed: "音频复制失败，未添加素材。",
   selectAudioInstead: "请使用资源栏中的音频按钮选择原始文件，以便项目保留文件引用。",
   migrate: "迁移到文件夹", migrationFailed: "迁移失败：请确认素材可读取、目标为空且有写入权限。原项目仍被保留，目标文件夹可能存在已创建的文件。",
   openExisting: "打开本地项目",
@@ -16,6 +17,7 @@ const zhCN = {
   listFailed: "项目列表加载失败，请刷新重试。", createFailed: "创建项目失败，请重试。", deleteFailed: "删除失败，请重试。"
 };
 const en: typeof zhCN = {
+  copyAudio: "Copy this audio into the project? Choose Cancel to reference the original file.", copyAudioFailed: "Audio copy failed; the resource was not added.",
   selectAudioInstead: "Use the audio button to select the original file and preserve its reference.",
   migrate: "Migrate to folder", migrationFailed: "Migration failed. Check media, the empty destination and write access. The old project is retained; the destination may contain created files.",
   openExisting: "Open local project",
@@ -33,6 +35,7 @@ const en: typeof zhCN = {
   listFailed: "Could not load projects. Refresh and try again.", createFailed: "Could not create project.", deleteFailed: "Could not delete projects."
 };
 const ja: typeof zhCN = {
+  copyAudio: "音声をプロジェクトにコピーしますか？キャンセルすると元ファイルを参照します。", copyAudioFailed: "音声をコピーできませんでした。",
   selectAudioInstead: "音声ボタンから元のファイルを選択してください。",
   migrate: "フォルダーへ移行", migrationFailed: "移行に失敗しました。素材、空のフォルダー、権限を確認してください。元のプロジェクトは保持されます。",
   openExisting: "ローカルプロジェクトを開く",

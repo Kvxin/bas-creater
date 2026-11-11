@@ -19,6 +19,10 @@ const projectMediaKey = (projectId: string, mediaId: string) => `${projectId}--$
 const browserSessions = new Map<string, BrowserProjectFile>();
 const desktopSessions = new Map<string, DesktopProjectSession>();
 
+export function projectSessionDirectory(id: string): string | FileSystemDirectoryHandle | null {
+  return desktopSessions.get(id)?.directory ?? browserSessions.get(id)?.directory ?? null;
+}
+
 export function hasDesktopProjectSession(id: string): boolean { return desktopSessions.has(id); }
 
 export function hasBrowserProjectSession(id: string): boolean {

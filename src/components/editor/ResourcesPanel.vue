@@ -12,7 +12,8 @@ import { pickBrowserAudio } from "@/services/storage/browserMediaFile";
 import { getItemName } from "@/utils/resourceUtils";
 import { extractAudioCover } from "@/utils/audio/audio-cover";
 import { LayoutGrid, List } from "lucide-vue-next";
-import { hasBrowserProjectSession, hasDesktopProjectSession } from "@/services/storage/projectStorage";
+import { hasBrowserProjectSession, hasDesktopProjectSession, projectSessionDirectory } from "@/services/storage/projectStorage";
+import { writeProjectAudio } from "@/services/storage/projectAssets";
 import { rememberBrowserMedia } from "@/services/storage/browserMediaFile";
 
 const props = defineProps<{ projectId: string; offlineAudio?: SerializedAudioMetadata[] }>();
@@ -127,6 +128,16 @@ const handleAudioUpload = async (file: File, handle?: FileSystemFileHandle, sour
     sourcePath,
     duration,
   };
+  const directory = projectSessionDirectory(props.projectId);
+  if (directory && window.confirm(t("projects.copyAudio"))) {
+    try {
+      const name = `${crypto.randomUUID()}.audio`;
+      await writeProjectAudio(directory, name, file);
+      resource.relativePath = name;
+      resource.sourcePath = undefined;
+      handle = undefined;
+    } catch (error) { URL.revokeObjectURL(url); console.error(error); window.alert(t("projects.copyAudioFailed")); return; }
+  }
   if (handle) {
     try { await rememberBrowserMedia(props.projectId, resource.id, handle); }
     catch (error) { URL.revokeObjectURL(url); console.error("Failed to remember audio", error); return; }

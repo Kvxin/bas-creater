@@ -27,5 +27,6 @@ export async function readProjectAudio(directory: string | FileSystemDirectoryHa
     const bytes = await invoke<number[]>("read_project_audio", { directory, name });
     return new File([new Uint8Array(bytes)], name, { type });
   }
-  return (await (await webAudioDirectory(directory, false)).getFileHandle(name)).getFile();
+  const file = await (await (await webAudioDirectory(directory, false)).getFileHandle(name)).getFile();
+  return type && !file.type ? new File([file], name, { type, lastModified: file.lastModified }) : file;
 }

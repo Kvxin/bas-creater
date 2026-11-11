@@ -209,7 +209,9 @@ pub fn delete_disk_project_file(directory: PathBuf, project_id: String) -> Resul
                     Err(error) => return Err(error),
                 };
                 match fs::symlink_metadata(&asset) {
-                    Ok(meta) if meta.file_type().is_symlink() => return Err("ASSET_SYMLINK_NOT_ALLOWED".into()),
+                    Ok(meta) if meta.file_type().is_symlink() => {
+                        return Err("ASSET_SYMLINK_NOT_ALLOWED".into())
+                    }
                     Ok(_) => fs::remove_file(asset).map_err(|e| e.to_string())?,
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
                     Err(error) => return Err(error.to_string()),
@@ -218,7 +220,8 @@ pub fn delete_disk_project_file(directory: PathBuf, project_id: String) -> Resul
         }
     }
     for name in list_disk_backups(directory.clone())? {
-        fs::remove_file(directory.join(".danmakucut-backups").join(name)).map_err(|e| e.to_string())?;
+        fs::remove_file(directory.join(".danmakucut-backups").join(name))
+            .map_err(|e| e.to_string())?;
     }
     fs::remove_file(path).map_err(|e| e.to_string())
 }
