@@ -213,7 +213,7 @@ export function useProjectAutoSave() {
   /**
    * 导出当前工程文件 (.basproj)
    */
-  const exportBackup = () => {
+  const exportBackup = async () => {
     const projectData: BasProjectData = {
       version: PROJECT_VERSION,
       id: "project_" + Math.random().toString(36).slice(2, 9),
@@ -226,7 +226,7 @@ export function useProjectAutoSave() {
       tracks: JSON.parse(JSON.stringify(timelineStore.rootTracks)),
       audioMeta: getSerializedAudioMetadata(),
     };
-    exportProjectFile(projectData);
+    await exportProjectFile(projectData);
   };
 
   /**
