@@ -14,6 +14,8 @@ import ResourcesPanel from "./ResourcesPanel.vue";
 import PreviewPanel from "./PreviewPanel.vue";
 import PropertiesPanel from "./PropertiesPanel.vue";
 import TimelinePanel from "./TimelinePanel.vue";
+import WindowControls from "./WindowControls.vue";
+import { useTitleBarDrag } from "@/composables/useTitleBarDrag";
 import { useI18n } from "vue-i18n";
 import { SUPPORTED_LOCALES } from "@/i18n";
 import { useProjectAutoSave } from "@/composables/useProjectAutoSave";
@@ -23,7 +25,7 @@ import { Label } from "@/components/ui/label";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { compileTimelineToBas } from "@/utils/compiler";
-import { openExternalUrl, saveTextFile } from "@/utils/desktop";
+import { isDesktopApp, isMacOS, openExternalUrl, saveTextFile } from "@/utils/desktop";
 
 const { t, locale } = useI18n();
 const autoSave = useProjectAutoSave();
@@ -32,6 +34,11 @@ const danmuStore = useDanmuStore();
 const isExportDialogOpen = ref(false);
 const exportFileName = ref("bas-creater-timeline");
 const REPOSITORY_URL = "https://github.com/Kvxin/bas-creater";
+// 桌面端隐藏系统标题栏，由顶部 header 充当可拖动的深色标题栏
+const isDesktop = isDesktopApp();
+const hasCustomWindowControls = isDesktop && !isMacOS();
+const hasTrafficLights = isDesktop && isMacOS();
+const titleBarListeners = isDesktop ? useTitleBarDrag() : {};
 
 const openExportDialog = () => {
   isExportDialogOpen.value = true;
@@ -119,7 +126,15 @@ useEventListener("mouseleave", stopResize);
   >
     <!-- Header -->
     <header
-      class="h-[3.4rem] bg-background flex items-center justify-between px-3 pt-0.5 shrink-0 z-20"
+      class="h-[3.4rem] bg-background text-foreground flex items-center justify-between pl-3 pt-0.5 shrink-0 z-20 select-none"
+      :class="{
+        dark: isDesktop,
+        'border-b border-border': isDesktop,
+        'pl-[5.5rem]': hasTrafficLights,
+        'pr-3': !hasCustomWindowControls
+      }"
+      v-on="titleBarListeners"
+      data-ui="title-bar"
     >
       <div class="flex items-center gap-2 min-w-0">
         <div class="size-8 rounded-sm hover:bg-accent flex items-center justify-center text-foreground">
@@ -186,6 +201,7 @@ useEventListener("mouseleave", stopResize);
         <div
           class="size-8 rounded-sm border border-border bg-linear-to-br from-primary/85 to-chart-2/75"
         ></div>
+        <WindowControls v-if="hasCustomWindowControls" class="ml-1 -mt-0.5 h-[3.4rem]" />
       </div>
     </header>
 
