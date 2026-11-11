@@ -32,6 +32,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::write_text_file,
             project_files::create_disk_project,
+            project_files::restore_missing_disk_project,
             project_files::read_disk_project,
             project_files::save_disk_project,
             project_files::read_audio_reference,

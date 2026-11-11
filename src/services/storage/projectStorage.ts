@@ -9,7 +9,7 @@ import { mediaStorage } from "./mediaStorage";
 import { getBrowserMediaHandle, readBrowserMedia } from "./browserMediaFile";
 import { normalizeProjectData, PROJECT_VERSION } from "./projectSchema";
 import { saveTextFile } from "@/utils/desktop";
-import { createBrowserProject, deleteBrowserProjectFile, ensureDirectoryPermission, findBrowserProjectLocation, forgetBrowserProject, openBrowserProject, rememberBrowserProject, saveBrowserProject, type BrowserProjectFile } from "./browserProjectFile";
+import { createBrowserProject, deleteBrowserProjectFile, ensureDirectoryPermission, findBrowserProjectLocation, forgetBrowserProject, openBrowserProject, rememberBrowserProject, restoreBrowserProjectFile, saveBrowserProject, type BrowserProjectFile } from "./browserProjectFile";
 
 const CURRENT_VERSION = PROJECT_VERSION;
 const ACTIVE_DRAFT_KEY = "active_draft";
@@ -313,20 +313,30 @@ export async function restoreProjectBackup(id: string, name: string): Promise<vo
   const desktop = await findDesktopProjectLocation(id);
   const browser = await findBrowserProjectLocation(id);
   if (desktop) {
-    const contents = await invoke<string>("read_disk_backup", { directory: desktop, name });
-    const backup = normalizeProjectData(JSON.parse(contents));
+    const backupContents = await invoke<string>("read_disk_backup", { directory: desktop, name });
+    const backup = normalizeProjectData(JSON.parse(backupContents));
     if (backup.id !== id) throw new Error("PROJECT_ID_MISMATCH");
-    const current = await openDesktopProject(desktop, id);
-    const saved = await saveDesktopProject(current, backup);
+    let current: string | null;
+    try { current = await invoke<string>("read_disk_project", { directory: desktop }); }
+    catch (error) { if (String(error).includes("PROJECT_FILE_NOT_FOUND")) current = null; else throw error; }
+    const contents = JSON.stringify(backup, null, 2);
+    if (current === null) {
+      await invoke("restore_missing_disk_project", { directory: desktop, contents });
+    } else {
+      try {
+        const raw: unknown = JSON.parse(current);
+        if (raw && typeof raw === "object" && "id" in raw && typeof raw.id === "string" && raw.id !== id) throw new Error("PROJECT_ID_MISMATCH");
+      } catch (error) { if (!(error instanceof SyntaxError)) throw error; }
+      await invoke("save_disk_project", { directory: desktop, expected: current, contents });
+    }
+    const saved: DesktopProjectSession = { directory: desktop, contents, project: backup };
     desktopSessions.set(id, saved);
     await idbSet(STORES.PROJECTS, PROJECT_PREFIX + id, saved.project);
   } else if (browser) {
     if (!(await ensureDirectoryPermission(browser.directory, true))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
     const backup = normalizeProjectData(JSON.parse(await readBrowserBackup(browser.directory, name)));
     if (backup.id !== id) throw new Error("PROJECT_ID_MISMATCH");
-    const current = await openBrowserProject(browser.directory, browser.fileName);
-    if (current.project.id !== id) throw new Error("PROJECT_ID_MISMATCH");
-    const saved = await saveBrowserProject(current, backup);
+    const saved = await restoreBrowserProjectFile(browser, backup);
     browserSessions.set(id, saved);
     await idbSet(STORES.PROJECTS, PROJECT_PREFIX + id, saved.project);
   } else throw new Error("BACKUPS_UNAVAILABLE");

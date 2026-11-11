@@ -45,14 +45,37 @@ pub fn create_disk_project(directory: PathBuf, contents: String) -> Result<(), S
 #[tauri::command]
 pub fn read_disk_project(directory: PathBuf) -> Result<String, String> {
     let path = project_path(&directory)?;
-    if fs::symlink_metadata(&path)
-        .map_err(|e| e.to_string())?
-        .file_type()
-        .is_symlink()
-    {
+    let metadata = fs::symlink_metadata(&path).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            "PROJECT_FILE_NOT_FOUND".to_string()
+        } else {
+            e.to_string()
+        }
+    })?;
+    if metadata.file_type().is_symlink() {
         return Err("PROJECT_SYMLINK_NOT_ALLOWED".into());
     }
     fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn restore_missing_disk_project(directory: PathBuf, contents: String) -> Result<(), String> {
+    let _guard = PROJECT_IO.lock().map_err(|e| e.to_string())?;
+    let path = project_path(&directory)?;
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    if let Err(error) = file
+        .write_all(contents.as_bytes())
+        .and_then(|()| file.sync_all())
+    {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(error.to_string());
+    }
+    Ok(())
 }
 
 fn backup_project(directory: &Path, contents: &str) -> Result<(), String> {
@@ -376,6 +399,14 @@ mod tests {
         save_disk_project(directory.clone(), "first".into(), "second".into()).unwrap();
         assert!(save_disk_project(directory.clone(), "first".into(), "lost".into()).is_err());
         assert_eq!(read_disk_project(directory.clone()).unwrap(), "second");
+        assert!(restore_missing_disk_project(directory.clone(), "replacement".into()).is_err());
+        fs::remove_file(directory.join(PROJECT_FILE)).unwrap();
+        assert_eq!(
+            read_disk_project(directory.clone()).unwrap_err(),
+            "PROJECT_FILE_NOT_FOUND"
+        );
+        restore_missing_disk_project(directory.clone(), "restored".into()).unwrap();
+        assert_eq!(read_disk_project(directory.clone()).unwrap(), "restored");
         fs::remove_dir_all(directory).unwrap();
     }
 }

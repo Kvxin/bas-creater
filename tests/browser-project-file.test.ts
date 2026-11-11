@@ -163,3 +163,30 @@ test("project assets reject traversal and preserve copied audio", async () => {
   await assert.rejects(writeProjectAudio(dir, "safe.audio", new File(["new"], "other.wav")), /ASSET_ALREADY_EXISTS/);
   assert.equal(await (await readProjectAudio(dir, "safe.audio")).text(), "audio");
 });
+
+test("disk removal deletes only project-owned assets and backups", async () => {
+  const { deleteBrowserProjectFile } = await import("../src/services/storage/browserProjectFile");
+  const deleted: string[] = [];
+  const projectWithAsset = { ...project, audioMeta: [{ id: "audio-1", name: "sound", relativePath: "owned.audio" }] };
+  const backups = {
+    values: async function* () { yield { kind: "file", name: "backup-1000-aaaaaaaa.basproj" }; yield { kind: "file", name: "unrelated.txt" }; },
+    removeEntry: async (name: string) => { deleted.push(`backup/${name}`); }
+  };
+  const audio = { removeEntry: async (name: string) => { deleted.push(`audio/${name}`); } };
+  const root = {
+    queryPermission: async () => "granted",
+    getFileHandle: async () => ({ getFile: async () => new File([JSON.stringify(projectWithAsset)], "project.basproj") }),
+    getDirectoryHandle: async (name: string) => name === "assets" ? { getDirectoryHandle: async () => audio } : backups,
+    removeEntry: async (name: string) => { deleted.push(name); }
+  } as unknown as FileSystemDirectoryHandle;
+  await deleteBrowserProjectFile({ projectId: project.id, directory: root, fileName: "project.basproj" });
+  assert.deepEqual(deleted, ["audio/owned.audio", "backup/backup-1000-aaaaaaaa.basproj", "project.basproj"]);
+});
+
+test("a validated backup can recover corrupted project JSON", async () => {
+  const { restoreBrowserProjectFile } = await import("../src/services/storage/browserProjectFile");
+  const fs = directoryFixture("{corrupt");
+  const restored = await restoreBrowserProjectFile({ projectId: project.id, directory: fs.directory, fileName: "project.basproj" }, project);
+  assert.equal(restored.project.id, project.id);
+  assert.equal(JSON.parse(fs.read()!).name, project.name);
+});

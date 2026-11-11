@@ -151,3 +151,18 @@ export async function deleteBrowserProjectFile(location: BrowserProjectLocation)
   }
   await location.directory.removeEntry(location.fileName);
 }
+
+/** Restore a validated backup even when the current project JSON is corrupt. */
+export async function restoreBrowserProjectFile(location: BrowserProjectLocation, backup: BasProjectData): Promise<BrowserProjectFile> {
+  validateFileName(location.fileName);
+  if (!(await ensureDirectoryPermission(location.directory, true))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
+  if (backup.id !== location.projectId) throw new Error("PROJECT_ID_MISMATCH");
+  const contents = await (await (await location.directory.getFileHandle(location.fileName)).getFile()).text();
+  try {
+    const raw = JSON.parse(contents) as { id?: unknown };
+    if (raw && typeof raw === "object" && typeof raw.id === "string" && raw.id !== location.projectId) throw new Error("PROJECT_ID_MISMATCH");
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+  }
+  return saveBrowserProject({ directory: location.directory, fileName: location.fileName, project: backup, fingerprint: await digest(contents) }, backup);
+}
