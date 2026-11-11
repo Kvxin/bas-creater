@@ -12,6 +12,7 @@ export interface SerializedAudioMetadata {
   size?: number;
   type?: string;
   sourcePath?: string;
+  relativePath?: string;
 }
 
 /**

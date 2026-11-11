@@ -7,4 +7,5 @@ export interface AudioResource {
   file: File;
   duration?: number;
   sourcePath?: string;
+  relativePath?: string;
 }

@@ -55,6 +55,7 @@ export function useProjectAutoSave(projectId: string) {
       size: resource.file?.size,
       type: resource.file?.type,
       sourcePath: resource.sourcePath,
+      relativePath: resource.relativePath,
     }));
     const knownIds = new Set(metadata.map((item) => item.id));
     for (const item of importedAudioMeta.value) {

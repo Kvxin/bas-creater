@@ -58,7 +58,11 @@ pub fn read_disk_project(directory: PathBuf) -> Result<String, String> {
 fn backup_project(directory: &Path, contents: &str) -> Result<(), String> {
     let backup_dir = directory.join(".danmakucut-backups");
     if backup_dir.exists() {
-        if fs::symlink_metadata(&backup_dir).map_err(|e| e.to_string())?.file_type().is_symlink() {
+        if fs::symlink_metadata(&backup_dir)
+            .map_err(|e| e.to_string())?
+            .file_type()
+            .is_symlink()
+        {
             return Err("BACKUP_SYMLINK_NOT_ALLOWED".into());
         }
     } else {
@@ -67,24 +71,47 @@ fn backup_project(directory: &Path, contents: &str) -> Result<(), String> {
     let mut backups = Vec::new();
     for entry in fs::read_dir(&backup_dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
-        if !entry.file_type().map_err(|e| e.to_string())?.is_file() { continue; }
+        if !entry.file_type().map_err(|e| e.to_string())?.is_file() {
+            continue;
+        }
         if let Some(name) = entry.file_name().to_str() {
-            if let Some(timestamp) = name.strip_prefix("backup-").and_then(|s| s.strip_suffix(".basproj")).and_then(|s| s.parse::<u128>().ok()) {
+            if let Some(timestamp) = name
+                .strip_prefix("backup-")
+                .and_then(|s| s.strip_suffix(".basproj"))
+                .and_then(|s| s.parse::<u128>().ok())
+            {
                 backups.push((timestamp, entry.path()));
             }
         }
     }
-    backups.sort_by(|a, b| b.0.cmp(&a.0));
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(|e| e.to_string())?.as_millis();
-    if backups.first().is_some_and(|(time, _)| now.saturating_sub(*time) < 300_000) { return Ok(()); }
+    backups.sort_by_key(|item| std::cmp::Reverse(item.0));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_millis();
+    if backups
+        .first()
+        .is_some_and(|(time, _)| now.saturating_sub(*time) < 300_000)
+    {
+        return Ok(());
+    }
     let path = backup_dir.join(format!("backup-{now}.basproj"));
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&path).map_err(|e| e.to_string())?;
-    if let Err(error) = file.write_all(contents.as_bytes()).and_then(|()| file.sync_all()) {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    if let Err(error) = file
+        .write_all(contents.as_bytes())
+        .and_then(|()| file.sync_all())
+    {
         drop(file);
         let _ = fs::remove_file(path);
         return Err(error.to_string());
     }
-    for (_, path) in backups.into_iter().skip(9) { fs::remove_file(path).map_err(|e| e.to_string())?; }
+    for (_, path) in backups.into_iter().skip(9) {
+        fs::remove_file(path).map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
 
@@ -178,15 +205,30 @@ pub fn delete_disk_project_file(directory: PathBuf, project_id: String) -> Resul
 
 #[tauri::command]
 pub fn list_disk_backups(directory: PathBuf) -> Result<Vec<String>, String> {
-    let path = project_path(&directory)?.parent().ok_or("INVALID_PROJECT_DIRECTORY")?.join(".danmakucut-backups");
-    if !path.exists() { return Ok(Vec::new()); }
-    if fs::symlink_metadata(&path).map_err(|e| e.to_string())?.file_type().is_symlink() { return Err("BACKUP_SYMLINK_NOT_ALLOWED".into()); }
+    let path = project_path(&directory)?
+        .parent()
+        .ok_or("INVALID_PROJECT_DIRECTORY")?
+        .join(".danmakucut-backups");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    if fs::symlink_metadata(&path)
+        .map_err(|e| e.to_string())?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("BACKUP_SYMLINK_NOT_ALLOWED".into());
+    }
     let mut names = Vec::new();
     for entry in fs::read_dir(path).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
-        if !entry.file_type().map_err(|e| e.to_string())?.is_file() { continue; }
+        if !entry.file_type().map_err(|e| e.to_string())?.is_file() {
+            continue;
+        }
         if let Some(name) = entry.file_name().to_str() {
-            if valid_backup_name(name) { names.push(name.to_string()); }
+            if valid_backup_name(name) {
+                names.push(name.to_string());
+            }
         }
     }
     names.sort();
@@ -195,17 +237,75 @@ pub fn list_disk_backups(directory: PathBuf) -> Result<Vec<String>, String> {
 }
 
 fn valid_backup_name(name: &str) -> bool {
-    name.strip_prefix("backup-").and_then(|s| s.strip_suffix(".basproj")).is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+    name.strip_prefix("backup-")
+        .and_then(|s| s.strip_suffix(".basproj"))
+        .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
 }
 
 #[tauri::command]
 pub fn read_disk_backup(directory: PathBuf, name: String) -> Result<String, String> {
-    if !valid_backup_name(&name) { return Err("INVALID_BACKUP_NAME".into()); }
-    let backup_dir = project_path(&directory)?.parent().ok_or("INVALID_PROJECT_DIRECTORY")?.join(".danmakucut-backups");
-    if fs::symlink_metadata(&backup_dir).map_err(|e| e.to_string())?.file_type().is_symlink() { return Err("BACKUP_SYMLINK_NOT_ALLOWED".into()); }
+    if !valid_backup_name(&name) {
+        return Err("INVALID_BACKUP_NAME".into());
+    }
+    let backup_dir = project_path(&directory)?
+        .parent()
+        .ok_or("INVALID_PROJECT_DIRECTORY")?
+        .join(".danmakucut-backups");
+    if fs::symlink_metadata(&backup_dir)
+        .map_err(|e| e.to_string())?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("BACKUP_SYMLINK_NOT_ALLOWED".into());
+    }
     let path = backup_dir.join(name);
-    if fs::symlink_metadata(&path).map_err(|e| e.to_string())?.file_type().is_symlink() { return Err("BACKUP_SYMLINK_NOT_ALLOWED".into()); }
+    if fs::symlink_metadata(&path)
+        .map_err(|e| e.to_string())?
+        .file_type()
+        .is_symlink()
+    {
+        return Err("BACKUP_SYMLINK_NOT_ALLOWED".into());
+    }
     fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+fn asset_path(directory: &Path, name: &str, create: bool) -> Result<PathBuf, String> {
+    if !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'.') || name.starts_with('.') || name.contains("..") {
+        return Err("INVALID_ASSET_NAME".into());
+    }
+    let _ = project_path(directory)?;
+    let assets = directory.join("assets");
+    let audio = assets.join("audio");
+    for dir in [&assets, &audio] {
+        if dir.exists() {
+            let metadata = fs::symlink_metadata(dir).map_err(|e| e.to_string())?;
+            if metadata.file_type().is_symlink() || !metadata.is_dir() { return Err("INVALID_ASSET_DIRECTORY".into()); }
+        } else if create { fs::create_dir(dir).map_err(|e| e.to_string())?; }
+        else { return Err("ASSET_NOT_FOUND".into()); }
+    }
+    Ok(audio.join(name))
+}
+
+#[tauri::command]
+pub fn write_project_audio(directory: PathBuf, name: String, bytes: Vec<u8>) -> Result<(), String> {
+    if bytes.len() > 512 * 1024 * 1024 { return Err("AUDIO_FILE_TOO_LARGE".into()); }
+    let path = asset_path(&directory, &name, true)?;
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&path).map_err(|e| e.to_string())?;
+    if let Err(error) = file.write_all(&bytes).and_then(|()| file.sync_all()) {
+        drop(file);
+        let _ = fs::remove_file(path);
+        return Err(error.to_string());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn read_project_audio(directory: PathBuf, name: String) -> Result<Vec<u8>, String> {
+    let path = asset_path(&directory, &name, false)?;
+    if fs::symlink_metadata(&path).map_err(|e| e.to_string())?.file_type().is_symlink() { return Err("ASSET_SYMLINK_NOT_ALLOWED".into()); }
+    let size = fs::metadata(&path).map_err(|e| e.to_string())?.len();
+    if size > 512 * 1024 * 1024 { return Err("AUDIO_FILE_TOO_LARGE".into()); }
+    fs::read(path).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -232,4 +332,3 @@ mod tests {
         fs::remove_dir_all(directory).unwrap();
     }
 }
-

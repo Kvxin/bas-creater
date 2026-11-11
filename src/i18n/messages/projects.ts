@@ -1,4 +1,5 @@
 const zhCN = {
+  migrate: "迁移到文件夹", migrationFailed: "迁移失败：请确认素材可读取、目标为空且有写入权限。原项目仍被保留，目标文件夹可能存在已创建的文件。",
   openExisting: "打开本地项目",
   backups: "历史备份", noBackups: "暂无历史备份。", restoreBackup: "恢复", confirmRestore: "恢复此版本会替换当前项目文件，确认继续？", backupFailed: "备份操作失败，请检查文件权限和项目状态。",
   offlineMedia: "素材离线", relink: "重新链接", relinkFailed: "重新链接失败，请检查文件和权限。", relinkConfirm: "选择的文件：{name}（{size} 字节）。确认用于重新链接？",
@@ -14,6 +15,7 @@ const zhCN = {
   listFailed: "项目列表加载失败，请刷新重试。", createFailed: "创建项目失败，请重试。", deleteFailed: "删除失败，请重试。"
 };
 const en: typeof zhCN = {
+  migrate: "Migrate to folder", migrationFailed: "Migration failed. Check media, the empty destination and write access. The old project is retained; the destination may contain created files.",
   openExisting: "Open local project",
   backups: "Backups", noBackups: "No backups yet.", restoreBackup: "Restore", confirmRestore: "Replace the current project with this backup?", backupFailed: "Backup operation failed. Check the project and file permissions.",
   offlineMedia: "Offline media", relink: "Relink", relinkFailed: "Could not relink this file. Check file access and permissions.", relinkConfirm: "Use {name} ({size} bytes) for this media?",
@@ -29,6 +31,7 @@ const en: typeof zhCN = {
   listFailed: "Could not load projects. Refresh and try again.", createFailed: "Could not create project.", deleteFailed: "Could not delete projects."
 };
 const ja: typeof zhCN = {
+  migrate: "フォルダーへ移行", migrationFailed: "移行に失敗しました。素材、空のフォルダー、権限を確認してください。元のプロジェクトは保持されます。",
   openExisting: "ローカルプロジェクトを開く",
   backups: "バックアップ", noBackups: "バックアップはありません。", restoreBackup: "復元", confirmRestore: "現在のプロジェクトをこのバックアップで置き換えますか？", backupFailed: "バックアップ操作に失敗しました。",
   offlineMedia: "オフライン素材", relink: "再リンク", relinkFailed: "再リンクできません。権限とファイルを確認してください。", relinkConfirm: "{name}（{size} バイト）を使用しますか？",

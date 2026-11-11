@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTitleBarDrag } from "@/composables/useTitleBarDrag";
-import { createProject, createFolderProject, createDesktopFolderProject, deleteProject, getProjectLocationLabel, listProjectBackups, restoreProjectBackup, openSelectedProjectDirectory, listProjects, prepareProjectOpen } from "@/services/storage/projectStorage";
+import { createProject, createFolderProject, createDesktopFolderProject, deleteProject, getProjectLocationLabel, listProjectBackups, restoreProjectBackup, openSelectedProjectDirectory, migrateProjectToDirectory, listProjects, prepareProjectOpen } from "@/services/storage/projectStorage";
 import { pickDesktopDirectory } from "@/services/storage/desktopProjectFile";
 import { pickProjectDirectory } from "@/services/storage/browserProjectFile";
 import type { BasProjectData } from "@/types/storage";
@@ -22,6 +22,7 @@ const isDesktop = isDesktopApp();
 const hasControls = isDesktop && !isMacOS();
 const titleBarListeners = isDesktop ? useTitleBarDrag() : {};
 const projects = ref<BasProjectData[]>([]);
+const projectLocations = ref<Record<string, string | null>>({});
 const search = ref("");
 const selected = ref<string[]>([]);
 const view = ref<"grid" | "list">("grid");
@@ -48,7 +49,7 @@ const formatDate = (timestamp: number) => new Intl.DateTimeFormat(locale.value, 
 const refresh = async () => {
   isLoading.value = true;
   error.value = "";
-  try { projects.value = await listProjects(); }
+  try { projects.value = await listProjects(); projectLocations.value = Object.fromEntries(await Promise.all(projects.value.map(async (project) => [project.id, await getProjectLocationLabel(project.id)] as const))); }
   catch (cause) { console.error("[Projects] Failed to load", cause); error.value = t("projects.listFailed"); }
   finally { isLoading.value = false; }
 };
@@ -57,6 +58,17 @@ const showCreate = () => { name.value = ""; directory.value = null; desktopDirec
 const selectDirectory = async () => {
   try { if (isDesktop) desktopDirectory.value = await pickDesktopDirectory(); else directory.value = await pickProjectDirectory(); }
   catch (cause) { if (!(cause instanceof DOMException && cause.name === "AbortError")) { console.error(cause); window.alert(t("projects.folderFailed")); } }
+};
+const migrateProject = async (id: string) => {
+  try {
+    const directory = isDesktop ? await pickDesktopDirectory() : await pickProjectDirectory();
+    if (!directory) return;
+    const project = await migrateProjectToDirectory(id, directory);
+    await refresh();
+    emit("open", project.id);
+  } catch (cause) {
+    if (!(cause instanceof DOMException && cause.name === "AbortError")) { console.error(cause); window.alert(t("projects.migrationFailed")); }
+  }
 };
 const openExisting = async () => {
   try {
@@ -154,6 +166,7 @@ const confirmRemove = async () => {
           <div class="relative bg-accent flex justify-center items-center text-muted-foreground" :class="view === 'grid' ? 'h-36' : 'w-24 h-16 my-2 rounded-md shrink-0'">
             <input v-model="selected" type="checkbox" :value="project.id" :aria-label="`${t('projects.selectAll')}: ${project.name}`" class="absolute top-3 left-3" /><MessageSquareText class="size-8 opacity-60" />
           </div>
+          <button v-if="supportsFolder && !projectLocations[project.id]" class="m-2 p-2 text-xs text-muted-foreground hover:text-foreground" @click="migrateProject(project.id)">{{ t("projects.migrate") }}</button>
           <button class="m-2 p-2 text-xs text-muted-foreground hover:text-foreground" @click="showBackups(project.id)">{{ t("projects.backups") }}</button>
           <button class="p-4 text-left min-w-0 flex-1 w-full" @click="open(project.id)"><span class="block truncate font-medium">{{ project.name }}</span><span class="block mt-2 text-xs text-muted-foreground">{{ t("projects.modified") }} · {{ formatDate(project.updatedAt) }}</span></button>
         </article>

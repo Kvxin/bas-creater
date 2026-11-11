@@ -1,3 +1,4 @@
+import { writeProjectAudio, readProjectAudio } from "./projectAssets";
 import { invoke } from "@tauri-apps/api/core";
 import { listBrowserBackups, readBrowserBackup } from "./browserBackups";
 import type { AudioResource } from "@/types/resource";
@@ -106,6 +107,31 @@ export async function openSelectedProjectDirectory(directory: string | FileSyste
   return session.project;
 }
 
+/** Copies a legacy project and all available media into a new user-chosen directory. */
+export async function migrateProjectToDirectory(id: string, directory: string | FileSystemDirectoryHandle): Promise<BasProjectData> {
+  if (await findDesktopProjectLocation(id) || await findBrowserProjectLocation(id)) throw new Error("ALREADY_A_FOLDER_PROJECT");
+  const old = await loadProjectDraft(id);
+  if (!old) throw new Error("PROJECT_NOT_FOUND");
+  const byId = new Map(old.audioResources.map((resource) => [resource.id, resource]));
+  if (old.project.audioMeta.some((meta) => !byId.has(meta.id))) throw new Error("MEDIA_OFFLINE");
+  const project: BasProjectData = {
+    ...old.project, id: crypto.randomUUID(), createdAt: Date.now(), updatedAt: Date.now(),
+    audioMeta: old.project.audioMeta.map((meta) => ({ ...meta, sourcePath: undefined, relativePath: `${crypto.randomUUID()}.audio` }))
+  };
+  // The old project remains intact even if copying or registration fails.
+  const desktop = typeof directory === "string" ? await createDesktopProject(directory, project) : null;
+  const browser = typeof directory !== "string" ? await createBrowserProject(directory, "project.basproj", project) : null;
+  for (const meta of project.audioMeta) await writeProjectAudio(directory, meta.relativePath!, byId.get(meta.id)!.file);
+  if (browser && typeof directory !== "string") {
+    await rememberBrowserProject({ projectId: project.id, directory, fileName: "project.basproj" });
+    browserSessions.set(project.id, browser);
+  }
+  if (desktop) desktopSessions.set(project.id, desktop);
+  await idbSet(STORES.PROJECTS, PROJECT_PREFIX + project.id, project);
+  for (const resource of old.audioResources) URL.revokeObjectURL(resource.url);
+  return project;
+}
+
 /** 在用户点击打开时恢复权限和文件内容；不允许静默使用过期缓存。 */
 export async function prepareProjectOpen(id: string): Promise<void> {
   const desktopDirectory = await findDesktopProjectLocation(id);
@@ -167,7 +193,7 @@ export async function saveProjectDraft(
   const mediaSaves: Promise<void>[] = [];
   for (const [id, file] of audioFiles.entries()) {
     const reference = await getBrowserMediaHandle(projectData.id, id);
-    if (!reference && !projectData.audioMeta.some((item) => item.id === id && item.sourcePath)) mediaSaves.push(mediaStorage.save(projectMediaKey(projectData.id, id), file));
+    if (!reference && !projectData.audioMeta.some((item) => item.id === id && (item.sourcePath || item.relativePath))) mediaSaves.push(mediaStorage.save(projectMediaKey(projectData.id, id), file));
   }
   await Promise.all(mediaSaves);
 
@@ -217,7 +243,8 @@ export async function loadProjectDraft(id: string): Promise<{
     for (const meta of project.audioMeta) {
       try {
         const handle = await getBrowserMediaHandle(id, meta.id);
-        const file = meta.sourcePath && desktopSession ? await readDesktopAudio(meta.sourcePath, meta.type) : handle ? await readBrowserMedia(handle) : await mediaStorage.get(projectMediaKey(id, meta.id)) ??
+        const projectDirectory = desktopSession?.directory ?? session?.directory;
+        const file = meta.relativePath && projectDirectory ? await readProjectAudio(projectDirectory, meta.relativePath, meta.type) : meta.sourcePath && desktopSession ? await readDesktopAudio(meta.sourcePath, meta.type) : handle ? await readBrowserMedia(handle) : await mediaStorage.get(projectMediaKey(id, meta.id)) ??
           (id === LEGACY_PROJECT_ID ? await mediaStorage.get(meta.id) : null);
         if (file) {
           const url = URL.createObjectURL(file);
@@ -229,6 +256,7 @@ export async function loadProjectDraft(id: string): Promise<{
             coverUrl: meta.coverUrl,
             file,
             sourcePath: meta.sourcePath,
+            relativePath: meta.relativePath,
             url,
           });
         }

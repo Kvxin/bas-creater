@@ -141,3 +141,24 @@ test("backup copies previous content at most once per interval", async () => {
   await backupBrowserProject(dir, "new", 1_300_001);
   assert.deepEqual([...files.values()], ["old", "new"]);
 });
+
+test("project assets reject traversal and preserve copied audio", async () => {
+  const { writeProjectAudio, readProjectAudio } = await import("../src/services/storage/projectAssets");
+  const files = new Map<string, File>();
+  const audio = {
+    getFileHandle: async (name: string, options?: { create?: boolean }) => {
+      if (!files.has(name) && !options?.create) throw new DOMException("Missing", "NotFoundError");
+      return {
+        getFile: async () => files.get(name)!,
+        createWritable: async () => { let file: File; return { write: async (value: File) => { file = value; }, close: async () => { files.set(name, file); }, abort: async () => {} }; }
+      };
+    }
+  };
+  const assets = { getDirectoryHandle: async () => audio };
+  const dir = { getDirectoryHandle: async () => assets } as unknown as FileSystemDirectoryHandle;
+  await assert.rejects(writeProjectAudio(dir, "../x", new File(["audio"], "source.wav")), /INVALID_ASSET_NAME/);
+  await writeProjectAudio(dir, "safe.audio", new File(["audio"], "source.wav"));
+  assert.equal(await (await readProjectAudio(dir, "safe.audio")).text(), "audio");
+  await assert.rejects(writeProjectAudio(dir, "safe.audio", new File(["new"], "other.wav")), /ASSET_ALREADY_EXISTS/);
+  assert.equal(await (await readProjectAudio(dir, "safe.audio")).text(), "audio");
+});
