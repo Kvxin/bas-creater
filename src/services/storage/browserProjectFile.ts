@@ -157,7 +157,20 @@ export async function restoreBrowserProjectFile(location: BrowserProjectLocation
   validateFileName(location.fileName);
   if (!(await ensureDirectoryPermission(location.directory, true))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
   if (backup.id !== location.projectId) throw new Error("PROJECT_ID_MISMATCH");
-  const contents = await (await (await location.directory.getFileHandle(location.fileName)).getFile()).text();
+  let contents: string;
+  try {
+    contents = await (await (await location.directory.getFileHandle(location.fileName)).getFile()).text();
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error;
+    // Use a fresh name instead of risking overwrite of a concurrently recreated project file.
+    const fileName = `recovered-${crypto.randomUUID()}.basproj`;
+    const handle = await location.directory.getFileHandle(fileName, { create: true });
+    const serialized = JSON.stringify(normalizeProjectData(backup), null, 2);
+    const writer = await handle.createWritable();
+    try { await writer.write(serialized); await writer.close(); }
+    catch (cause) { await writer.abort().catch(() => {}); throw cause; }
+    return { directory: location.directory, fileName, project: backup, fingerprint: await digest(serialized) };
+  }
   try {
     const raw = JSON.parse(contents) as { id?: unknown };
     if (raw && typeof raw === "object" && typeof raw.id === "string" && raw.id !== location.projectId) throw new Error("PROJECT_ID_MISMATCH");
@@ -165,4 +178,17 @@ export async function restoreBrowserProjectFile(location: BrowserProjectLocation
     if (!(error instanceof SyntaxError)) throw error;
   }
   return saveBrowserProject({ directory: location.directory, fileName: location.fileName, project: backup, fingerprint: await digest(contents) }, backup, true);
+}
+
+/** Find the canonical project file, or a single file created by recovery. */
+export async function findBrowserProjectFile(directory: FileSystemDirectoryHandle): Promise<string> {
+  try { await directory.getFileHandle("project.basproj"); return "project.basproj"; }
+  catch (error) { if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error; }
+  const names: string[] = [];
+  const iterable = directory as FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> };
+  for await (const entry of iterable.values()) {
+    if (entry.kind === "file" && /^recovered-[a-f0-9-]+\.basproj$/.test(entry.name)) names.push(entry.name);
+  }
+  if (names.length !== 1) throw new Error("PROJECT_FILE_NOT_FOUND_OR_AMBIGUOUS");
+  return names[0]!;
 }

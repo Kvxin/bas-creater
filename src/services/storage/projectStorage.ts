@@ -9,7 +9,7 @@ import { mediaStorage } from "./mediaStorage";
 import { getBrowserMediaHandle, readBrowserMedia } from "./browserMediaFile";
 import { normalizeProjectData, PROJECT_VERSION } from "./projectSchema";
 import { saveTextFile } from "@/utils/desktop";
-import { createBrowserProject, deleteBrowserProjectFile, ensureDirectoryPermission, findBrowserProjectLocation, forgetBrowserProject, openBrowserProject, rememberBrowserProject, restoreBrowserProjectFile, saveBrowserProject, type BrowserProjectFile } from "./browserProjectFile";
+import { createBrowserProject, deleteBrowserProjectFile, findBrowserProjectFile, ensureDirectoryPermission, findBrowserProjectLocation, forgetBrowserProject, openBrowserProject, rememberBrowserProject, restoreBrowserProjectFile, saveBrowserProject, type BrowserProjectFile } from "./browserProjectFile";
 
 const CURRENT_VERSION = PROJECT_VERSION;
 const ACTIVE_DRAFT_KEY = "active_draft";
@@ -103,7 +103,7 @@ export async function openSelectedProjectDirectory(directory: string | FileSyste
     return session.project;
   }
   if (!(await ensureDirectoryPermission(directory, true))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
-  const session = await openBrowserProject(directory, "project.basproj");
+  const session = await openBrowserProject(directory, await findBrowserProjectFile(directory));
   if (!session.project.id) throw new Error("INVALID_PROJECT_ID");
   await rememberBrowserProject({ projectId: session.project.id, directory, fileName: session.fileName });
   await idbSet(STORES.PROJECTS, PROJECT_PREFIX + session.project.id, session.project);
@@ -337,6 +337,7 @@ export async function restoreProjectBackup(id: string, name: string): Promise<vo
     const backup = normalizeProjectData(JSON.parse(await readBrowserBackup(browser.directory, name)));
     if (backup.id !== id) throw new Error("PROJECT_ID_MISMATCH");
     const saved = await restoreBrowserProjectFile(browser, backup);
+    if (saved.fileName !== browser.fileName) await rememberBrowserProject({ ...browser, fileName: saved.fileName });
     browserSessions.set(id, saved);
     await idbSet(STORES.PROJECTS, PROJECT_PREFIX + id, saved.project);
   } else throw new Error("BACKUPS_UNAVAILABLE");

@@ -192,3 +192,21 @@ test("a validated backup can recover corrupted project JSON", async () => {
   assert.equal(restored.project.id, project.id);
   assert.equal(JSON.parse(fs.read()!).name, project.name);
 });
+
+test("missing browser project is recovered under a fresh filename", async () => {
+  const { restoreBrowserProjectFile, findBrowserProjectFile } = await import("../src/services/storage/browserProjectFile");
+  const files = new Map<string, string>();
+  const dir = {
+    queryPermission: async () => "granted",
+    values: async function* () { for (const name of files.keys()) yield { kind: "file", name }; },
+    getFileHandle: async (name: string, options?: { create?: boolean }) => {
+      if (!files.has(name) && !options?.create) throw new DOMException("Missing", "NotFoundError");
+      if (options?.create) files.set(name, "");
+      return { getFile: async () => new File([files.get(name)!], name), createWritable: async () => { let text = ""; return { write: async (value: string) => { text = value; }, close: async () => { files.set(name, text); }, abort: async () => {} }; } };
+    }
+  } as unknown as FileSystemDirectoryHandle;
+  const restored = await restoreBrowserProjectFile({ projectId: project.id, directory: dir, fileName: "project.basproj" }, project);
+  assert.match(restored.fileName, /^recovered-/);
+  assert.equal(await findBrowserProjectFile(dir), restored.fileName);
+  assert.equal(JSON.parse(files.get(restored.fileName)!).id, project.id);
+});
