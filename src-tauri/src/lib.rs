@@ -1,4 +1,5 @@
 mod commands;
+mod project_files;
 
 use tauri::Manager;
 use tauri_plugin_window_state::StateFlags;
@@ -28,7 +29,19 @@ pub fn run() {
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![commands::write_text_file])
+        .invoke_handler(tauri::generate_handler![
+            commands::write_text_file,
+            project_files::create_disk_project,
+            project_files::restore_missing_disk_project,
+            project_files::read_disk_project,
+            project_files::save_disk_project,
+            project_files::read_audio_reference,
+            project_files::list_disk_backups,
+            project_files::read_disk_backup,
+            project_files::write_project_audio,
+            project_files::read_project_audio,
+            project_files::delete_disk_project_file
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

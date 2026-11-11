@@ -11,6 +11,8 @@ export interface SerializedAudioMetadata {
   coverUrl?: string; // Data URL 格式的封面
   size?: number;
   type?: string;
+  sourcePath?: string;
+  relativePath?: string;
 }
 
 /**

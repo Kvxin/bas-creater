@@ -22,6 +22,7 @@ export function useProjectAutoSave(projectId: string) {
 
   const projectName = ref("默认工程");
   const saveStatus = ref<AutoSaveStatus>("idle");
+  const lastSaveError = ref("");
   const lastSavedTime = ref<Date | null>(null);
   const isDirty = ref(false);
   const isHydrating = ref(true);
@@ -41,24 +42,12 @@ export function useProjectAutoSave(projectId: string) {
   /**
    * 构造当前工程需要持久化的音频元数据。
    *
-   * 已加载的音频使用运行时资源信息；未加载但仍被任意嵌套时间轴引用的音频，
+   * 已加载的音频使用运行时资源信息；暂时未加载的音频，
    * 则沿用导入工程中的元数据，避免保存后产生悬空资源引用。
    *
    * @returns 当前工程需要写入持久化数据的音频元数据列表
    */
   const getSerializedAudioMetadata = (): SerializedAudioMetadata[] => {
-    const resources = new Map(audioStore.audioResources.map((resource) => [resource.id, resource]));
-    const referencedIds = new Set<string>();
-    const collectReferencedIds = (tracks: typeof timelineStore.rootTracks) => {
-      for (const track of tracks) {
-        for (const clip of track.clips) {
-          if (clip.kind === "resource") referencedIds.add(clip.resourceId);
-          else collectReferencedIds(clip.tracks);
-        }
-      }
-    };
-    collectReferencedIds(timelineStore.rootTracks);
-
     const metadata: SerializedAudioMetadata[] = audioStore.audioResources.map((resource) => ({
       id: resource.id,
       name: resource.name,
@@ -66,10 +55,12 @@ export function useProjectAutoSave(projectId: string) {
       coverUrl: resource.coverUrl,
       size: resource.file?.size,
       type: resource.file?.type,
+      sourcePath: resource.sourcePath,
+      relativePath: resource.relativePath,
     }));
     const knownIds = new Set(metadata.map((item) => item.id));
     for (const item of importedAudioMeta.value) {
-      if (referencedIds.has(item.id) && !knownIds.has(item.id)) {
+      if (!knownIds.has(item.id)) {
         metadata.push(item);
       }
     }
@@ -91,6 +82,7 @@ export function useProjectAutoSave(projectId: string) {
     clearTimer();
     const savedRevision = revision;
     saveStatus.value = "saving";
+    lastSaveError.value = "";
     try {
       const audioFiles = new Map<string, File>();
       for (const resource of audioStore.audioResources) {
@@ -124,6 +116,7 @@ export function useProjectAutoSave(projectId: string) {
     } catch (err) {
       console.error("[AutoSave] Failed to save project:", err);
       saveStatus.value = "error";
+      lastSaveError.value = String(err);
       return false;
     }
   };
@@ -151,7 +144,8 @@ export function useProjectAutoSave(projectId: string) {
 
       const { project, audioResources } = draft;
       createdAt.value = project.createdAt;
-      importedAudioMeta.value = project.audioMeta ?? [];
+      const restoredIds = new Set(audioResources.map((resource) => resource.id));
+      importedAudioMeta.value = (project.audioMeta ?? []).filter((meta) => !restoredIds.has(meta.id));
 
       if (project.name) {
         projectName.value = project.name;
@@ -312,9 +306,11 @@ export function useProjectAutoSave(projectId: string) {
   return {
     projectName,
     saveStatus,
+    lastSaveError,
     lastSavedTime,
     isDirty,
     isHydrating,
+    importedAudioMeta,
     saveNow,
     restoreProject,
     resetProject,

@@ -9,7 +9,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTitleBarDrag } from "@/composables/useTitleBarDrag";
-import { createProject, deleteProject, listProjects } from "@/services/storage/projectStorage";
+import { createProject, createFolderProject, createDesktopFolderProject, deleteProject, getProjectLocationLabel, listProjectBackups, restoreProjectBackup, openSelectedProjectDirectory, migrateProjectToDirectory, listProjects, prepareProjectOpen } from "@/services/storage/projectStorage";
+import { pickDesktopDirectory } from "@/services/storage/desktopProjectFile";
+import { pickProjectDirectory } from "@/services/storage/browserProjectFile";
 import type { BasProjectData } from "@/types/storage";
 import { isDesktopApp, isMacOS } from "@/utils/desktop";
 
@@ -20,6 +22,7 @@ const isDesktop = isDesktopApp();
 const hasControls = isDesktop && !isMacOS();
 const titleBarListeners = isDesktop ? useTitleBarDrag() : {};
 const projects = ref<BasProjectData[]>([]);
+const projectLocations = ref<Record<string, string | null>>({});
 const search = ref("");
 const selected = ref<string[]>([]);
 const view = ref<"grid" | "list">("grid");
@@ -29,7 +32,16 @@ const error = ref("");
 const isCreating = ref(false);
 const isCreateOpen = ref(false);
 const isSettingsOpen = ref(false);
+const isRemoveOpen = ref(false);
+const backupProjectId = ref("");
+const backupNames = ref<string[]>([]);
+const isBackupOpen = ref(false);
+const deleteDiskFiles = ref(false);
+const removeLocations = ref<Record<string, string>>({});
 const name = ref("");
+const directory = ref<FileSystemDirectoryHandle | null>(null);
+const desktopDirectory = ref<string | null>(null);
+const supportsFolder = isDesktop || "showDirectoryPicker" in window;
 const filtered = computed(() => projects.value.filter((project) => project.name.toLowerCase().includes(search.value.trim().toLowerCase()))
   .sort((a, b) => descending.value ? b.updatedAt - a.updatedAt : a.updatedAt - b.updatedAt));
 const allSelected = computed(() => filtered.value.length > 0 && filtered.value.every((p) => selected.value.includes(p.id)));
@@ -37,31 +49,78 @@ const formatDate = (timestamp: number) => new Intl.DateTimeFormat(locale.value, 
 const refresh = async () => {
   isLoading.value = true;
   error.value = "";
-  try { projects.value = await listProjects(); }
+  try { projects.value = await listProjects(); projectLocations.value = Object.fromEntries(await Promise.all(projects.value.map(async (project) => [project.id, await getProjectLocationLabel(project.id)] as const))); }
   catch (cause) { console.error("[Projects] Failed to load", cause); error.value = t("projects.listFailed"); }
   finally { isLoading.value = false; }
 };
 onMounted(refresh);
-const showCreate = () => { name.value = ""; isCreateOpen.value = true; };
+const showCreate = () => { name.value = ""; directory.value = null; desktopDirectory.value = null; isCreateOpen.value = true; };
+const selectDirectory = async () => {
+  try { if (isDesktop) desktopDirectory.value = await pickDesktopDirectory(); else directory.value = await pickProjectDirectory(); }
+  catch (cause) { if (!(cause instanceof DOMException && cause.name === "AbortError")) { console.error(cause); window.alert(t("projects.folderFailed")); } }
+};
+const migrateProject = async (id: string) => {
+  try {
+    const directory = isDesktop ? await pickDesktopDirectory() : await pickProjectDirectory();
+    if (!directory) return;
+    const project = await migrateProjectToDirectory(id, directory);
+    await refresh();
+    emit("open", project.id);
+  } catch (cause) {
+    if (!(cause instanceof DOMException && cause.name === "AbortError")) { console.error(cause); window.alert(t("projects.migrationFailed")); }
+  }
+};
+const openExisting = async () => {
+  try {
+    const chosen = isDesktop ? await pickDesktopDirectory() : await pickProjectDirectory();
+    if (!chosen) return;
+    const project = await openSelectedProjectDirectory(chosen);
+    emit("open", project.id);
+  } catch (cause) { if (!(cause instanceof DOMException && cause.name === "AbortError")) { console.error(cause); window.alert(t("projects.openFailed")); } }
+};
+const open = async (id: string) => {
+  try { await prepareProjectOpen(id); emit("open", id); }
+  catch (cause) { console.error("[Projects] Failed to open", cause); window.alert(t("projects.openFailed")); }
+};
 const create = async () => {
   const projectName = name.value.trim();
-  if (!projectName || isCreating.value) return;
+  if (!projectName || isCreating.value || (supportsFolder && !(isDesktop ? desktopDirectory.value : directory.value))) return;
   isCreating.value = true;
   try {
-    const project = await createProject(projectName, t("timeline.defaultTrackName", { n: 1 }));
+    const trackName = t("timeline.defaultTrackName", { n: 1 });
+    const project = desktopDirectory.value ? await createDesktopFolderProject(projectName, trackName, desktopDirectory.value) : directory.value ? await createFolderProject(projectName, trackName, directory.value) : await createProject(projectName, trackName);
     isCreateOpen.value = false;
     emit("open", project.id);
   } catch (cause) { console.error("[Projects] Failed to create", cause); window.alert(t("projects.createFailed")); }
   finally { isCreating.value = false; }
+};
+const showBackups = async (id: string) => {
+  try { backupNames.value = await listProjectBackups(id); backupProjectId.value = id; isBackupOpen.value = true; }
+  catch (cause) { console.error(cause); window.alert(t("projects.backupFailed")); }
+};
+const restoreBackup = async (name: string) => {
+  if (!window.confirm(t("projects.confirmRestore"))) return;
+  try { await restoreProjectBackup(backupProjectId.value, name); isBackupOpen.value = false; await refresh(); }
+  catch (cause) { console.error(cause); window.alert(t("projects.backupFailed")); }
 };
 const toggleAll = () => {
   const ids = new Set(filtered.value.map((p) => p.id));
   selected.value = allSelected.value ? selected.value.filter((id) => !ids.has(id)) : Array.from(new Set([...selected.value, ...ids]));
 };
 const removeSelected = async () => {
-  if (!selected.value.length || !window.confirm(t("projects.confirmDelete", { count: selected.value.length }))) return;
-  try { for (const id of selected.value) await deleteProject(id); selected.value = []; await refresh(); }
-  catch (cause) { console.error("[Projects] Failed to delete", cause); window.alert(t("projects.deleteFailed")); await refresh(); }
+  if (!selected.value.length) return;
+  const locations = await Promise.all(selected.value.map(async (id) => [id, await getProjectLocationLabel(id)] as const));
+  removeLocations.value = Object.fromEntries(locations.map(([id, path]) => [id, path || t("projects.storedInternally")]));
+  deleteDiskFiles.value = false;
+  isRemoveOpen.value = true;
+};
+const confirmRemove = async () => {
+  if (deleteDiskFiles.value && !window.confirm(t("projects.confirmFileDelete"))) return;
+  try {
+    for (const id of [...selected.value]) { await deleteProject(id, deleteDiskFiles.value); selected.value = selected.value.filter((item) => item !== id); }
+    isRemoveOpen.value = false;
+    await refresh();
+  } catch (cause) { console.error("[Projects] Failed to delete", cause); window.alert(t("projects.deleteFailed")); await refresh(); }
 };
 </script>
 
@@ -86,6 +145,7 @@ const removeSelected = async () => {
         </div>
         <div class="flex items-center gap-3 flex-wrap">
           <label class="h-10 flex items-center gap-2 rounded-md border border-border px-3 text-muted-foreground"><Search class="size-4" /><input v-model="search" type="search" :aria-label="t('projects.search')" :placeholder="t('projects.search')" class="w-36 sm:w-48 bg-transparent text-foreground text-sm outline-none" /></label>
+          <button v-if="supportsFolder" class="h-10 px-4 rounded-md border border-border text-sm hover:bg-accent" @click="openExisting">{{ t("projects.openExisting") }}</button>
           <button class="h-10 px-4 rounded-md bg-foreground text-background font-medium flex items-center gap-2 hover:opacity-90" @click="showCreate"><Plus class="size-4" />{{ t("projects.newProject") }}</button>
           <button v-if="!isDesktop" class="size-9 rounded-md flex items-center justify-center text-muted-foreground hover:bg-accent" :title="t('app.settings')" :aria-label="t('app.settings')" @click="isSettingsOpen = true"><Settings class="size-4" /></button>
         </div>
@@ -106,10 +166,22 @@ const removeSelected = async () => {
           <div class="relative bg-accent flex justify-center items-center text-muted-foreground" :class="view === 'grid' ? 'h-36' : 'w-24 h-16 my-2 rounded-md shrink-0'">
             <input v-model="selected" type="checkbox" :value="project.id" :aria-label="`${t('projects.selectAll')}: ${project.name}`" class="absolute top-3 left-3" /><MessageSquareText class="size-8 opacity-60" />
           </div>
-          <button class="p-4 text-left min-w-0 flex-1 w-full" @click="emit('open', project.id)"><span class="block truncate font-medium">{{ project.name }}</span><span class="block mt-2 text-xs text-muted-foreground">{{ t("projects.modified") }} · {{ formatDate(project.updatedAt) }}</span></button>
+          <button v-if="supportsFolder && !projectLocations[project.id]" class="m-2 p-2 text-xs text-muted-foreground hover:text-foreground" @click="migrateProject(project.id)">{{ t("projects.migrate") }}</button>
+          <button class="m-2 p-2 text-xs text-muted-foreground hover:text-foreground" @click="showBackups(project.id)">{{ t("projects.backups") }}</button>
+          <button class="p-4 text-left min-w-0 flex-1 w-full" @click="open(project.id)"><span class="block truncate font-medium">{{ project.name }}</span><span class="block mt-2 text-xs text-muted-foreground">{{ t("projects.modified") }} · {{ formatDate(project.updatedAt) }}</span></button>
         </article>
       </div>
     </main>
-    <Dialog :open="isCreateOpen" @update:open="isCreateOpen = $event"><DialogContent class="sm:max-w-[440px]"><DialogHeader><DialogTitle>{{ t("projects.createTitle") }}</DialogTitle><DialogDescription>{{ t("projects.createDescription") }}</DialogDescription></DialogHeader><form @submit.prevent="create"><Label for="project-name">{{ t("projects.name") }}</Label><Input id="project-name" v-model="name" class="mt-2" :placeholder="t('projects.placeholder')" maxlength="60" required /><DialogFooter class="mt-6"><button type="button" class="h-9 px-3 rounded-sm border border-border hover:bg-accent" @click="isCreateOpen = false">{{ t("app.cancel") }}</button><button type="submit" :disabled="isCreating || !name.trim()" class="h-9 px-3 rounded-sm bg-foreground text-background disabled:opacity-50">{{ t("projects.create") }}</button></DialogFooter></form></DialogContent></Dialog>
+    <Dialog :open="isBackupOpen" @update:open="isBackupOpen = $event"><DialogContent class="sm:max-w-[520px]"><DialogHeader><DialogTitle>{{ t("projects.backups") }}</DialogTitle><DialogDescription>{{ t("projects.confirmRestore") }}</DialogDescription></DialogHeader><p v-if="!backupNames.length" class="text-sm text-muted-foreground">{{ t("projects.noBackups") }}</p><ul v-else class="max-h-64 overflow-auto space-y-2"><li v-for="name in backupNames" :key="name" class="flex items-center justify-between gap-3 text-sm"><span class="break-all">{{ name }}</span><button class="underline" @click="restoreBackup(name)">{{ t("projects.restoreBackup") }}</button></li></ul></DialogContent></Dialog>
+    <Dialog :open="isRemoveOpen" @update:open="isRemoveOpen = $event">
+      <DialogContent class="sm:max-w-[520px]">
+        <DialogHeader><DialogTitle>{{ t("projects.removeTitle") }}</DialogTitle><DialogDescription>{{ t("projects.removeDescription") }}</DialogDescription></DialogHeader>
+        <ul class="max-h-44 overflow-auto text-sm space-y-2"><li v-for="id in selected" :key="id" class="break-all"><strong>{{ projects.find(p => p.id === id)?.name }}</strong><br /><span class="text-muted-foreground">{{ removeLocations[id] }}</span></li></ul>
+        <label class="flex gap-2 text-sm"><input v-model="deleteDiskFiles" type="radio" :value="false" />{{ t("projects.listOnly") }}</label>
+        <label class="flex gap-2 text-sm"><input v-model="deleteDiskFiles" type="radio" :value="true" />{{ t("projects.deleteFiles") }}</label>
+        <DialogFooter><button type="button" class="h-9 px-3 rounded-sm border border-border" @click="isRemoveOpen = false">{{ t("app.cancel") }}</button><button type="button" class="h-9 px-3 rounded-sm bg-destructive text-white" @click="confirmRemove">{{ t("projects.remove") }}</button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog :open="isCreateOpen" @update:open="isCreateOpen = $event"><DialogContent class="sm:max-w-[440px]"><DialogHeader><DialogTitle>{{ t("projects.createTitle") }}</DialogTitle><DialogDescription>{{ t("projects.createDescription") }}</DialogDescription></DialogHeader><form @submit.prevent="create"><Label for="project-name">{{ t("projects.name") }}</Label><Input id="project-name" v-model="name" class="mt-2" :placeholder="t('projects.placeholder')" maxlength="60" required /><p v-if="!supportsFolder" class="mt-4 text-xs text-muted-foreground">{{ t("projects.browserStorageNotice") }}</p><div v-if="supportsFolder" class="mt-4"><button type="button" class="h-9 px-3 rounded-sm border border-border hover:bg-accent" @click="selectDirectory">{{ t("projects.selectFolder") }}</button><span class="ml-3 text-muted-foreground">{{ desktopDirectory || directory?.name || t("projects.emptyFolder") }}</span></div><DialogFooter class="mt-6"><button type="button" class="h-9 px-3 rounded-sm border border-border hover:bg-accent" @click="isCreateOpen = false">{{ t("app.cancel") }}</button><button type="submit" :disabled="isCreating || !name.trim() || (supportsFolder && !(isDesktop ? desktopDirectory : directory))" class="h-9 px-3 rounded-sm bg-foreground text-background disabled:opacity-50">{{ t("projects.create") }}</button></DialogFooter></form></DialogContent></Dialog>
   </div>
 </template>

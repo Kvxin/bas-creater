@@ -9,22 +9,40 @@ import {
   AudioLines,
 } from "lucide-vue-next";
 import type { DanmuType } from "@/types/danmu";
+import { pickDesktopAudio } from "@/services/storage/desktopProjectFile";
+import { pickBrowserAudio } from "@/services/storage/browserMediaFile";
 
-defineProps<{
+const props = defineProps<{
   searchQuery?: string;
+  useFileReferences?: boolean;
+  useDesktopReferences?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "update:searchQuery", value: string): void;
   (e: "add-danmu", type: DanmuType): void;
-  (e: "upload-audio", file: File): void;
+  (e: "upload-audio", file: File, handle?: FileSystemFileHandle, path?: string): void;
 }>();
 
 const audioInputRef = ref<HTMLInputElement | null>(null);
 
 const { t } = useI18n();
 
-const triggerAudioUpload = () => {
+const triggerAudioUpload = async () => {
+  if (props.useDesktopReferences) {
+    try { const selected = await pickDesktopAudio(); if (selected) emit("upload-audio", selected.file, undefined, selected.path); }
+    catch (error) { console.error("Failed to select audio", error); }
+    return;
+  }
+  if (props.useFileReferences && "showOpenFilePicker" in window) {
+    try {
+      const handle = await pickBrowserAudio();
+      if (handle) emit("upload-audio", await handle.getFile(), handle);
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) console.error("Failed to select audio", error);
+    }
+    return;
+  }
   audioInputRef.value?.click();
 };
 

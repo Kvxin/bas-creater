@@ -6,9 +6,18 @@ import { useTimelineStore } from "@/stores/timeline";
 import { useAudioStore } from "@/stores/audio";
 import type { DanmuType, AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
+import type { SerializedAudioMetadata } from "@/types/storage";
+import { pickDesktopAudio } from "@/services/storage/desktopProjectFile";
+import { pickBrowserAudio } from "@/services/storage/browserMediaFile";
 import { getItemName } from "@/utils/resourceUtils";
 import { extractAudioCover } from "@/utils/audio/audio-cover";
 import { LayoutGrid, List } from "lucide-vue-next";
+import { hasBrowserProjectSession, hasDesktopProjectSession, projectSessionDirectory } from "@/services/storage/projectStorage";
+import { writeProjectAudio } from "@/services/storage/projectAssets";
+import { rememberBrowserMedia } from "@/services/storage/browserMediaFile";
+
+const props = defineProps<{ projectId: string; offlineAudio?: SerializedAudioMetadata[] }>();
+const emit = defineEmits<{ (e: "relink-audio", id: string): void }>();
 
 import ResourcesSidebar from "./resources/ResourcesSidebar.vue";
 import ResourcesHeader from "./resources/ResourcesHeader.vue";
@@ -103,7 +112,7 @@ const getAudioDuration = (url: string): Promise<number> => {
 };
 
 // 点击选择和拖放音频均从这里创建资源，保证行为一致。
-const handleAudioUpload = async (file: File) => {
+const handleAudioUpload = async (file: File, handle?: FileSystemFileHandle, sourcePath?: string) => {
   const url = URL.createObjectURL(file);
   const [duration, coverUrl] = await Promise.all([
     getAudioDuration(url),
@@ -116,12 +125,53 @@ const handleAudioUpload = async (file: File) => {
     url,
     coverUrl: coverUrl ?? undefined,
     file,
+    sourcePath,
     duration,
   };
+  const directory = projectSessionDirectory(props.projectId);
+  if (directory && window.confirm(t("projects.copyAudio"))) {
+    try {
+      const name = `${crypto.randomUUID()}.audio`;
+      await writeProjectAudio(directory, name, file);
+      resource.relativePath = name;
+      resource.sourcePath = undefined;
+      handle = undefined;
+    } catch (error) { URL.revokeObjectURL(url); console.error(error); window.alert(t("projects.copyAudioFailed")); return; }
+  }
+  if (handle) {
+    try { await rememberBrowserMedia(props.projectId, resource.id, handle); }
+    catch (error) { URL.revokeObjectURL(url); console.error("Failed to remember audio", error); return; }
+  }
   audioStore.add(resource);
   console.log(
     `[ResourcesPanel] 上传音频文件: ${file.name}, 时长: ${duration}ms`
   );
+};
+
+const relinkAudio = async (meta: SerializedAudioMetadata) => {
+  try {
+    let file: File;
+    let sourcePath: string | undefined;
+    let handle: FileSystemFileHandle | undefined;
+    if (hasDesktopProjectSession(props.projectId)) {
+      const selection = await pickDesktopAudio();
+      if (!selection) return;
+      file = selection.file;
+      sourcePath = selection.path;
+    } else {
+      const selection = await pickBrowserAudio();
+      if (!selection) return;
+      handle = selection;
+      file = await selection.getFile();
+    }
+    if (!window.confirm(t("projects.relinkConfirm", { name: file.name, size: file.size }))) return;
+    if (handle) await rememberBrowserMedia(props.projectId, meta.id, handle);
+    const url = URL.createObjectURL(file);
+    audioStore.add({ id: meta.id, type: "audio-file", name: meta.name, duration: meta.duration, coverUrl: meta.coverUrl, file, url, sourcePath });
+    emit("relink-audio", meta.id);
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === "AbortError")) { console.error("Failed to relink audio", error); window.alert(t("projects.relinkFailed")); }
+  }
 };
 
 const isAudioFile = (file: File) => file.type.startsWith("audio/");
@@ -153,6 +203,10 @@ const handleDrop = (event: DragEvent) => {
   audioDragDepth.value = 0;
   isAudioFileDrag.value = false;
 
+  if (hasBrowserProjectSession(props.projectId) || hasDesktopProjectSession(props.projectId)) {
+    window.alert(t("projects.selectAudioInstead"));
+    return;
+  }
   const audioFile = Array.from(event.dataTransfer?.files ?? []).find(isAudioFile);
   if (audioFile) {
     void handleAudioUpload(audioFile);
@@ -215,10 +269,17 @@ const toggleResourceLayout = () => {
       </div>
       <!-- Header -->
       <ResourcesHeader
+        :use-file-references="hasBrowserProjectSession(props.projectId)"
+        :use-desktop-references="hasDesktopProjectSession(props.projectId)"
         v-model:searchQuery="searchQuery"
         @add-danmu="handleAddDanmu"
         @upload-audio="handleAudioUpload"
       />
+
+      <div v-if="offlineAudio?.length" class="px-3 py-2 border-b border-border text-xs space-y-2">
+        <div class="text-destructive">{{ t("projects.offlineMedia") }}</div>
+        <div v-for="audio in offlineAudio" :key="audio.id" class="flex items-center justify-between gap-2"><span class="truncate">{{ audio.name }}</span><button class="underline shrink-0" @click="relinkAudio(audio)">{{ t("projects.relink") }}</button></div>
+      </div>
 
       <!-- List -->
       <ResourcesList

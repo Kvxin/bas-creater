@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEventListener, useDark } from "@vueuse/core";
 import {
   MessageSquareText,
@@ -30,6 +31,13 @@ const props = defineProps<{ projectId: string }>();
 const emit = defineEmits<{ close: [] }>();
 const { t } = useI18n();
 const autoSave = useProjectAutoSave(props.projectId);
+const saveErrorMessage = computed(() => {
+  const message = autoSave.lastSaveError.value.toLowerCase();
+  if (message.includes("modified_externally")) return t("projects.saveConflict");
+  if (message.includes("permission") || message.includes("denied") || message.includes("notallowed")) return t("projects.savePermission");
+  if (message.includes("space") || message.includes("quota") || message.includes("disk full")) return t("projects.saveSpace");
+  return t("projects.saveFailed");
+});
 const isReady = ref(false);
 const loadFailed = ref(false);
 const isLeaving = ref(false);
@@ -59,24 +67,49 @@ const exportTimelineAsTxt = async () => {
   });
 };
 
+let unlistenClose: (() => void) | undefined;
+let unmounted = false;
+let allowWindowClose = false;
+
+const flushBeforeLeaving = async (): Promise<boolean> => {
+  if (!isReady.value && !loadFailed.value) return false;
+  if (!loadFailed.value) {
+    while (autoSave.isDirty.value || autoSave.saveStatus.value === "saving") {
+      if (!(await autoSave.saveNow())) return window.confirm(`${saveErrorMessage.value}\n\n${t("projects.discardAfterSaveFailed")}`);
+    }
+  }
+  return true;
+};
+
 onMounted(async () => {
+  if (isDesktop) {
+    const appWindow = getCurrentWindow();
+    try {
+      const unlisten = await appWindow.onCloseRequested(async (event) => {
+        if (allowWindowClose) return;
+        event.preventDefault();
+        if (isLeaving.value) return;
+        isLeaving.value = true;
+        try {
+          if (await flushBeforeLeaving()) { allowWindowClose = true; await appWindow.close(); }
+        } catch (error) {
+          allowWindowClose = false;
+          console.error("[Editor] Failed to close window", error);
+        } finally { isLeaving.value = false; }
+      });
+      if (unmounted) unlisten(); else unlistenClose = unlisten;
+    } catch (error) { console.error("[Editor] Failed to register close handler", error); }
+  }
   isReady.value = await autoSave.restoreProject();
   loadFailed.value = !isReady.value;
 });
+onBeforeUnmount(() => { unmounted = true; unlistenClose?.(); });
 
 const closeProject = async () => {
-  if (isLeaving.value || (!isReady.value && !loadFailed.value)) return;
+  if (isLeaving.value) return;
   isLeaving.value = true;
-  if (!loadFailed.value) {
-    while (autoSave.isDirty.value || autoSave.saveStatus.value === "saving") {
-      if (!(await autoSave.saveNow())) {
-        isLeaving.value = false;
-        window.alert(t("projects.saveFailed"));
-        return;
-      }
-    }
-  }
-  emit("close");
+  try { if (await flushBeforeLeaving()) emit("close"); }
+  finally { isLeaving.value = false; }
 };
 
 // Theme
@@ -167,7 +200,7 @@ useEventListener("mouseleave", stopResize);
         <!-- 自动保存状态指示徽章 -->
         <div
           class="flex items-center gap-1.5 px-2 py-1 rounded text-xs text-muted-foreground select-none"
-          :title="autoSave.lastSavedTime.value ? `上次保存时间: ${autoSave.lastSavedTime.value.toLocaleTimeString()}` : ''"
+          :title="autoSave.saveStatus.value === 'error' ? saveErrorMessage : autoSave.lastSavedTime.value ? `上次保存时间: ${autoSave.lastSavedTime.value.toLocaleTimeString()}` : ''"
         >
           <Loader2 v-if="autoSave.saveStatus.value === 'saving'" class="size-3.5 animate-spin text-primary" />
           <Check v-else-if="autoSave.saveStatus.value === 'saved' && !autoSave.isDirty.value" class="size-3.5 text-constructive" />
@@ -176,6 +209,8 @@ useEventListener("mouseleave", stopResize);
             {{
               autoSave.saveStatus.value === 'saving'
                 ? t('app.saving')
+                : autoSave.saveStatus.value === 'error'
+                ? saveErrorMessage
                 : autoSave.isDirty.value
                 ? t('app.unsaved')
                 : t('app.saved')
@@ -233,7 +268,7 @@ useEventListener("mouseleave", stopResize);
       <div class="flex-1 flex min-h-0 gap-[0.19rem] px-3">
         <!-- Left Panel: Resources -->
         <div class="shrink-0 flex min-w-0" :style="{ width: `${leftWidth}px` }">
-          <ResourcesPanel />
+          <ResourcesPanel :project-id="props.projectId" :offline-audio="autoSave.importedAudioMeta.value" @relink-audio="id => autoSave.importedAudioMeta.value = autoSave.importedAudioMeta.value.filter(item => item.id !== id)" />
         </div>
 
         <!-- Resizer -->

@@ -6,4 +6,6 @@ export interface AudioResource {
   coverUrl?: string; // 内嵌封面的 Data URL
   file: File;
   duration?: number;
+  sourcePath?: string;
+  relativePath?: string;
 }
