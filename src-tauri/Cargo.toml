@@ -1,6 +1,6 @@
 [package]
 name = "bas-creater"
-version = "0.1.0"
+version = "0.1.1"
 description = "DanmakuCut - BAS danmaku timeline editor"
 authors = ["Kvxin"]
 repository = "https://github.com/Kvxin/bas-creater"
