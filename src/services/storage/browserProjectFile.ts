@@ -1,4 +1,5 @@
 import type { BasProjectData } from "@/types/storage";
+import { idbDelete, idbGet, idbSet, STORES } from "./indexedDB";
 import { normalizeProjectData } from "./projectSchema";
 
 type DirectoryPermission = FileSystemDirectoryHandle & {
@@ -16,6 +17,29 @@ export type BrowserProjectFile = {
   fingerprint: string;
   project: BasProjectData;
 };
+
+/** 目录句柄只作为最近项目索引；项目内容以用户目录中的文件为准。 */
+export type BrowserProjectLocation = {
+  projectId: string;
+  directory: FileSystemDirectoryHandle;
+  fileName: string;
+};
+
+const LOCATION_PREFIX = "browser-project-location:";
+
+export async function rememberBrowserProject(location: BrowserProjectLocation): Promise<void> {
+  validateFileName(location.fileName);
+  await idbSet(STORES.PROJECTS, LOCATION_PREFIX + location.projectId, location);
+}
+
+export async function findBrowserProjectLocation(projectId: string): Promise<BrowserProjectLocation | null> {
+  return idbGet<BrowserProjectLocation>(STORES.PROJECTS, LOCATION_PREFIX + projectId);
+}
+
+/** 移除最近项目记录，不删除用户目录中的任何文件。 */
+export async function forgetBrowserProject(projectId: string): Promise<void> {
+  await idbDelete(STORES.PROJECTS, LOCATION_PREFIX + projectId);
+}
 
 /** 文件夹权限可能在页面重启或浏览器重启后失效。申请权限必须由用户操作触发。 */
 export async function ensureDirectoryPermission(directory: FileSystemDirectoryHandle, request = false): Promise<boolean> {
@@ -49,6 +73,30 @@ export async function openBrowserProject(directory: FileSystemDirectoryHandle, f
   const file = await (await directory.getFileHandle(fileName)).getFile();
   const contents = await file.text();
   return { directory, fileName, project: normalizeProjectData(JSON.parse(contents)), fingerprint: await digest(contents) };
+}
+
+/** 只在用户选定的空目录中初始化文件，已有文件或目录都不覆盖。 */
+export async function createBrowserProject(
+  directory: FileSystemDirectoryHandle,
+  fileName: string,
+  project: BasProjectData
+): Promise<BrowserProjectFile> {
+  validateFileName(fileName);
+  if (!(await ensureDirectoryPermission(directory))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
+  const iterable = directory as FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> };
+  for await (const _entry of iterable.values()) throw new Error("DIRECTORY_NOT_EMPTY");
+  const normalized = normalizeProjectData(project);
+  const contents = JSON.stringify(normalized, null, 2);
+  const handle = await directory.getFileHandle(fileName, { create: true });
+  const writable = await handle.createWritable();
+  try {
+    await writable.write(contents);
+    await writable.close();
+  } catch (error) {
+    await writable.abort().catch(() => {});
+    throw error;
+  }
+  return { directory, fileName, project: normalized, fingerprint: await digest(contents) };
 }
 
 /** 检测外部更改后才写入；浏览器文件系统 API 不提供跨进程原子比较并交换。 */
