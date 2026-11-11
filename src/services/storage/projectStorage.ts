@@ -3,6 +3,7 @@ import type { BasProjectData } from "@/types/storage";
 import { idbGet, idbSet, idbDelete, STORES } from "./indexedDB";
 import { mediaStorage } from "./mediaStorage";
 import { normalizeProjectData, PROJECT_VERSION } from "./projectSchema";
+import { saveTextFile } from "@/utils/desktop";
 
 const CURRENT_VERSION = PROJECT_VERSION;
 const ACTIVE_DRAFT_KEY = "active_draft";
@@ -91,19 +92,14 @@ export async function clearProjectDraft(): Promise<void> {
 /**
  * 导出工程配置文件为独立 .basproj (JSON) 文件供备份或分享
  */
-export function exportProjectFile(projectData: BasProjectData): void {
-  const jsonStr = JSON.stringify(projectData, null, 2);
-  const blob = new Blob([jsonStr], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-
-  const a = document.createElement("a");
+export async function exportProjectFile(projectData: BasProjectData): Promise<boolean> {
   const fileName = `${projectData.name || "DanmakuProject"}_${new Date().toISOString().slice(0, 10)}.basproj`;
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  return saveTextFile({
+    fileName,
+    content: JSON.stringify(projectData, null, 2),
+    mimeType: "application/json;charset=utf-8",
+    filters: [{ name: "BAS Project", extensions: ["basproj"] }]
+  });
 }
 
 /**

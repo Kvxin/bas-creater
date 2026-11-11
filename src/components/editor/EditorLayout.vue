@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { compileTimelineToBas } from "@/utils/compiler";
+import { openExternalUrl, saveTextFile } from "@/utils/desktop";
 
 const { t, locale } = useI18n();
 const autoSave = useProjectAutoSave();
@@ -30,24 +31,21 @@ const timelineStore = useTimelineStore();
 const danmuStore = useDanmuStore();
 const isExportDialogOpen = ref(false);
 const exportFileName = ref("bas-creater-timeline");
+const REPOSITORY_URL = "https://github.com/Kvxin/bas-creater";
 
 const openExportDialog = () => {
   isExportDialogOpen.value = true;
 };
 
-const exportTimelineAsTxt = () => {
+const exportTimelineAsTxt = async () => {
   const content = compileTimelineToBas(timelineStore.rootTracks, danmuStore.danmus);
-  const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
   const safeName = exportFileName.value.trim().replace(/[\\/:*?"<>|]/g, "_") || "bas-creater-timeline";
-  link.download = `${safeName}.txt`;
   isExportDialogOpen.value = false;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  await saveTextFile({
+    fileName: `${safeName}.txt`,
+    content,
+    filters: [{ name: "Text", extensions: ["txt"] }]
+  });
 };
 
 onMounted(async () => {
@@ -153,9 +151,10 @@ useEventListener("mouseleave", stopResize);
 
       <div class="flex items-center gap-2">
         <a
-          href="https://github.com/Kvxin/bas-creater"
+          :href="REPOSITORY_URL"
           target="_blank"
           rel="noopener noreferrer"
+          @click.prevent="openExternalUrl(REPOSITORY_URL)"
           class="size-8 rounded-sm hover:bg-accent hover:text-accent-foreground transition-colors focus:outline-none focus:ring-1 focus:ring-ring flex items-center justify-center"
           :aria-label="t('app.github')"
           :title="t('app.github')"

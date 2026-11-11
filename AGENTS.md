@@ -8,7 +8,7 @@
 
 ## 项目结构与模块组织
 
-本仓库是使用 Vite、pnpm、Vue 3 和 TypeScript 构建的应用。
+本仓库是使用 Tauri 2、Vite、pnpm、Vue 3 和 TypeScript 构建的桌面客户端，同时保留可部署到 GitHub Pages 的 Web 版本。
 
 - 视图放在 `src/views`。
 - 可复用的 Vue 组件放在 `src/components`。
@@ -18,9 +18,11 @@
 - 浏览器持久化逻辑放在 `src/services/storage`。
 - 本地化消息放在 `src/i18n/messages`。
 - 静态文件放在 `public/`。
+- Tauri Rust 端代码与配置放在 `src-tauri/`（commands 放在 `src-tauri/src/commands.rs`，权限声明放在 `src-tauri/capabilities/`）。
+- 前端调用桌面能力（文件保存、打开外部链接等）统一通过 `src/utils/desktop.ts`，并保证浏览器环境下有可用的回退逻辑。
 - 文档放在 `docs/`。
 - 端到端测试场景放在 `e2e/`。
-- 生成的输出文件放在 `dist/`，不要将其纳入源码修改。
+- 生成的输出文件放在 `dist/` 与 `src-tauri/target/`，不要将其纳入源码修改。
 
 ## Vue 与 TypeScript 规则
 
@@ -49,20 +51,24 @@
 使用 Node 20.19+（或 22.12+）和 pnpm。
 
 ```sh
-pnpm install       # 安装锁定的依赖版本
-pnpm dev           # 启动带热更新的 Vite 开发服务器
-pnpm type-check    # 运行 vue-tsc 类型检查
-pnpm build         # 执行类型检查并创建生产构建
-pnpm build-only    # 创建 Vite 构建，不执行类型检查
-pnpm preview       # 在本地提供构建结果预览
+pnpm install         # 安装锁定的依赖版本
+pnpm dev             # 启动 Tauri 桌面客户端开发模式（自动拉起 Vite）
+pnpm dev:renderer    # 仅启动带热更新的 Vite 开发服务器
+pnpm type-check      # 运行 vue-tsc 类型检查
+pnpm build:renderer  # 执行类型检查并创建前端生产构建
+pnpm build-only      # 创建 Vite 构建，不执行类型检查
+pnpm build           # 打包 Tauri 桌面客户端
+pnpm preview         # 在本地提供前端构建结果预览
 ```
+
+修改 `src-tauri/` 后，在 `src-tauri/` 目录下运行 `cargo fmt --check` 与 `cargo clippy -- -D warnings`（需先存在 `dist/` 目录）。
 
 项目当前没有配置 Playwright 依赖，也没有独立的单元测试框架。新增测试工具后，应补充对应的 pnpm 命令。新增端到端测试时，将测试文件放在 `e2e/` 下，并命名为 `*.spec.ts`；相关测试工具加入后，使用获准的测试运行器执行。
 
 ## 测试指南
 
 - 测试应覆盖用户可见的编辑器行为，例如加载工作区、主题切换、时间轴交互和资源处理。
-- 提交前运行 `pnpm type-check` 和 `pnpm build`。如果项目已经配置单元测试命令，也应一并运行。
+- 提交前运行 `pnpm type-check` 和 `pnpm build:renderer`；涉及 Rust 端时同时运行 `cargo clippy`。如果项目已经配置单元测试命令，也应一并运行。
 - 单独运行的浏览器检查应记录在拉取请求中。
 - 当前没有强制的覆盖率阈值。
 - 单元测试可以使用必要的 mock 隔离浏览器 API、存储 API 或外部模块，但不得用 mock 掩盖真实的实现错误。
@@ -77,10 +83,11 @@ pnpm preview       # 在本地提供构建结果预览
 
 ## 配置与数据说明
 
-- 应用使用浏览器 IndexedDB 和 OPFS 存储项目及媒体数据。
+- 应用使用 WebView / 浏览器的 IndexedDB 和 OPFS 存储项目及媒体数据。
 - 不要提交用户媒体、生成的构建文件、本地密钥或其他敏感信息。
 - 修改依赖时保留 `pnpm-lock.yaml`。
-- 编辑 `vite.config.ts` 或部署工作流时，确认 GitHub Pages 的构建路径正确。
+- 编辑 `vite.config.ts` 或部署工作流时，确认 GitHub Pages 的构建路径（`/bas-creater/`）与 Tauri 构建路径（`/`）均正确。
+- 发布新版本时同步修改 `package.json` 与 `src-tauri/Cargo.toml` 的 `version`，再推送 `v*` tag 触发 Release workflow。
 - 不要使用 Git 命令丢弃用户已有的修改；需要恢复内容时，先确认目标状态，再使用文件编辑工具进行恢复。
 
 ## 开发流程
