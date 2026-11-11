@@ -305,6 +305,7 @@ export function useProjectAutoSave(projectId: string) {
     lastSavedTime,
     isDirty,
     isHydrating,
+    importedAudioMeta,
     saveNow,
     restoreProject,
     resetProject,

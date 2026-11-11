@@ -1,7 +1,9 @@
+import { invoke } from "@tauri-apps/api/core";
+import { listBrowserBackups, readBrowserBackup } from "./browserBackups";
 import type { AudioResource } from "@/types/resource";
 import type { BasProjectData } from "@/types/storage";
 import { idbGet, idbSet, idbDelete, idbGetAllKeys, STORES } from "./indexedDB";
-import { createDesktopProject, findDesktopProjectLocation, forgetDesktopProject, openDesktopProject, saveDesktopProject, readDesktopAudio, deleteDesktopProjectFile, type DesktopProjectSession } from "./desktopProjectFile";
+import { createDesktopProject, rememberDesktopProject, findDesktopProjectLocation, forgetDesktopProject, openDesktopProject, saveDesktopProject, readDesktopAudio, deleteDesktopProjectFile, type DesktopProjectSession } from "./desktopProjectFile";
 import { mediaStorage } from "./mediaStorage";
 import { getBrowserMediaHandle, readBrowserMedia } from "./browserMediaFile";
 import { normalizeProjectData, PROJECT_VERSION } from "./projectSchema";
@@ -83,6 +85,25 @@ export async function createDesktopFolderProject(name: string, trackName: string
   await idbSet(STORES.PROJECTS, PROJECT_PREFIX + project.id, project);
   desktopSessions.set(project.id, session);
   return project;
+}
+
+/** The user explicitly chose this directory, so it may also repair a moved project. */
+export async function openSelectedProjectDirectory(directory: string | FileSystemDirectoryHandle): Promise<BasProjectData> {
+  if (typeof directory === "string") {
+    const session = await openDesktopProject(directory);
+    if (!session.project.id) throw new Error("INVALID_PROJECT_ID");
+    await rememberDesktopProject(session.project.id, directory);
+    await idbSet(STORES.PROJECTS, PROJECT_PREFIX + session.project.id, session.project);
+    desktopSessions.set(session.project.id, session);
+    return session.project;
+  }
+  if (!(await ensureDirectoryPermission(directory, true))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
+  const session = await openBrowserProject(directory, "project.basproj");
+  if (!session.project.id) throw new Error("INVALID_PROJECT_ID");
+  await rememberBrowserProject({ projectId: session.project.id, directory, fileName: session.fileName });
+  await idbSet(STORES.PROJECTS, PROJECT_PREFIX + session.project.id, session.project);
+  browserSessions.set(session.project.id, session);
+  return session.project;
 }
 
 /** 在用户点击打开时恢复权限和文件内容；不允许静默使用过期缓存。 */
@@ -243,4 +264,38 @@ export async function exportProjectFile(projectData: BasProjectData): Promise<bo
 export async function parseProjectFile(file: File): Promise<BasProjectData> {
   const text = await file.text();
   return normalizeProjectData(JSON.parse(text), file.name.replace(/\.[^/.]+$/, ""));
+}
+
+/** List backups without changing the current project. */
+export async function listProjectBackups(id: string): Promise<string[]> {
+  const desktop = await findDesktopProjectLocation(id);
+  if (desktop) return invoke<string[]>("list_disk_backups", { directory: desktop });
+  const browser = await findBrowserProjectLocation(id);
+  if (!browser) return [];
+  if (!(await ensureDirectoryPermission(browser.directory, true))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
+  return listBrowserBackups(browser.directory);
+}
+
+/** Validate both project identity and current file before restoring a chosen snapshot. */
+export async function restoreProjectBackup(id: string, name: string): Promise<void> {
+  const desktop = await findDesktopProjectLocation(id);
+  const browser = await findBrowserProjectLocation(id);
+  if (desktop) {
+    const contents = await invoke<string>("read_disk_backup", { directory: desktop, name });
+    const backup = normalizeProjectData(JSON.parse(contents));
+    if (backup.id !== id) throw new Error("PROJECT_ID_MISMATCH");
+    const current = await openDesktopProject(desktop, id);
+    const saved = await saveDesktopProject(current, backup);
+    desktopSessions.set(id, saved);
+    await idbSet(STORES.PROJECTS, PROJECT_PREFIX + id, saved.project);
+  } else if (browser) {
+    if (!(await ensureDirectoryPermission(browser.directory, true))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
+    const backup = normalizeProjectData(JSON.parse(await readBrowserBackup(browser.directory, name)));
+    if (backup.id !== id) throw new Error("PROJECT_ID_MISMATCH");
+    const current = await openBrowserProject(browser.directory, browser.fileName);
+    if (current.project.id !== id) throw new Error("PROJECT_ID_MISMATCH");
+    const saved = await saveBrowserProject(current, backup);
+    browserSessions.set(id, saved);
+    await idbSet(STORES.PROJECTS, PROJECT_PREFIX + id, saved.project);
+  } else throw new Error("BACKUPS_UNAVAILABLE");
 }

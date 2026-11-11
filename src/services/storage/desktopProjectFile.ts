@@ -20,10 +20,10 @@ export async function createDesktopProject(directory: string, project: BasProjec
   await idbSet(STORES.PROJECTS, prefix + project.id, directory);
   return { directory, contents, project };
 }
-export async function openDesktopProject(directory: string, expectedId: string): Promise<DesktopProjectSession> {
+export async function openDesktopProject(directory: string, expectedId?: string): Promise<DesktopProjectSession> {
   const contents = await invoke<string>("read_disk_project", { directory });
   const project = normalizeProjectData(JSON.parse(contents));
-  if (project.id !== expectedId) throw new Error("PROJECT_ID_MISMATCH");
+  if (expectedId && project.id !== expectedId) throw new Error("PROJECT_ID_MISMATCH");
   return { directory, contents, project };
 }
 export async function saveDesktopProject(session: DesktopProjectSession, project: BasProjectData): Promise<DesktopProjectSession> {
@@ -46,4 +46,8 @@ export async function readDesktopAudio(path: string, mimeType = "audio/*"): Prom
 
 export async function deleteDesktopProjectFile(directory: string, projectId: string): Promise<void> {
   await invoke("delete_disk_project_file", { directory, projectId });
+}
+
+export async function rememberDesktopProject(id: string, directory: string): Promise<void> {
+  await idbSet(STORES.PROJECTS, prefix + id, directory);
 }

@@ -1,3 +1,4 @@
+import { backupBrowserProject } from "./browserBackups";
 import type { BasProjectData } from "@/types/storage";
 import { idbDelete, idbGet, idbSet, STORES } from "./indexedDB";
 import { normalizeProjectData } from "./projectSchema";
@@ -110,6 +111,8 @@ export async function saveBrowserProject(opened: BrowserProjectFile, project: Ba
     const normalized = normalizeProjectData(project);
     if (normalized.id !== opened.project.id) throw new Error("PROJECT_ID_MISMATCH");
     const contents = JSON.stringify(normalized, null, 2);
+    await backupBrowserProject(opened.directory, current);
+    if ((await digest(await (await handle.getFile()).text())) !== opened.fingerprint) throw new Error("PROJECT_MODIFIED_EXTERNALLY");
     const writable = await handle.createWritable();
     try {
       await writable.write(contents);

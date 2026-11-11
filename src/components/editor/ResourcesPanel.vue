@@ -6,13 +6,17 @@ import { useTimelineStore } from "@/stores/timeline";
 import { useAudioStore } from "@/stores/audio";
 import type { DanmuType, AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
+import type { SerializedAudioMetadata } from "@/types/storage";
+import { pickDesktopAudio } from "@/services/storage/desktopProjectFile";
+import { pickBrowserAudio } from "@/services/storage/browserMediaFile";
 import { getItemName } from "@/utils/resourceUtils";
 import { extractAudioCover } from "@/utils/audio/audio-cover";
 import { LayoutGrid, List } from "lucide-vue-next";
 import { hasBrowserProjectSession, hasDesktopProjectSession } from "@/services/storage/projectStorage";
 import { rememberBrowserMedia } from "@/services/storage/browserMediaFile";
 
-const props = defineProps<{ projectId: string }>();
+const props = defineProps<{ projectId: string; offlineAudio?: SerializedAudioMetadata[] }>();
+const emit = defineEmits<{ (e: "relink-audio", id: string): void }>();
 
 import ResourcesSidebar from "./resources/ResourcesSidebar.vue";
 import ResourcesHeader from "./resources/ResourcesHeader.vue";
@@ -133,6 +137,32 @@ const handleAudioUpload = async (file: File, handle?: FileSystemFileHandle, sour
   );
 };
 
+const relinkAudio = async (meta: SerializedAudioMetadata) => {
+  try {
+    let file: File;
+    let sourcePath: string | undefined;
+    let handle: FileSystemFileHandle | undefined;
+    if (hasDesktopProjectSession(props.projectId)) {
+      const selection = await pickDesktopAudio();
+      if (!selection) return;
+      file = selection.file;
+      sourcePath = selection.path;
+    } else {
+      const selection = await pickBrowserAudio();
+      if (!selection) return;
+      handle = selection;
+      file = await selection.getFile();
+    }
+    if (!window.confirm(t("projects.relinkConfirm", { name: file.name, size: file.size }))) return;
+    if (handle) await rememberBrowserMedia(props.projectId, meta.id, handle);
+    const url = URL.createObjectURL(file);
+    audioStore.add({ id: meta.id, type: "audio-file", name: meta.name, duration: meta.duration, coverUrl: meta.coverUrl, file, url, sourcePath });
+    emit("relink-audio", meta.id);
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === "AbortError")) { console.error("Failed to relink audio", error); window.alert(t("projects.relinkFailed")); }
+  }
+};
+
 const isAudioFile = (file: File) => file.type.startsWith("audio/");
 
 const hasFiles = (event: DragEvent) =>
@@ -230,6 +260,11 @@ const toggleResourceLayout = () => {
         @add-danmu="handleAddDanmu"
         @upload-audio="handleAudioUpload"
       />
+
+      <div v-if="offlineAudio?.length" class="px-3 py-2 border-b border-border text-xs space-y-2">
+        <div class="text-destructive">{{ t("projects.offlineMedia") }}</div>
+        <div v-for="audio in offlineAudio" :key="audio.id" class="flex items-center justify-between gap-2"><span class="truncate">{{ audio.name }}</span><button class="underline shrink-0" @click="relinkAudio(audio)">{{ t("projects.relink") }}</button></div>
+      </div>
 
       <!-- List -->
       <ResourcesList

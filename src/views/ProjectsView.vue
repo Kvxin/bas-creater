@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTitleBarDrag } from "@/composables/useTitleBarDrag";
-import { createProject, createFolderProject, createDesktopFolderProject, deleteProject, getProjectLocationLabel, listProjects, prepareProjectOpen } from "@/services/storage/projectStorage";
+import { createProject, createFolderProject, createDesktopFolderProject, deleteProject, getProjectLocationLabel, listProjectBackups, restoreProjectBackup, openSelectedProjectDirectory, listProjects, prepareProjectOpen } from "@/services/storage/projectStorage";
 import { pickDesktopDirectory } from "@/services/storage/desktopProjectFile";
 import { pickProjectDirectory } from "@/services/storage/browserProjectFile";
 import type { BasProjectData } from "@/types/storage";
@@ -32,6 +32,9 @@ const isCreating = ref(false);
 const isCreateOpen = ref(false);
 const isSettingsOpen = ref(false);
 const isRemoveOpen = ref(false);
+const backupProjectId = ref("");
+const backupNames = ref<string[]>([]);
+const isBackupOpen = ref(false);
 const deleteDiskFiles = ref(false);
 const removeLocations = ref<Record<string, string>>({});
 const name = ref("");
@@ -55,6 +58,14 @@ const selectDirectory = async () => {
   try { if (isDesktop) desktopDirectory.value = await pickDesktopDirectory(); else directory.value = await pickProjectDirectory(); }
   catch (cause) { if (!(cause instanceof DOMException && cause.name === "AbortError")) { console.error(cause); window.alert(t("projects.folderFailed")); } }
 };
+const openExisting = async () => {
+  try {
+    const chosen = isDesktop ? await pickDesktopDirectory() : await pickProjectDirectory();
+    if (!chosen) return;
+    const project = await openSelectedProjectDirectory(chosen);
+    emit("open", project.id);
+  } catch (cause) { if (!(cause instanceof DOMException && cause.name === "AbortError")) { console.error(cause); window.alert(t("projects.openFailed")); } }
+};
 const open = async (id: string) => {
   try { await prepareProjectOpen(id); emit("open", id); }
   catch (cause) { console.error("[Projects] Failed to open", cause); window.alert(t("projects.openFailed")); }
@@ -70,6 +81,15 @@ const create = async () => {
     emit("open", project.id);
   } catch (cause) { console.error("[Projects] Failed to create", cause); window.alert(t("projects.createFailed")); }
   finally { isCreating.value = false; }
+};
+const showBackups = async (id: string) => {
+  try { backupNames.value = await listProjectBackups(id); backupProjectId.value = id; isBackupOpen.value = true; }
+  catch (cause) { console.error(cause); window.alert(t("projects.backupFailed")); }
+};
+const restoreBackup = async (name: string) => {
+  if (!window.confirm(t("projects.confirmRestore"))) return;
+  try { await restoreProjectBackup(backupProjectId.value, name); isBackupOpen.value = false; await refresh(); }
+  catch (cause) { console.error(cause); window.alert(t("projects.backupFailed")); }
 };
 const toggleAll = () => {
   const ids = new Set(filtered.value.map((p) => p.id));
@@ -113,6 +133,7 @@ const confirmRemove = async () => {
         </div>
         <div class="flex items-center gap-3 flex-wrap">
           <label class="h-10 flex items-center gap-2 rounded-md border border-border px-3 text-muted-foreground"><Search class="size-4" /><input v-model="search" type="search" :aria-label="t('projects.search')" :placeholder="t('projects.search')" class="w-36 sm:w-48 bg-transparent text-foreground text-sm outline-none" /></label>
+          <button v-if="supportsFolder" class="h-10 px-4 rounded-md border border-border text-sm hover:bg-accent" @click="openExisting">{{ t("projects.openExisting") }}</button>
           <button class="h-10 px-4 rounded-md bg-foreground text-background font-medium flex items-center gap-2 hover:opacity-90" @click="showCreate"><Plus class="size-4" />{{ t("projects.newProject") }}</button>
           <button v-if="!isDesktop" class="size-9 rounded-md flex items-center justify-center text-muted-foreground hover:bg-accent" :title="t('app.settings')" :aria-label="t('app.settings')" @click="isSettingsOpen = true"><Settings class="size-4" /></button>
         </div>
@@ -133,10 +154,12 @@ const confirmRemove = async () => {
           <div class="relative bg-accent flex justify-center items-center text-muted-foreground" :class="view === 'grid' ? 'h-36' : 'w-24 h-16 my-2 rounded-md shrink-0'">
             <input v-model="selected" type="checkbox" :value="project.id" :aria-label="`${t('projects.selectAll')}: ${project.name}`" class="absolute top-3 left-3" /><MessageSquareText class="size-8 opacity-60" />
           </div>
+          <button class="m-2 p-2 text-xs text-muted-foreground hover:text-foreground" @click="showBackups(project.id)">{{ t("projects.backups") }}</button>
           <button class="p-4 text-left min-w-0 flex-1 w-full" @click="open(project.id)"><span class="block truncate font-medium">{{ project.name }}</span><span class="block mt-2 text-xs text-muted-foreground">{{ t("projects.modified") }} · {{ formatDate(project.updatedAt) }}</span></button>
         </article>
       </div>
     </main>
+    <Dialog :open="isBackupOpen" @update:open="isBackupOpen = $event"><DialogContent class="sm:max-w-[520px]"><DialogHeader><DialogTitle>{{ t("projects.backups") }}</DialogTitle><DialogDescription>{{ t("projects.confirmRestore") }}</DialogDescription></DialogHeader><p v-if="!backupNames.length" class="text-sm text-muted-foreground">{{ t("projects.noBackups") }}</p><ul v-else class="max-h-64 overflow-auto space-y-2"><li v-for="name in backupNames" :key="name" class="flex items-center justify-between gap-3 text-sm"><span class="break-all">{{ name }}</span><button class="underline" @click="restoreBackup(name)">{{ t("projects.restoreBackup") }}</button></li></ul></DialogContent></Dialog>
     <Dialog :open="isRemoveOpen" @update:open="isRemoveOpen = $event">
       <DialogContent class="sm:max-w-[520px]">
         <DialogHeader><DialogTitle>{{ t("projects.removeTitle") }}</DialogTitle><DialogDescription>{{ t("projects.removeDescription") }}</DialogDescription></DialogHeader>

@@ -6,6 +6,10 @@ import { ensureBrowserMediaPermission, readBrowserMedia } from "../src/services/
 const project = { version: 2, id: "project-1", name: "Project", createdAt: 1, updatedAt: 1,
   canvas: { width: 800, height: 450 }, timeline: { duration: 0 }, danmus: [], audioMeta: [], tracks: [] };
 
+function fakeBackupDirectory() {
+  return { values: async function* () {}, getFileHandle: async () => ({ createWritable: async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }) }), removeEntry: async () => {} };
+}
+
 function directoryFixture(initial?: string) {
   let contents = initial;
   const fileHandle = {
@@ -18,6 +22,7 @@ function directoryFixture(initial?: string) {
   };
   const directory = {
     kind: "directory", name: "project", queryPermission: async () => "granted",
+    getDirectoryHandle: async () => fakeBackupDirectory(),
     values: async function* () { if (contents !== undefined) yield fileHandle; },
     getFileHandle: async (_name: string, options?: { create?: boolean }) => {
       if (contents === undefined && !options?.create) throw new DOMException("Missing", "NotFoundError");
@@ -82,7 +87,7 @@ test("aborts the writable stream when writing fails", async () => {
       abort: async () => { aborted = true; }
     })
   };
-  const directory = { queryPermission: async () => "granted", getFileHandle: async () => fileHandle } as unknown as FileSystemDirectoryHandle;
+  const directory = { queryPermission: async () => "granted", getFileHandle: async () => fileHandle, getDirectoryHandle: async () => fakeBackupDirectory() } as unknown as FileSystemDirectoryHandle;
   const opened = await openBrowserProject(directory, "project.basproj");
   await assert.rejects(saveBrowserProject(opened, project), /disk full/);
   assert.equal(aborted, true);
@@ -103,4 +108,36 @@ test("serializes project saves with Web Locks when available", async () => {
     if (original) Object.defineProperty(globalThis, "navigator", original);
     else Reflect.deleteProperty(globalThis, "navigator");
   }
+});
+
+test("disk removal validates project identity and removes only the project file", async () => {
+  const { deleteBrowserProjectFile } = await import("../src/services/storage/browserProjectFile");
+  let removed = "";
+  const contents = JSON.stringify(project);
+  const directory = {
+    queryPermission: async () => "granted",
+    getFileHandle: async () => ({ getFile: async () => new File([contents], "project.basproj") }),
+    removeEntry: async (name: string) => { removed = name; }
+  } as unknown as FileSystemDirectoryHandle;
+  await assert.rejects(deleteBrowserProjectFile({ projectId: "other", directory, fileName: "project.basproj" }), /PROJECT_ID_MISMATCH/);
+  assert.equal(removed, "");
+  await deleteBrowserProjectFile({ projectId: project.id, directory, fileName: "project.basproj" });
+  assert.equal(removed, "project.basproj");
+});
+
+
+test("backup copies previous content at most once per interval", async () => {
+  const { backupBrowserProject } = await import("../src/services/storage/browserBackups");
+  const files = new Map<string, string>();
+  const backupDir = {
+    values: async function* () { for (const name of files.keys()) yield { kind: "file", name }; },
+    getFileHandle: async (name: string) => ({ createWritable: async () => { let value = ""; return { write: async (text: string) => { value = text; }, close: async () => { files.set(name, value); }, abort: async () => {} }; } }),
+    removeEntry: async (name: string) => { files.delete(name); }
+  };
+  const dir = { getDirectoryHandle: async () => backupDir } as unknown as FileSystemDirectoryHandle;
+  await backupBrowserProject(dir, "old", 1_000_000);
+  await backupBrowserProject(dir, "new", 1_000_001);
+  assert.deepEqual([...files.values()], ["old"]);
+  await backupBrowserProject(dir, "new", 1_300_001);
+  assert.deepEqual([...files.values()], ["old", "new"]);
 });

@@ -235,7 +235,7 @@ useEventListener("mouseleave", stopResize);
       <div class="flex-1 flex min-h-0 gap-[0.19rem] px-3">
         <!-- Left Panel: Resources -->
         <div class="shrink-0 flex min-w-0" :style="{ width: `${leftWidth}px` }">
-          <ResourcesPanel :project-id="props.projectId" />
+          <ResourcesPanel :project-id="props.projectId" :offline-audio="autoSave.importedAudioMeta.value" @relink-audio="id => autoSave.importedAudioMeta.value = autoSave.importedAudioMeta.value.filter(item => item.id !== id)" />
         </div>
 
         <!-- Resizer -->

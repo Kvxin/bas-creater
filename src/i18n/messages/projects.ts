@@ -1,4 +1,7 @@
 const zhCN = {
+  openExisting: "打开本地项目",
+  backups: "历史备份", noBackups: "暂无历史备份。", restoreBackup: "恢复", confirmRestore: "恢复此版本会替换当前项目文件，确认继续？", backupFailed: "备份操作失败，请检查文件权限和项目状态。",
+  offlineMedia: "素材离线", relink: "重新链接", relinkFailed: "重新链接失败，请检查文件和权限。", relinkConfirm: "选择的文件：{name}（{size} 字节）。确认用于重新链接？",
   removeTitle: "移除项目", removeDescription: "选择处理方式。引用的原始素材和项目文件夹不会被删除。", listOnly: "仅从列表移除", deleteFiles: "同时删除项目文件", confirmFileDelete: "确定永久删除显示的项目文件吗？此操作无法撤销。", storedInternally: "应用内存储",
   selectFolder: "选择空文件夹", emptyFolder: "请选择已有的空文件夹", folderFailed: "无法选择文件夹，请重试。", openFailed: "无法打开项目，请检查文件夹权限和项目文件。",
   title: "项目", search: "搜索项目...", newProject: "新建项目", createFirst: "创建第一个项目",
@@ -11,6 +14,9 @@ const zhCN = {
   listFailed: "项目列表加载失败，请刷新重试。", createFailed: "创建项目失败，请重试。", deleteFailed: "删除失败，请重试。"
 };
 const en: typeof zhCN = {
+  openExisting: "Open local project",
+  backups: "Backups", noBackups: "No backups yet.", restoreBackup: "Restore", confirmRestore: "Replace the current project with this backup?", backupFailed: "Backup operation failed. Check the project and file permissions.",
+  offlineMedia: "Offline media", relink: "Relink", relinkFailed: "Could not relink this file. Check file access and permissions.", relinkConfirm: "Use {name} ({size} bytes) for this media?",
   removeTitle: "Remove projects", removeDescription: "Choose what to remove. Original referenced media and folders will be kept.", listOnly: "Remove from list only", deleteFiles: "Also delete project files", confirmFileDelete: "Permanently delete the displayed project files? This cannot be undone.", storedInternally: "App storage",
   selectFolder: "Choose empty folder", emptyFolder: "Select an existing empty folder", folderFailed: "Unable to select folder.", openFailed: "Could not open project. Check the folder permission and project file.",
   title: "Projects", search: "Search projects...", newProject: "New project", createFirst: "Create your first project",
@@ -23,6 +29,9 @@ const en: typeof zhCN = {
   listFailed: "Could not load projects. Refresh and try again.", createFailed: "Could not create project.", deleteFailed: "Could not delete projects."
 };
 const ja: typeof zhCN = {
+  openExisting: "ローカルプロジェクトを開く",
+  backups: "バックアップ", noBackups: "バックアップはありません。", restoreBackup: "復元", confirmRestore: "現在のプロジェクトをこのバックアップで置き換えますか？", backupFailed: "バックアップ操作に失敗しました。",
+  offlineMedia: "オフライン素材", relink: "再リンク", relinkFailed: "再リンクできません。権限とファイルを確認してください。", relinkConfirm: "{name}（{size} バイト）を使用しますか？",
   removeTitle: "プロジェクトを削除", removeDescription: "削除方法を選択してください。元の素材とフォルダーは削除されません。", listOnly: "一覧からのみ削除", deleteFiles: "プロジェクトファイルも削除", confirmFileDelete: "表示されたファイルを完全に削除しますか？元に戻せません。", storedInternally: "アプリ内ストレージ",
   selectFolder: "空のフォルダーを選択", emptyFolder: "既存の空フォルダーを選択", folderFailed: "フォルダーを選択できません。", openFailed: "プロジェクトを開けません。権限とファイルを確認してください。",
   title: "プロジェクト", search: "プロジェクトを検索...", newProject: "新規プロジェクト", createFirst: "最初のプロジェクトを作成",
