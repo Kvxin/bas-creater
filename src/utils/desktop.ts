@@ -5,6 +5,9 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 /** 当前是否运行在 Tauri 桌面客户端中 */
 export const isDesktopApp = (): boolean => isTauri();
 
+/** macOS 使用系统红绿灯按钮，其余平台由前端绘制窗口按钮 */
+export const isMacOS = (): boolean => /Mac/i.test(navigator.userAgent);
+
 export type SaveTextFileOptions = {
   fileName: string;
   content: string;

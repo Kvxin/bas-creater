@@ -1,6 +1,7 @@
 mod commands;
 
 use tauri::Manager;
+use tauri_plugin_window_state::StateFlags;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -19,7 +20,12 @@ pub fn run() {
     }
 
     builder
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // 标题栏由前端自绘，不能让旧版本保存的 decorations 状态把系统标题栏恢复回来
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::all() & !StateFlags::DECORATIONS)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![commands::write_text_file])
