@@ -1,34 +1,43 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { BasProjectData } from "@/types/storage";
-import { normalizeProjectData } from "./projectSchema";
-import { idbDelete, idbGet, idbSet, STORES } from "./indexedDB";
-
-const prefix = "desktop-project-location:";
+import { normalizeProjectData, serializeProjectData } from "./projectSchema";
 export type DesktopProjectSession = { directory: string; contents: string; project: BasProjectData };
 
 /** Must be called directly from the user's click. */
 export async function pickDesktopDirectory(): Promise<string | null> {
   return await open({ directory: true, multiple: false });
 }
-export const findDesktopProjectLocation = (id: string) => idbGet<string>(STORES.PROJECTS, prefix + id);
-export const forgetDesktopProject = (id: string) => idbDelete(STORES.PROJECTS, prefix + id);
+
+export async function pickDesktopProjectFile(): Promise<string | null> {
+  return await open({ multiple: false, filters: [{ name: "BAS Project", extensions: ["basproj"] }] });
+}
+
+export function projectFileName(name: string): string {
+  const base = name.trim().replace(/\.basproj$/i, "");
+  if (!base || base === "." || base === ".." || /[\\/:*?"<>|\0]/.test(base) || /[. ]$/.test(base)) {
+    throw new Error("INVALID_PROJECT_FILE_NAME");
+  }
+  return `${base}.basproj`;
+}
 
 export async function createDesktopProject(directory: string, project: BasProjectData): Promise<DesktopProjectSession> {
-  const contents = JSON.stringify(normalizeProjectData(project), null, 2);
-  await invoke("create_disk_project", { directory, contents });
-  await idbSet(STORES.PROJECTS, prefix + project.id, directory);
-  return { directory, contents, project };
+  const contents = JSON.stringify(serializeProjectData(project), null, 2);
+  const path = `${directory.replace(/[\\/]$/, "")}/${projectFileName(project.name)}`;
+  await invoke("reserve_project_support", { directory: path });
+  await invoke("create_disk_project", { directory: path, contents });
+  return { directory: path, contents, project };
 }
 export async function openDesktopProject(directory: string, expectedId?: string): Promise<DesktopProjectSession> {
-  const contents = await invoke<string>("read_disk_project", { directory });
+  const path = /\.basproj$/i.test(directory) ? directory : `${directory.replace(/[\\/]$/, "")}/project.basproj`;
+  const contents = await invoke<string>("read_disk_project", { directory: path });
   const project = normalizeProjectData(JSON.parse(contents));
   if (expectedId && project.id !== expectedId) throw new Error("PROJECT_ID_MISMATCH");
-  return { directory, contents, project };
+  return { directory: path, contents, project };
 }
 export async function saveDesktopProject(session: DesktopProjectSession, project: BasProjectData): Promise<DesktopProjectSession> {
   if (project.id !== session.project.id) throw new Error("PROJECT_ID_MISMATCH");
-  const contents = JSON.stringify(normalizeProjectData(project), null, 2);
+  const contents = JSON.stringify(serializeProjectData(project), null, 2);
   await invoke("save_disk_project", { directory: session.directory, expected: session.contents, contents, forceBackup: false });
   return { ...session, contents, project };
 }
@@ -48,6 +57,3 @@ export async function deleteDesktopProjectFile(directory: string, projectId: str
   await invoke("delete_disk_project_file", { directory, projectId });
 }
 
-export async function rememberDesktopProject(id: string, directory: string): Promise<void> {
-  await idbSet(STORES.PROJECTS, prefix + id, directory);
-}

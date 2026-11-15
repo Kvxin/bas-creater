@@ -16,11 +16,12 @@
     "build-only": "vite build",
     "preview": "vite preview",
     "type-check": "vue-tsc --build",
-    "test:storage": "node --import tsx --test tests/browser-project-file.test.ts"
+    "test:storage": "node --import tsx --test tests/browser-project-file.test.ts tests/folder-project-storage.test.ts tests/desktop-recent-projects.test.ts tests/project-asset-migration.test.ts tests/clip-instances.test.ts tests/audio-clip.test.ts tests/asset-bins.test.ts"
   },
   "dependencies": {
     "@dantheman827/taglib-ts": "^0.1.5",
     "@tailwindcss/vite": "^4.1.17",
+    "@tanstack/vue-table": "^8.21.3",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-dialog": "^2.8.4",
     "@tauri-apps/plugin-opener": "^2.7.2",

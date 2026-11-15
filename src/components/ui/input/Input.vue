@@ -16,7 +16,7 @@ const emits = defineEmits<{
 
 const modelValue = useVModel(props, "modelValue", emits, {
   passive: true,
-  defaultValue: props.defaultValue,
+  defaultValue: props.defaultValue
 });
 
 const inputRef = ref<HTMLInputElement | null>(null);
@@ -26,7 +26,7 @@ defineExpose({
   focus: () => inputRef.value?.focus(),
   select: () => inputRef.value?.select(),
   blur: () => inputRef.value?.blur(),
-  el: inputRef,
+  el: inputRef
 });
 </script>
 
@@ -36,7 +36,7 @@ defineExpose({
     v-model="modelValue"
     :class="
       cn(
-        'flex h-9 w-full rounded-sm border border-input bg-accent px-2.5 py-1 text-base transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:border-primary disabled:cursor-not-allowed disabled:opacity-50 md:text-sm',
+        'flex h-8 w-full rounded-sm border border-border bg-input px-2.5 py-1 text-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground placeholder:text-tertiary focus-visible:outline-none focus-visible:border-primary focus-visible:ring-1 focus-visible:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-50',
         props.class
       )
     "

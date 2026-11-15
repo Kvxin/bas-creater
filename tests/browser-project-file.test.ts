@@ -1,53 +1,91 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createBrowserProject, openBrowserProject, saveBrowserProject } from "../src/services/storage/browserProjectFile";
+import { browserProjectHasChanged, createBrowserProject, openBrowserProject, saveBrowserProject } from "../src/services/storage/browserProjectFile";
 import { ensureBrowserMediaPermission, readBrowserMedia } from "../src/services/storage/browserMediaFile";
 
 const project = { version: 2, id: "project-1", name: "Project", createdAt: 1, updatedAt: 1,
   canvas: { width: 800, height: 450 }, timeline: { duration: 0 }, danmus: [], audioMeta: [], tracks: [] };
 
-function fakeBackupDirectory() {
-  return { values: async function* () {}, getFileHandle: async () => ({ createWritable: async () => ({ write: async () => {}, close: async () => {}, abort: async () => {} }) }), removeEntry: async () => {} };
+function directoryFixture(initial?: string, unrelated = false) {
+  const files = new Map<string, string>();
+  if (initial !== undefined) files.set("project.basproj", initial);
+  if (unrelated) files.set("unrelated.txt", "unrelated");
+  function makeDirectory(name: string): FileSystemDirectoryHandle {
+    const entries = name === "project" ? files : new Map<string, string>();
+    const directories = new Map<string, FileSystemDirectoryHandle>();
+    return {
+      kind: "directory", name, queryPermission: async () => "granted" as PermissionState,
+      values: async function* () {
+        for (const entry of entries.keys()) yield { kind: "file", name: entry };
+        for (const entry of directories.keys()) yield { kind: "directory", name: entry };
+      },
+      getDirectoryHandle: async (child: string, options?: { create?: boolean }) => {
+        if (entries.has(child)) throw new DOMException("Wrong type", "TypeMismatchError");
+        if (!directories.has(child)) {
+          if (!options?.create) throw new DOMException("Missing", "NotFoundError");
+          directories.set(child, makeDirectory(child));
+        }
+        return directories.get(child)!;
+      },
+      getFileHandle: async (child: string, options?: { create?: boolean }) => {
+        if (directories.has(child)) throw new DOMException("Wrong type", "TypeMismatchError");
+        if (!entries.has(child)) {
+          if (!options?.create) throw new DOMException("Missing", "NotFoundError");
+          entries.set(child, "");
+        }
+        return {
+          kind: "file", name: child,
+          getFile: async () => new File([entries.get(child)!], child),
+          createWritable: async () => {
+            let next = "";
+            return { write: async (data: string) => { next = data; }, close: async () => { entries.set(child, next); }, abort: async () => {} };
+          }
+        };
+      },
+      removeEntry: async (child: string) => { entries.delete(child); }
+    } as unknown as FileSystemDirectoryHandle;
+  }
+  const directory = makeDirectory("project");
+  return { directory, read: () => files.get("project.basproj"), modify: (value: string) => { files.set("project.basproj", value); } };
 }
 
-function directoryFixture(initial?: string) {
-  let contents = initial;
-  const fileHandle = {
-    kind: "file", name: "project.basproj",
-    getFile: async () => new File([contents ?? ""], "project.basproj"),
-    createWritable: async () => {
-      let next = "";
-      return { write: async (data: string) => { next = data; }, close: async () => { contents = next; }, abort: async () => {} };
-    }
-  };
-  const directory = {
-    kind: "directory", name: "project", queryPermission: async () => "granted",
-    getDirectoryHandle: async () => fakeBackupDirectory(),
-    values: async function* () { if (contents !== undefined) yield fileHandle; },
-    getFileHandle: async (_name: string, options?: { create?: boolean }) => {
-      if (contents === undefined && !options?.create) throw new DOMException("Missing", "NotFoundError");
-      return fileHandle;
-    }
-  } as unknown as FileSystemDirectoryHandle;
-  return { directory, read: () => contents, modify: (value: string) => { contents = value; } };
+function fakeBackupDirectory(): FileSystemDirectoryHandle {
+  return directoryFixture().directory;
 }
 
-test("creates a project only in an empty directory", async () => {
-  const fs = directoryFixture();
+test("creates a project alongside unrelated files but never overwrites an existing project", async () => {
+  const fs = directoryFixture(undefined, true);
   const opened = await createBrowserProject(fs.directory, "project.basproj", project);
   assert.equal(opened.project.id, "project-1");
-  assert.equal(JSON.parse(fs.read()!).id, "project-1");
-  await assert.rejects(createBrowserProject(fs.directory, "project.basproj", project), /DIRECTORY_NOT_EMPTY/);
+  const other = await createBrowserProject(fs.directory, "other.basproj", { ...project, id: "project-2" });
+  assert.notEqual(opened.assetDirectory, other.assetDirectory);
+  assert.equal(opened.assetDirectory.name, ".project.basproj.danmakucut");
+  assert.equal(other.assetDirectory.name, ".other.basproj.danmakucut");
+  assert.equal(await (await (await fs.directory.getFileHandle("unrelated.txt")).getFile()).text(), "unrelated");
+  const original = fs.read();
+  await assert.rejects(createBrowserProject(fs.directory, "project.basproj", project), /PROJECT_ALREADY_EXISTS/);
+  assert.equal(fs.read(), original);
 });
 
 test("saves a project and refuses externally modified files", async () => {
   const fs = directoryFixture(JSON.stringify(project));
   const opened = await openBrowserProject(fs.directory, "project.basproj");
   const saved = await saveBrowserProject(opened, { ...project, name: "Changed" });
+  assert.equal(await browserProjectHasChanged(saved), false);
   assert.equal(JSON.parse(fs.read()!).name, "Changed");
   fs.modify(JSON.stringify({ ...project, name: "External" }));
+  assert.equal(await browserProjectHasChanged(saved), true);
   await assert.rejects(saveBrowserProject(saved, project), /PROJECT_MODIFIED_EXTERNALLY/);
   assert.equal(JSON.parse(fs.read()!).name, "External");
+});
+
+test("a project deleted outside the application is reported as a conflict without recreating it", async () => {
+  const fs = directoryFixture(JSON.stringify(project));
+  const opened = await openBrowserProject(fs.directory, "project.basproj");
+  await fs.directory.removeEntry("project.basproj");
+  assert.equal(await browserProjectHasChanged(opened), true);
+  await assert.rejects(saveBrowserProject(opened, project), /PROJECT_MODIFIED_EXTERNALLY/);
+  assert.equal(fs.read(), undefined);
 });
 
 test("rejects paths outside selected directory and mismatched project IDs", async () => {
@@ -117,7 +155,7 @@ test("disk removal validates project identity and removes only the project file"
   const directory = {
     queryPermission: async () => "granted",
     getFileHandle: async () => ({ getFile: async () => new File([contents], "project.basproj") }),
-    getDirectoryHandle: async () => { throw new DOMException("Missing", "NotFoundError"); },
+    getDirectoryHandle: async () => fakeBackupDirectory(),
     removeEntry: async (name: string) => { removed = name; }
   } as unknown as FileSystemDirectoryHandle;
   await assert.rejects(deleteBrowserProjectFile({ projectId: "other", directory, fileName: "project.basproj" }), /PROJECT_ID_MISMATCH/);
@@ -166,7 +204,7 @@ test("project assets reject traversal and preserve copied audio", async () => {
   assert.equal(await (await readProjectAudio(dir, "safe.audio")).text(), "audio");
 });
 
-test("disk removal deletes only project-owned assets and backups", async () => {
+test("disk removal preserves project-owned assets and backups", async () => {
   const { deleteBrowserProjectFile } = await import("../src/services/storage/browserProjectFile");
   const deleted: string[] = [];
   const projectWithAsset = { ...project, audioMeta: [{ id: "audio-1", name: "sound", relativePath: "owned.audio" }] };
@@ -182,7 +220,7 @@ test("disk removal deletes only project-owned assets and backups", async () => {
     removeEntry: async (name: string) => { deleted.push(name); }
   } as unknown as FileSystemDirectoryHandle;
   await deleteBrowserProjectFile({ projectId: project.id, directory: root, fileName: "project.basproj" });
-  assert.deepEqual(deleted, ["audio/owned.audio", "backup/backup-1000-aaaaaaaa.basproj", "project.basproj"]);
+  assert.deepEqual(deleted, ["project.basproj"]);
 });
 
 test("a validated backup can recover corrupted project JSON", async () => {
@@ -203,6 +241,10 @@ test("missing browser project is recovered under a fresh filename", async () => 
       if (!files.has(name) && !options?.create) throw new DOMException("Missing", "NotFoundError");
       if (options?.create) files.set(name, "");
       return { getFile: async () => new File([files.get(name)!], name), createWritable: async () => { let text = ""; return { write: async (value: string) => { text = value; }, close: async () => { files.set(name, text); }, abort: async () => {} }; } };
+    },
+    getDirectoryHandle: async (name: string) => {
+      if (name.endsWith(".basproj")) throw new DOMException("Missing", "NotFoundError");
+      return fakeBackupDirectory();
     }
   } as unknown as FileSystemDirectoryHandle;
   const restored = await restoreBrowserProjectFile({ projectId: project.id, directory: dir, fileName: "project.basproj" }, project);

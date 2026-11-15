@@ -1,7 +1,6 @@
-import { backupBrowserProject, listBrowserBackups } from "./browserBackups";
+import { backupBrowserProject } from "./browserBackups";
 import type { BasProjectData } from "@/types/storage";
-import { idbDelete, idbGet, idbSet, STORES } from "./indexedDB";
-import { normalizeProjectData } from "./projectSchema";
+import { normalizeProjectData, serializeProjectData } from "./projectSchema";
 
 type DirectoryPermission = FileSystemDirectoryHandle & {
   queryPermission(descriptor: { mode: "read" | "readwrite" }): Promise<PermissionState>;
@@ -15,32 +14,17 @@ type DirectoryPicker = Window & {
 export type BrowserProjectFile = {
   directory: FileSystemDirectoryHandle;
   fileName: string;
+  assetDirectory: FileSystemDirectoryHandle;
   fingerprint: string;
   project: BasProjectData;
 };
 
-/** 目录句柄只作为最近项目索引；项目内容以用户目录中的文件为准。 */
 export type BrowserProjectLocation = {
   projectId: string;
   directory: FileSystemDirectoryHandle;
   fileName: string;
 };
 
-const LOCATION_PREFIX = "browser-project-location:";
-
-export async function rememberBrowserProject(location: BrowserProjectLocation): Promise<void> {
-  validateFileName(location.fileName);
-  await idbSet(STORES.PROJECTS, LOCATION_PREFIX + location.projectId, location);
-}
-
-export async function findBrowserProjectLocation(projectId: string): Promise<BrowserProjectLocation | null> {
-  return idbGet<BrowserProjectLocation>(STORES.PROJECTS, LOCATION_PREFIX + projectId);
-}
-
-/** 移除最近项目记录，不删除用户目录中的任何文件。 */
-export async function forgetBrowserProject(projectId: string): Promise<void> {
-  await idbDelete(STORES.PROJECTS, LOCATION_PREFIX + projectId);
-}
 
 /** 文件夹权限可能在页面重启或浏览器重启后失效。申请权限必须由用户操作触发。 */
 export async function ensureDirectoryPermission(directory: FileSystemDirectoryHandle, request = false): Promise<boolean> {
@@ -68,15 +52,82 @@ async function digest(contents: string): Promise<string> {
   return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+async function readCurrentProject(opened: BrowserProjectFile): Promise<string> {
+  try { return await (await (await opened.directory.getFileHandle(opened.fileName)).getFile()).text(); }
+  catch (error) {
+    if (error instanceof DOMException && error.name === "NotFoundError") throw new Error("PROJECT_MODIFIED_EXTERNALLY");
+    throw error;
+  }
+}
+
+export async function browserProjectHasChanged(opened: BrowserProjectFile): Promise<boolean> {
+  if (!(await ensureDirectoryPermission(opened.directory))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
+  try { return await digest(await readCurrentProject(opened)) !== opened.fingerprint; }
+  catch (error) {
+    if (error instanceof Error && error.message === "PROJECT_MODIFIED_EXTERNALLY") return true;
+    throw error;
+  }
+}
+
+/** 迁移旧版浏览器目录时保留原文件，遇到冲突绝不覆盖。 */
+async function copyLegacyDirectory(source: FileSystemDirectoryHandle, target: FileSystemDirectoryHandle): Promise<void> {
+  for await (const entry of (source as FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> }).values()) {
+    if (entry.kind === "directory") {
+      await copyLegacyDirectory(
+        await source.getDirectoryHandle(entry.name),
+        await target.getDirectoryHandle(entry.name, { create: true })
+      );
+      continue;
+    }
+    const file = await (await source.getFileHandle(entry.name)).getFile();
+    let existing: File | undefined;
+    try { existing = await (await target.getFileHandle(entry.name)).getFile(); }
+    catch (error) { if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error; }
+    if (existing) {
+      if (file.size !== existing.size) throw new Error("SUPPORT_DIRECTORY_CONFLICT");
+      const chunkSize = 1024 * 1024;
+      for (let offset = 0; offset < file.size; offset += chunkSize) {
+        const left = new Uint8Array(await file.slice(offset, offset + chunkSize).arrayBuffer());
+        const right = new Uint8Array(await existing.slice(offset, offset + chunkSize).arrayBuffer());
+        if (left.some((byte, index) => byte !== right[index])) throw new Error("SUPPORT_DIRECTORY_CONFLICT");
+      }
+      continue;
+    }
+    const writer = await (await target.getFileHandle(entry.name, { create: true })).createWritable();
+    try { await writer.write(file); await writer.close(); }
+    catch (error) { await writer.abort().catch(() => {}); throw error; }
+  }
+}
+
+export async function browserProjectSupportDirectory(directory: FileSystemDirectoryHandle, fileName: string, id: string): Promise<FileSystemDirectoryHandle> {
+  validateFileName(fileName);
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error("INVALID_PROJECT_ID");
+  let legacy: FileSystemDirectoryHandle | undefined;
+  try { legacy = await directory.getDirectoryHandle(`.danmakucut-${id}`); }
+  catch (error) { if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error; }
+  const support = await directory.getDirectoryHandle(`.${fileName}.danmakucut`, { create: true });
+  if (legacy) {
+    const marker = `.legacy-${id}.migrated`;
+    try { await support.getFileHandle(marker); return support; }
+    catch (error) { if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error; }
+    await copyLegacyDirectory(legacy, support);
+    const writer = await (await support.getFileHandle(marker, { create: true })).createWritable();
+    try { await writer.close(); }
+    catch (error) { await writer.abort().catch(() => {}); throw error; }
+  }
+  return support;
+}
+
 export async function openBrowserProject(directory: FileSystemDirectoryHandle, fileName: string): Promise<BrowserProjectFile> {
   validateFileName(fileName);
   if (!(await ensureDirectoryPermission(directory))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
   const file = await (await directory.getFileHandle(fileName)).getFile();
   const contents = await file.text();
-  return { directory, fileName, project: normalizeProjectData(JSON.parse(contents)), fingerprint: await digest(contents) };
+  const project = normalizeProjectData(JSON.parse(contents));
+  return { directory, fileName, project, assetDirectory: await browserProjectSupportDirectory(directory, fileName, project.id), fingerprint: await digest(contents) };
 }
 
-/** 只在用户选定的空目录中初始化文件，已有文件或目录都不覆盖。 */
+/** Create a named project without replacing a file in the selected directory. */
 export async function createBrowserProject(
   directory: FileSystemDirectoryHandle,
   fileName: string,
@@ -84,11 +135,15 @@ export async function createBrowserProject(
 ): Promise<BrowserProjectFile> {
   validateFileName(fileName);
   if (!(await ensureDirectoryPermission(directory))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
-  const iterable = directory as FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> };
-  for await (const _entry of iterable.values()) throw new Error("DIRECTORY_NOT_EMPTY");
+  const create = async (): Promise<BrowserProjectFile> => {
+  try { await directory.getFileHandle(fileName); throw new Error("PROJECT_ALREADY_EXISTS"); }
+  catch (error) { if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error; }
+  try { await directory.getDirectoryHandle(fileName); throw new Error("PROJECT_ALREADY_EXISTS"); }
+  catch (error) { if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error; }
   const normalized = normalizeProjectData(project);
-  const contents = JSON.stringify(normalized, null, 2);
+  const contents = JSON.stringify(serializeProjectData(normalized), null, 2);
   const handle = await directory.getFileHandle(fileName, { create: true });
+  if ((await (await handle.getFile()).size) !== 0) throw new Error("PROJECT_ALREADY_EXISTS");
   const writable = await handle.createWritable();
   try {
     await writable.write(contents);
@@ -97,7 +152,12 @@ export async function createBrowserProject(
     await writable.abort().catch(() => {});
     throw error;
   }
-  return { directory, fileName, project: normalized, fingerprint: await digest(contents) };
+  return { directory, fileName, assetDirectory: await browserProjectSupportDirectory(directory, fileName, normalized.id), project: normalized, fingerprint: await digest(contents) };
+  };
+  if (typeof navigator !== "undefined" && navigator.locks) {
+    return navigator.locks.request(`danmakucut-create:${fileName}`, { mode: "exclusive" }, create);
+  }
+  return create();
 }
 
 /** 检测外部更改后才写入；浏览器文件系统 API 不提供跨进程原子比较并交换。 */
@@ -105,14 +165,14 @@ export async function saveBrowserProject(opened: BrowserProjectFile, project: Ba
   validateFileName(opened.fileName);
   if (!(await ensureDirectoryPermission(opened.directory))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
   const save = async (): Promise<BrowserProjectFile> => {
-    const handle = await opened.directory.getFileHandle(opened.fileName);
-    const current = await (await handle.getFile()).text();
+    const current = await readCurrentProject(opened);
     if ((await digest(current)) !== opened.fingerprint) throw new Error("PROJECT_MODIFIED_EXTERNALLY");
     const normalized = normalizeProjectData(project);
     if (normalized.id !== opened.project.id) throw new Error("PROJECT_ID_MISMATCH");
-    const contents = JSON.stringify(normalized, null, 2);
-    await backupBrowserProject(opened.directory, current, Date.now(), forceBackup);
-    if ((await digest(await (await handle.getFile()).text())) !== opened.fingerprint) throw new Error("PROJECT_MODIFIED_EXTERNALLY");
+    const contents = JSON.stringify(serializeProjectData(normalized), null, 2);
+    await backupBrowserProject(opened.assetDirectory, current, Date.now(), forceBackup);
+    if ((await digest(await readCurrentProject(opened))) !== opened.fingerprint) throw new Error("PROJECT_MODIFIED_EXTERNALLY");
+    const handle = await opened.directory.getFileHandle(opened.fileName);
     const writable = await handle.createWritable();
     try {
       await writable.write(contents);
@@ -132,23 +192,10 @@ export async function saveBrowserProject(opened: BrowserProjectFile, project: Ba
 
 /** Removes only the matching project file, never the selected directory or referenced assets. */
 export async function deleteBrowserProjectFile(location: BrowserProjectLocation): Promise<void> {
+  validateFileName(location.fileName);
   if (!(await ensureDirectoryPermission(location.directory, true))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
-  const opened = await openBrowserProject(location.directory, location.fileName);
-  if (opened.project.id !== location.projectId) throw new Error("PROJECT_ID_MISMATCH");
-  const assets = opened.project.audioMeta.filter((item) => item.relativePath).map((item) => item.relativePath!);
-  for (const name of assets) if (!/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(name) || name.includes("..")) throw new Error("INVALID_ASSET_NAME");
-  if (assets.length) {
-    const audio = await (await location.directory.getDirectoryHandle("assets")).getDirectoryHandle("audio");
-    for (const name of assets) {
-      try { await audio.removeEntry(name); }
-      catch (error) { if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error; }
-    }
-  }
-  const backups = await listBrowserBackups(location.directory);
-  if (backups.length) {
-    const backupDirectory = await location.directory.getDirectoryHandle(".danmakucut-backups");
-    for (const name of backups) await backupDirectory.removeEntry(name);
-  }
+  const contents = await (await (await location.directory.getFileHandle(location.fileName)).getFile()).text();
+  if (normalizeProjectData(JSON.parse(contents)).id !== location.projectId) throw new Error("PROJECT_ID_MISMATCH");
   await location.directory.removeEntry(location.fileName);
 }
 
@@ -162,32 +209,41 @@ export async function restoreBrowserProjectFile(location: BrowserProjectLocation
     contents = await (await (await location.directory.getFileHandle(location.fileName)).getFile()).text();
   } catch (error) {
     if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error;
-    // Use a fresh name instead of risking overwrite of a concurrently recreated project file.
-    const fileName = `recovered-${crypto.randomUUID()}.basproj`;
-    const handle = await location.directory.getFileHandle(fileName, { create: true });
-    const serialized = JSON.stringify(normalizeProjectData(backup), null, 2);
-    const writer = await handle.createWritable();
-    try { await writer.write(serialized); await writer.close(); }
-    catch (cause) { await writer.abort().catch(() => {}); throw cause; }
-    return { directory: location.directory, fileName, project: backup, fingerprint: await digest(serialized) };
+    // 使用新文件名避免覆盖并发重建的项目，同时保留原项目的附属数据。
+    const recoveredName = `recovered-${crypto.randomUUID()}.basproj`;
+    const currentSupport = await browserProjectSupportDirectory(location.directory, location.fileName, backup.id);
+    const recoveredSupport = await location.directory.getDirectoryHandle(`.${recoveredName}.danmakucut`, { create: true });
+    await copyLegacyDirectory(currentSupport, recoveredSupport);
+    return createBrowserProject(location.directory, recoveredName, backup);
   }
   try {
-    const raw = JSON.parse(contents) as { id?: unknown };
+    const raw = JSON.parse(contents) as { id?: unknown; version?: unknown };
     if (raw && typeof raw === "object" && typeof raw.id === "string" && raw.id !== location.projectId) throw new Error("PROJECT_ID_MISMATCH");
+    if (typeof raw?.version === "number" && raw.version > backup.version) throw new Error("UNSUPPORTED_PROJECT_VERSION");
   } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
   }
-  return saveBrowserProject({ directory: location.directory, fileName: location.fileName, project: backup, fingerprint: await digest(contents) }, backup, true);
+  return saveBrowserProject({ directory: location.directory, fileName: location.fileName, assetDirectory: await browserProjectSupportDirectory(location.directory, location.fileName, backup.id), project: backup, fingerprint: await digest(contents) }, backup, true);
 }
 
-/** Find the canonical project file, or a single file created by recovery. */
-export async function findBrowserProjectFile(directory: FileSystemDirectoryHandle): Promise<string> {
-  try { await directory.getFileHandle("project.basproj"); return "project.basproj"; }
-  catch (error) { if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error; }
+/** Find a project by identity after the user reselects its directory. */
+export async function findBrowserProjectFile(directory: FileSystemDirectoryHandle, expectedId?: string): Promise<string> {
   const names: string[] = [];
   const iterable = directory as FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> };
   for await (const entry of iterable.values()) {
-    if (entry.kind === "file" && /^recovered-[a-f0-9-]+\.basproj$/.test(entry.name)) names.push(entry.name);
+    if (entry.kind !== "file" || !entry.name.toLowerCase().endsWith(".basproj")) continue;
+    if (expectedId) {
+      try {
+        const raw = JSON.parse(await (await (await directory.getFileHandle(entry.name)).getFile()).text()) as { id?: unknown };
+        if (raw?.id !== expectedId) continue;
+      } catch { continue; }
+    }
+    names.push(entry.name);
+  }
+  if (!expectedId && names.length > 1) {
+    const selected = window.prompt(`Select a project file:\n${names.join("\n")}`);
+    if (selected === null) throw new DOMException("Cancelled", "AbortError");
+    if (names.includes(selected)) return selected;
   }
   if (names.length !== 1) throw new Error("PROJECT_FILE_NOT_FOUND_OR_AMBIGUOUS");
   return names[0]!;

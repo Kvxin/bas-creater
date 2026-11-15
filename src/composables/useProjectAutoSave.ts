@@ -1,16 +1,18 @@
-import { ref, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useDanmuStore } from "@/stores/danmu";
 import { useTimelineStore } from "@/stores/timeline";
 import { useAudioStore } from "@/stores/audio";
-import type { AutoSaveStatus, BasProjectData, SerializedAudioMetadata } from "@/types/storage";
-import { PROJECT_VERSION } from "@/services/storage/projectSchema";
+import { useAssetsStore } from "@/stores/assets";
+import { useProjectHistory } from "@/composables/useProjectHistory";
+import type { AutoSaveStatus, BasProjectData, ProjectAsset, SerializedAudioMetadata } from "@/types/storage";
+import { normalizeProjectData, PROJECT_VERSION } from "@/services/storage/projectSchema";
 import {
   saveProjectDraft,
   loadProjectDraft,
   clearProjectDraft,
   exportProjectFile,
+  projectHasExternalChanges,
   parseProjectFile,
-  requestStoragePersistence,
 } from "@/services/storage/projectStorage";
 
 const DEBOUNCE_DELAY_MS = 800;
@@ -19,6 +21,7 @@ export function useProjectAutoSave(projectId: string) {
   const danmuStore = useDanmuStore();
   const timelineStore = useTimelineStore();
   const audioStore = useAudioStore();
+  const assetsStore = useAssetsStore();
 
   const projectName = ref("默认工程");
   const saveStatus = ref<AutoSaveStatus>("idle");
@@ -26,7 +29,11 @@ export function useProjectAutoSave(projectId: string) {
   const lastSavedTime = ref<Date | null>(null);
   const isDirty = ref(false);
   const isHydrating = ref(true);
+  useProjectHistory(isHydrating, projectId);
   const createdAt = ref(Date.now());
+  const canvas = ref({ width: 800, height: 450 });
+  let saveBlocked = false;
+  let knownDanmuIds = new Set<string>();
   let revision = 0;
   let saveChain: Promise<void> = Promise.resolve();
   /**
@@ -35,7 +42,11 @@ export function useProjectAutoSave(projectId: string) {
    * .basproj 只保存音频描述信息，不携带本地音频文件；保留这些元数据可以避免
    * 自动保存时覆盖仍被时间轴引用的音频资源，确保工程之后仍能被校验和恢复。
    */
-  const importedAudioMeta = ref<SerializedAudioMetadata[]>([]);
+  const importedAudioMeta = computed<SerializedAudioMetadata[]>(() => {
+    const loaded = new Set(audioStore.audioResources.map((resource) => resource.id));
+    return assetsStore.assets.flatMap((asset) =>
+      asset.type === "audio-file" && !loaded.has(asset.id) ? [asset.audio] : []);
+  });
 
   let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -48,23 +59,91 @@ export function useProjectAutoSave(projectId: string) {
    * @returns 当前工程需要写入持久化数据的音频元数据列表
    */
   const getSerializedAudioMetadata = (): SerializedAudioMetadata[] => {
-    const metadata: SerializedAudioMetadata[] = audioStore.audioResources.map((resource) => ({
-      id: resource.id,
-      name: resource.name,
-      duration: resource.duration,
-      coverUrl: resource.coverUrl,
-      size: resource.file?.size,
-      type: resource.file?.type,
-      sourcePath: resource.sourcePath,
-      relativePath: resource.relativePath,
-    }));
-    const knownIds = new Set(metadata.map((item) => item.id));
-    for (const item of importedAudioMeta.value) {
-      if (!knownIds.has(item.id)) {
-        metadata.push(item);
+    const existing = new Map(assetsStore.assets.flatMap((asset) =>
+      asset.type === "audio-file" ? [[asset.id, asset.audio] as const] : []));
+    for (const resource of audioStore.audioResources) {
+      existing.set(resource.id, {
+        ...existing.get(resource.id),
+        id: resource.id, name: resource.name, duration: resource.duration ?? existing.get(resource.id)?.duration,
+        coverUrl: resource.coverUrl ?? existing.get(resource.id)?.coverUrl, size: resource.file?.size, type: resource.file?.type,
+        sourcePath: resource.sourcePath,
+        relativePath: resource.relativePath,
+      });
+    }
+    return [...existing.values()];
+  };
+
+  const syncRuntimeAssets = () => {
+    const currentIds = new Set(danmuStore.danmus.map((item) => item.id));
+    const remaining = assetsStore.assets.filter((asset) =>
+      asset.type === "audio-file" || !knownDanmuIds.has(asset.id) || currentIds.has(asset.id));
+    if (remaining.length !== assetsStore.assets.length) assetsStore.assets = remaining;
+    for (const danmu of danmuStore.danmus) {
+      const old = assetsStore.assets.find((asset) => asset.id === danmu.id);
+      if (old && old.type === "audio-file") throw new Error("Conflicting asset ID");
+      if (!old || old.danmu !== danmu || old.type !== danmu.type) {
+        assetsStore.upsertAsset({ id: danmu.id, type: danmu.type, binId: old?.binId ?? null, danmu });
       }
     }
-    return metadata;
+    knownDanmuIds = currentIds;
+    for (const audio of getSerializedAudioMetadata()) {
+      const old = assetsStore.assets.find((asset) => asset.id === audio.id);
+      if (old && old.type !== "audio-file") throw new Error("Conflicting asset ID");
+      const loaded = audioStore.audioResources.find((resource) => resource.id === audio.id);
+      const location = loaded ? (loaded.sourcePath ? { kind: "external" as const, path: loaded.sourcePath } :
+        loaded.relativePath ? { kind: "project" as const, path: loaded.relativePath } : old?.location) : old?.location ??
+        (audio.sourcePath ? { kind: "external" as const, path: audio.sourcePath } :
+          audio.relativePath ? { kind: "project" as const, path: audio.relativePath } : undefined);
+      if (!old || JSON.stringify(old.audio) !== JSON.stringify(audio) ||
+        JSON.stringify(old.location) !== JSON.stringify(location)) {
+        assetsStore.upsertAsset({ id: audio.id, type: "audio-file", binId: old?.binId ?? null, audio, ...(location ? { location } : {}) });
+      }
+    }
+  };
+
+  const getProjectSnapshot = (): BasProjectData => {
+    const currentIds = new Set(danmuStore.danmus.map((item) => item.id));
+    const audioMetadata = getSerializedAudioMetadata();
+    const assets: ProjectAsset[] = assetsStore.assets.filter((asset) =>
+      asset.type === "audio-file" || !knownDanmuIds.has(asset.id) || currentIds.has(asset.id)).map((asset) => {
+      if (asset.type !== "audio-file") {
+        const danmu = danmuStore.danmus.find((item) => item.id === asset.id);
+        return danmu ? { ...asset, type: danmu.type, danmu } : asset;
+      }
+      const loaded = audioStore.audioResources.find((item) => item.id === asset.id);
+      if (!loaded) return asset;
+      const audio = audioMetadata.find((item) => item.id === asset.id)!;
+      const location = loaded.sourcePath ? { kind: "external" as const, path: loaded.sourcePath } :
+        loaded.relativePath ? { kind: "project" as const, path: loaded.relativePath } : asset.location;
+      return { ...asset, audio, ...(location ? { location } : {}) };
+    });
+    const ids = new Set(assets.map((asset) => asset.id));
+    for (const danmu of danmuStore.danmus) {
+      if (assets.some((asset) => asset.id === danmu.id && asset.type === "audio-file")) throw new Error("Conflicting asset ID");
+    }
+    for (const audio of audioMetadata) {
+      if (assets.some((asset) => asset.id === audio.id && asset.type !== "audio-file")) throw new Error("Conflicting asset ID");
+    }
+    for (const danmu of danmuStore.danmus) {
+      if (!ids.has(danmu.id)) {
+        assets.push({ id: danmu.id, type: danmu.type, binId: null, danmu });
+        ids.add(danmu.id);
+      }
+    }
+    for (const audio of audioMetadata) {
+      if (!ids.has(audio.id)) {
+        const location = audio.sourcePath ? { kind: "external" as const, path: audio.sourcePath } :
+          audio.relativePath ? { kind: "project" as const, path: audio.relativePath } : undefined;
+        assets.push({ id: audio.id, type: "audio-file", binId: null, audio, ...(location ? { location } : {}) });
+      }
+    }
+    return normalizeProjectData({
+      version: PROJECT_VERSION, id: projectId, name: projectName.value,
+      createdAt: createdAt.value, updatedAt: Date.now(), canvas: canvas.value,
+      timeline: { duration: timelineStore.rootDuration },
+      tracks: JSON.parse(JSON.stringify(timelineStore.rootTracks)),
+      assets, bins: JSON.parse(JSON.stringify(assetsStore.bins)),
+    });
   };
 
   const clearTimer = () => {
@@ -75,37 +154,17 @@ export function useProjectAutoSave(projectId: string) {
   };
 
   /**
-   * 立即将当前状态保存到本地持久化存储（IndexedDB + OPFS）
+   * 立即将当前状态保存到项目文件。
    */
   const saveNow = async (): Promise<boolean> => {
-    if (isHydrating.value) return false;
+    if (isHydrating.value || saveBlocked) return false;
     clearTimer();
     const savedRevision = revision;
     saveStatus.value = "saving";
     lastSaveError.value = "";
     try {
-      const audioFiles = new Map<string, File>();
-      for (const resource of audioStore.audioResources) {
-        if (resource.file) audioFiles.set(resource.id, resource.file);
-      }
-      const audioMeta = getSerializedAudioMetadata();
-
-      const snapshot = {
-          id: projectId,
-          name: projectName.value,
-          createdAt: createdAt.value,
-          canvas: {
-            width: 800,
-            height: 450,
-          },
-          timeline: {
-            duration: timelineStore.rootDuration,
-          },
-          danmus: JSON.parse(JSON.stringify(danmuStore.danmus)),
-          tracks: JSON.parse(JSON.stringify(timelineStore.rootTracks)),
-          audioMeta,
-        };
-      const pending = saveChain.then(() => saveProjectDraft(snapshot, audioFiles));
+      const snapshot = getProjectSnapshot();
+      const pending = saveChain.then(() => saveProjectDraft(snapshot));
       saveChain = pending.catch(() => {});
       await pending;
 
@@ -144,8 +203,10 @@ export function useProjectAutoSave(projectId: string) {
 
       const { project, audioResources } = draft;
       createdAt.value = project.createdAt;
-      const restoredIds = new Set(audioResources.map((resource) => resource.id));
-      importedAudioMeta.value = (project.audioMeta ?? []).filter((meta) => !restoredIds.has(meta.id));
+      canvas.value = project.canvas;
+      assetsStore.setProject(project.assets, project.bins);
+      knownDanmuIds = new Set(project.danmus.map((item) => item.id));
+      saveBlocked = false;
 
       if (project.name) {
         projectName.value = project.name;
@@ -170,6 +231,9 @@ export function useProjectAutoSave(projectId: string) {
       isDirty.value = false;
       return true;
     } catch (err) {
+      saveBlocked = true;
+      saveStatus.value = "error";
+      lastSaveError.value = String(err);
       console.error("[AutoSave] Failed to restore project:", err);
       return false;
     } finally {
@@ -186,7 +250,10 @@ export function useProjectAutoSave(projectId: string) {
     isHydrating.value = true;
     try {
       await clearProjectDraft(projectId);
-      importedAudioMeta.value = [];
+      saveBlocked = false;
+      assetsStore.setProject([], []);
+      knownDanmuIds.clear();
+      canvas.value = { width: 800, height: 450 };
       danmuStore.danmus = [];
       danmuStore.select(null);
       audioStore.audioResources = [];
@@ -214,18 +281,7 @@ export function useProjectAutoSave(projectId: string) {
    * 导出当前工程文件 (.basproj)
    */
   const exportBackup = async () => {
-    const projectData: BasProjectData = {
-      version: PROJECT_VERSION,
-      id: "project_" + Math.random().toString(36).slice(2, 9),
-      name: projectName.value,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      canvas: { width: 800, height: 450 },
-      timeline: { duration: timelineStore.rootDuration },
-      danmus: JSON.parse(JSON.stringify(danmuStore.danmus)),
-      tracks: JSON.parse(JSON.stringify(timelineStore.rootTracks)),
-      audioMeta: getSerializedAudioMetadata(),
-    };
+    const projectData = getProjectSnapshot();
     await exportProjectFile(projectData);
   };
 
@@ -236,7 +292,13 @@ export function useProjectAutoSave(projectId: string) {
     isHydrating.value = true;
     try {
       const data = await parseProjectFile(file);
-      importedAudioMeta.value = data.audioMeta ?? [];
+      for (const resource of audioStore.audioResources) URL.revokeObjectURL(resource.url);
+      audioStore.audioResources = [];
+      assetsStore.setProject(data.assets, data.bins);
+      knownDanmuIds = new Set(data.danmus.map((item) => item.id));
+      createdAt.value = data.createdAt;
+      canvas.value = data.canvas;
+      saveBlocked = false;
       projectName.value = data.name;
       danmuStore.danmus = data.danmus;
       if (data.danmus.length > 0) {
@@ -259,7 +321,7 @@ export function useProjectAutoSave(projectId: string) {
   // 监听各个 Store 的变动以触发防抖自动保存
   watch(
     () => danmuStore.danmus,
-    () => queueSave(),
+    () => { if (!isHydrating.value) { syncRuntimeAssets(); queueSave(); } },
     { deep: true }
   );
 
@@ -270,9 +332,13 @@ export function useProjectAutoSave(projectId: string) {
   );
 
   watch(
-    () => audioStore.audioResources.length,
-    () => queueSave()
+    () => audioStore.audioResources.map(({ id, name, duration, coverUrl, sourcePath, relativePath }) =>
+      [id, name, duration, coverUrl, sourcePath, relativePath]),
+    () => { if (!isHydrating.value) { syncRuntimeAssets(); queueSave(); } },
+    { deep: true }
   );
+  watch(() => [assetsStore.assets, assetsStore.bins], () => queueSave(), { deep: true });
+  watch(projectName, () => queueSave());
 
   // 页面关闭/刷新前的保护拦截
   const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -291,16 +357,43 @@ export function useProjectAutoSave(projectId: string) {
     }
   };
 
+  let isCheckingExternalChanges = false;
+  let disposed = false;
+  const checkExternalChanges = async () => {
+    if (isHydrating.value || isCheckingExternalChanges) return;
+    isCheckingExternalChanges = true;
+    try {
+      await saveChain;
+      const checkedRevision = revision;
+      const changed = await projectHasExternalChanges(projectId);
+      if (!disposed && changed && revision === checkedRevision && saveStatus.value !== "saving") {
+        saveStatus.value = "error";
+        lastSaveError.value = "PROJECT_MODIFIED_EXTERNALLY";
+      }
+    } catch (error) {
+      console.warn("[AutoSave] Failed to check external changes:", error);
+    } finally {
+      isCheckingExternalChanges = false;
+    }
+  };
+  const checkOnVisibility = () => {
+    if (document.visibilityState === "visible") void checkExternalChanges();
+  };
+
   onMounted(() => {
-    void requestStoragePersistence();
     window.addEventListener("beforeunload", handleBeforeUnload);
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("focus", checkExternalChanges);
+    document.addEventListener("visibilitychange", checkOnVisibility);
   });
 
   onBeforeUnmount(() => {
+    disposed = true;
     clearTimer();
     window.removeEventListener("beforeunload", handleBeforeUnload);
     window.removeEventListener("keydown", handleKeyDown);
+    window.removeEventListener("focus", checkExternalChanges);
+    document.removeEventListener("visibilitychange", checkOnVisibility);
   });
 
   return {
@@ -311,6 +404,7 @@ export function useProjectAutoSave(projectId: string) {
     isDirty,
     isHydrating,
     importedAudioMeta,
+    getProjectSnapshot,
     saveNow,
     restoreProject,
     resetProject,

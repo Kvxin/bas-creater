@@ -26,6 +26,8 @@
 const zhCN = {
   /** Panel header. */
   title: '属性设置',
+  parentClip: '父片段',
+  noParent: '无',
   tabs: {
     /** aria-label of the category tab strip. */
     ariaLabel: '属性分类',
@@ -119,6 +121,8 @@ const zhCN = {
 }
 
 const en: typeof zhCN = {
+  parentClip: 'Parent clip',
+  noParent: 'None',
   title: 'Properties',
   tabs: {
     ariaLabel: 'Property categories',
@@ -210,6 +214,8 @@ const en: typeof zhCN = {
 }
 
 const ja: typeof zhCN = {
+  parentClip: '親クリップ',
+  noParent: 'なし',
   title: 'プロパティ',
   tabs: {
     ariaLabel: 'プロパティの分類',

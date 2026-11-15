@@ -8,12 +8,16 @@ import {
   pickKeyframePropertiesForResource,
   resolveKeyframeProperties
 } from "@/utils/keyframes";
+import type { KeyframeReferenceSize } from "@/utils/keyframes";
 
 /** Slice animation data without changing the resource shared by other clips. */
-export function splitClipAnimation(clip: TimelineResourceClip, resource: AnyDanmu, offsetMs: number) {
+export function splitClipAnimation(clip: TimelineResourceClip, resource: AnyDanmu, offsetMs: number, reference?: KeyframeReferenceSize) {
   const keyframes = normalizeKeyframes(clip.keyframes, clip.duration);
+  if (keyframes.some(keyframe => keyframe.easing && keyframe.easing !== "linear")) {
+    throw new Error("Cannot split a clip with unsupported keyframe easing");
+  }
   if (keyframes.length > 0) {
-    const rightProperties = getEffectiveKeyframePropertiesAtTime(resource, clip, offsetMs);
+    const rightProperties = getEffectiveKeyframePropertiesAtTime(resource, clip, offsetMs, reference);
     const leftKeyframes = keyframes.filter((keyframe) => keyframe.timeMs <= offsetMs);
     const next = keyframes.find((keyframe) => keyframe.timeMs > offsetMs);
 
@@ -44,29 +48,34 @@ export function splitClipAnimation(clip: TimelineResourceClip, resource: AnyDanm
 
   const leftAnimations: AnimationSegment[] = [];
   const rightAnimations: AnimationSegment[] = [];
-  let rightProperties = getBaseKeyframeProperties(resource);
-  let state = getBaseKeyframeProperties(resource);
+  const baseResource = { ...resource, ...clip.overrides } as AnyDanmu;
+  let rightProperties = getBaseKeyframeProperties(baseResource);
+  let state = getBaseKeyframeProperties(baseResource);
   let cursorMs = 0;
   let rightChainStarted = false;
 
   for (const animation of clip.animations ?? []) {
     if (animation.type === "set") {
       cursorMs = 0;
-      state = getBaseKeyframeProperties(resource);
+      state = getBaseKeyframeProperties(baseResource);
       rightChainStarted = false;
     }
     const startMs = cursorMs + Math.max(0, animation.delay ?? 0);
     const endMs = startMs + Math.max(0, animation.duration);
     const target = pickKeyframePropertiesForResource(resource, animation.properties);
+    const unsupported = Object.keys(animation.properties).filter(key => !(key in target));
+    if (unsupported.length) throw new Error(`Cannot split unsupported animation properties: ${unsupported.join(", ")}`);
     const sample = (timeMs: number): TimelineKeyframeProperties => {
       const sampled = getEffectiveKeyframePropertiesAtTime(
         { ...resource, ...state } as AnyDanmu,
         {
           ...clip,
+          overrides: undefined,
           duration: animation.duration,
           keyframes: [{ id: animation.id, timeMs: animation.duration, properties: target }]
         },
-        timeMs - startMs
+        timeMs - startMs,
+        reference
       );
       return Object.fromEntries(
         Object.keys(target).map((key) => [key, sampled[key as keyof TimelineKeyframeProperties]])

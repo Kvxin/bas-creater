@@ -1,6 +1,7 @@
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { useClipDetailsStore } from "@/stores/clipDetails";
+import { runSplitAction } from "@/utils/splitAction";
 
 /**
  * =============================================================================
@@ -151,6 +152,7 @@ export const MENU_REGISTRY: Record<string, MenuConfig> = {
     items: [
       { id: "add", labelKey: "menus.addToTrack", action: "resource.addToTrack", disabled: (item) => item?.type === "audio-file" && useTimelineStore().activeGroupPath.length > 0 },
       { id: "rename", labelKey: "common.rename", action: "resource.rename" },
+      { id: "duplicate", labelKey: "common.copy", action: "resource.duplicate" },
       { id: "sep2", separator: true, labelKey: "" },
       {
         id: "del",
@@ -189,13 +191,13 @@ export const GLOBAL_COMMANDS: Record<string, (data: any) => void> = {
     else store.removeClip(clip.id);
   },
   "clip.split": (clip) => {
-    useTimelineStore().splitClip(clip?.id);
+    runSplitAction(() => useTimelineStore().splitClip(clip?.id));
   },
   "clip.splitLeft": (clip) => {
-    useTimelineStore().splitClipLeft(clip?.id);
+    runSplitAction(() => useTimelineStore().splitClipLeft(clip?.id));
   },
   "clip.splitRight": (clip) => {
-    useTimelineStore().splitClipRight(clip?.id);
+    runSplitAction(() => useTimelineStore().splitClipRight(clip?.id));
   },
   "clip.copy": (clip) => {
     const store = useTimelineStore();

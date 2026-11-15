@@ -1,4 +1,39 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { BasProjectData } from "@/types/storage";
+import { projectFileName } from "./desktopProjectFile";
+import { createBrowserProject, ensureDirectoryPermission } from "./browserProjectFile";
+import { serializeProjectData } from "./projectSchema";
+
+export type BundleTarget = {
+  directory: string | FileSystemDirectoryHandle;
+  assetDirectory: string | FileSystemDirectoryHandle;
+  fileName: string;
+};
+
+export async function createBundleTarget(directory: string | FileSystemDirectoryHandle, name: string, projectId: string): Promise<BundleTarget> {
+  const fileName = projectFileName(name);
+  if (!/^[A-Za-z0-9_-]+$/.test(projectId)) throw new Error("INVALID_PROJECT_ID");
+  if (typeof directory === "string") {
+    const path = `${directory.replace(/[\\/]$/, "")}/${fileName}`;
+    await invoke("reserve_project_support", { directory: path });
+    return { directory, assetDirectory: path, fileName };
+  }
+  if (!(await ensureDirectoryPermission(directory, true))) throw new Error("DIRECTORY_PERMISSION_REQUIRED");
+  try { await directory.getFileHandle(fileName); throw new Error("PROJECT_ALREADY_EXISTS"); }
+  catch (error) { if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error; }
+  const supportName = `.${fileName}.danmakucut`;
+  try { await directory.getDirectoryHandle(supportName); throw new Error("PROJECT_ALREADY_EXISTS"); }
+  catch (error) { if (!(error instanceof DOMException && error.name === "NotFoundError")) throw error; }
+  return { directory, assetDirectory: await directory.getDirectoryHandle(supportName, { create: true }), fileName };
+}
+
+export async function commitBundleTarget(target: BundleTarget, project: BasProjectData): Promise<void> {
+  if (typeof target.directory === "string") {
+    await invoke("create_disk_project", { directory: target.assetDirectory, contents: JSON.stringify(serializeProjectData(project), null, 2) });
+  } else {
+    await createBrowserProject(target.directory, target.fileName, project);
+  }
+}
 
 function validate(name: string): void {
   if (!/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(name) || name.includes("..")) throw new Error("INVALID_ASSET_NAME");

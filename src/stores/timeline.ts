@@ -60,6 +60,10 @@ export const useTimelineStore = defineStore("timeline", () => {
   const rootDuration = computed(() => getTimelineDuration(rootTracks.value));
   const duration = computed(() => getTimelineDuration(tracks.value));
   const currentTime = ref(0);
+  // 仅用于运行时采样，不写入工程；尺寸取自引擎实际内容盒。
+  const canvasReferenceSize = ref<{ width: number; height: number } | null>(null);
+  // BAS 在生成父子动画时按父文本定义基态计算局部尺寸，而非 DOM 的实时尺寸。
+  const parentReferenceSizes = ref<Record<string, { width: number; height: number }>>({});
   const isPlaying = ref(false);
   const zoomScale = ref(50);
   const selectedClipIds = ref<string[]>([]);
@@ -86,7 +90,6 @@ export const useTimelineStore = defineStore("timeline", () => {
 
   interface ClipboardData {
     clipData: TimelineClip;
-    resources: AnyDanmu[];
     /** 原始轨道类型（复制时记录，粘贴时用于类型兼容性检查） */
     trackType: TimelineTrackType | undefined;
   }
@@ -104,12 +107,8 @@ export const useTimelineStore = defineStore("timeline", () => {
   const copyClipToClipboard = (clip: TimelineClip) => {
     const location = findClipLocation(clip.id);
     const trackType = location?.track.type;
-    const resources = clip.kind === "group"
-      ? collectGroupResources(clip)
-      : useDanmuStore().danmus.filter((resource) => resource.id === clip.resourceId);
     clipboardClip.value = {
       clipData: JSON.parse(JSON.stringify(clip)),
-      resources: JSON.parse(JSON.stringify(resources)),
       trackType: clip.kind === "group" ? "danmu" : trackType
     };
     console.log(`[TimelineStore] 已复制片段到剪贴板: ${clip.name || clip.id}`);
@@ -143,7 +142,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     }
 
     // 深拷贝剪贴板数据
-    const newClip = cloneClip(source, trackId, clipboardClip.value.resources);
+    const newClip = cloneClip(source, trackId);
     newClip.startTime = Math.max(0, startTime);
 
     // 确保轨道类型匹配
@@ -286,6 +285,9 @@ export const useTimelineStore = defineStore("timeline", () => {
         clip.startTime = Math.max(0, updates.startTime);
       }
       return;
+    }
+    if (updates.sourceInMs !== undefined && (!Number.isFinite(updates.sourceInMs) || updates.sourceInMs < 0)) {
+      throw new Error("Invalid clip source offset");
     }
     const {
       trackId: _ignoredTrackId,
@@ -454,6 +456,18 @@ export const useTimelineStore = defineStore("timeline", () => {
       if (track.locked) continue;
       const clip = track.clips.find((c) => c.id === clipId);
       if (clip) {
+        if (clip.kind === "resource" && updates.parentClipId !== undefined) {
+          const byId = new Map<string, TimelineClip>();
+          visitTimelineClips(rootTracks.value, item => byId.set(item.id, item));
+          let parent: TimelineClip | undefined = byId.get(updates.parentClipId);
+          const seen = new Set([clip.id]);
+          if (!parent || parent.kind !== "resource") throw new Error("Invalid parent clip");
+          while (parent) {
+            if (seen.has(parent.id)) throw new Error("Cyclic parent clip relationship");
+            seen.add(parent.id);
+            parent = parent.kind === "resource" && parent.parentClipId ? byId.get(parent.parentClipId) : undefined;
+          }
+        }
         applyClipUpdates(clip, updates);
         
         // 如果更新了时间，重新排序
@@ -635,10 +649,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     }
 
     const childTrackId = createTimelineId("track");
-    const resources = source.clip.kind === "group"
-      ? collectGroupResources(source.clip)
-      : useDanmuStore().danmus.filter((resource) => resource.id === source.clip.resourceId);
-    const copiedClip = cloneClip(source.clip, childTrackId, resources);
+    const copiedClip = cloneClip(source.clip, childTrackId);
     copiedClip.startTime = Math.max(0, absoluteStart - group.startTime);
     group.tracks.push({
       id: childTrackId,
@@ -697,10 +708,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     }
 
     // 深拷贝源片段，剥离 id 和 trackId
-    const resources = sourceClip.kind === "group"
-      ? collectGroupResources(sourceClip)
-      : useDanmuStore().danmus.filter((resource) => resource.id === sourceClip.resourceId);
-    const newClip = cloneClip(sourceClip, targetTrackId, resources);
+    const newClip = cloneClip(sourceClip, targetTrackId);
     applyClipUpdates(newClip, updates);
 
     // 确保目标轨道有类型
@@ -725,38 +733,39 @@ export const useTimelineStore = defineStore("timeline", () => {
   const canSplitClip = (clipId: string | null, timeMs = currentTime.value) => {
     if (!clipId || !Number.isFinite(timeMs)) return false;
     const location = findClipLocation(clipId);
-    if (!location || location.clip.kind !== "resource" || location.track.locked || location.track.type === "audio" || selectedClipIds.value.length > 1) return false;
+    if (!location || location.clip.kind !== "resource" || location.track.locked || selectedClipIds.value.length > 1) return false;
     const { clip } = location;
     const offsetMs = Math.round(timeMs - clip.startTime);
     return Number.isFinite(clip.duration) && offsetMs > 0 && offsetMs < clip.duration &&
-      useDanmuStore().danmus.some((resource) => resource.id === clip.resourceId);
+      (useDanmuStore().danmus.some((resource) => resource.id === clip.resourceId) ||
+        useAudioStore().audioResources.some((resource) => resource.id === clip.resourceId));
   };
 
   const splitClip = (clipId: string | null, timeMs = currentTime.value): TimelineClip | null => {
     if (!canSplitClip(clipId, timeMs)) return null;
     const { track, clip } = findClipLocation(clipId!)!;
-    const danmuStore = useDanmuStore();
-    const resource = danmuStore.danmus.find((item) => item.id === clip.resourceId)!;
     if (clip.kind !== "resource") return null;
+    const resource = useDanmuStore().danmus.find((item) => item.id === clip.resourceId);
     const source: typeof clip = JSON.parse(JSON.stringify(clip));
     const offsetMs = Math.round(timeMs - clip.startTime);
-    const split = splitClipAnimation(source, resource, offsetMs);
-    const rightResource = danmuStore.duplicate(resource.id)!;
-    danmuStore.updateDanmu(rightResource.id, split.rightProperties as Partial<AnyDanmu>);
+    const reference = canvasReferenceSize.value ?? undefined;
+    const split = resource ? splitClipAnimation(source, resource, offsetMs, reference) : null;
 
     const rightClip: TimelineClip = {
       ...source,
       id: `clip_${crypto.randomUUID()}`,
-      resourceId: rightResource.id,
-      name: getItemName(rightResource),
       startTime: clip.startTime + offsetMs,
       duration: clip.duration - offsetMs,
-      keyframes: split.rightKeyframes,
-      animations: split.rightAnimations
+      sourceInMs: resource ? source.sourceInMs : (source.sourceInMs ?? 0) + offsetMs,
+      overrides: split ? { ...source.overrides, ...split.rightProperties } : source.overrides,
+      keyframes: split?.rightKeyframes ?? source.keyframes,
+      animations: split?.rightAnimations ?? source.animations
     };
     clip.duration = offsetMs;
-    clip.keyframes = split.leftKeyframes;
-    clip.animations = split.leftAnimations;
+    if (split) {
+      clip.keyframes = split.leftKeyframes;
+      clip.animations = split.leftAnimations;
+    }
     track.clips.push(rightClip);
     track.clips.sort((a, b) => a.startTime - b.startTime);
     recalculateDuration();
@@ -767,20 +776,10 @@ export const useTimelineStore = defineStore("timeline", () => {
   };
 
   const splitClipLeft = (clipId: string | null, timeMs = currentTime.value): TimelineClip | null => {
-    const leftClip = clipId ? findClipLocation(clipId)?.clip : undefined;
-    const leftResourceId = leftClip?.kind === "resource" ? leftClip.resourceId : undefined;
     const rightClip = splitClip(clipId, timeMs);
     if (!rightClip || !clipId) return null;
     if (rightClip.kind !== "resource") return null;
     removeClip(clipId);
-    // 共用资源仍被其他片段引用时，保留它以免影响其他元素。
-    let isReferenced = false;
-    visitTimelineClips(rootTracks.value, (clip) => {
-      if (clip.kind === "resource" && clip.resourceId === leftResourceId) isReferenced = true;
-    });
-    if (leftResourceId && !isReferenced) {
-      useDanmuStore().remove(leftResourceId);
-    }
     return rightClip;
   };
 
@@ -788,7 +787,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     const rightClip = splitClip(clipId, timeMs);
     if (!rightClip || !clipId) return null;
     removeClip(rightClip.id);
-    if (rightClip.kind === "resource") useDanmuStore().remove(rightClip.resourceId);
     selectedClipId.value = clipId;
     selectedAnimationId.value = null;
     selectedKeyframeId.value = BASE_KEYFRAME_ID;
@@ -854,34 +852,14 @@ export const useTimelineStore = defineStore("timeline", () => {
     for (const id of ids) removeClip(id);
   };
 
-  const collectGroupResources = (group: TimelineGroupClip): AnyDanmu[] => {
-    const resourceIds = new Set<string>();
-    visitTimelineClips(group.tracks, (clip) => {
-      if (clip.kind === "resource") resourceIds.add(clip.resourceId);
-    });
-    return JSON.parse(JSON.stringify(useDanmuStore().danmus.filter((resource) => resourceIds.has(resource.id))));
-  };
 
-  const cloneClip = (source: TimelineClip, trackId: string, resources?: AnyDanmu[]): TimelineClip => {
+  const cloneClip = (source: TimelineClip, trackId: string): TimelineClip => {
     const cloned: TimelineClip = JSON.parse(JSON.stringify(source));
-    const resourceIdMap = new Map<string, string>();
-    const resourcesToClone = resources ?? (source.kind === "group" ? collectGroupResources(source) : []);
-    if (resourcesToClone.length > 0) {
-      const copies = resourcesToClone.map((resource) => {
-        const copy: AnyDanmu = JSON.parse(JSON.stringify(resource));
-        copy.id = createTimelineId("danmu");
-        resourceIdMap.set(resource.id, copy.id);
-        return copy;
-      });
-      for (const resource of copies) {
-        if (resource.parentId && resourceIdMap.has(resource.parentId)) {
-          resource.parentId = resourceIdMap.get(resource.parentId);
-        }
-      }
-      useDanmuStore().danmus.push(...copies);
-    }
+    const clipIdMap = new Map<string, string>();
     const regenerate = (clip: TimelineClip, ownerTrackId: string) => {
+      const originalId = clip.id;
       clip.id = createTimelineId("clip");
+      clipIdMap.set(originalId, clip.id);
       clip.trackId = ownerTrackId;
       if (clip.kind === "group") {
         for (const track of clip.tracks) {
@@ -889,12 +867,19 @@ export const useTimelineStore = defineStore("timeline", () => {
           for (const child of track.clips) regenerate(child, track.id);
         }
       } else {
-        clip.resourceId = resourceIdMap.get(clip.resourceId) ?? clip.resourceId;
         for (const animation of clip.animations ?? []) animation.id = createTimelineId("anim");
         for (const keyframe of clip.keyframes ?? []) keyframe.id = createTimelineId("kf");
       }
     };
     regenerate(cloned, trackId);
+    const remapParents = (clip: TimelineClip) => {
+      if (clip.kind === "group") {
+        for (const track of clip.tracks) for (const child of track.clips) remapParents(child);
+      } else if (clip.parentClipId && clipIdMap.has(clip.parentClipId)) {
+        clip.parentClipId = clipIdMap.get(clip.parentClipId);
+      }
+    };
+    remapParents(cloned);
     return cloned;
   };
 
@@ -1063,6 +1048,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     for (const track of tracks.value) {
       const clip = track.clips.find(c => c.id === clipId);
       if (clip?.kind === "resource" && !track.locked) {
+        if (clip.keyframes?.length) return;
         if (!clip.animations) clip.animations = [];
         clip.animations.push(animation);
         return;
@@ -1074,6 +1060,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     for (const track of tracks.value) {
       const clip = track.clips.find(c => c.id === clipId);
       if (clip?.kind === "resource" && !track.locked) {
+        if (clip.keyframes?.length) return;
         if (!clip.animations) clip.animations = [];
         // Ensure index is valid
         if (index < 0) index = 0;
@@ -1121,6 +1108,7 @@ export const useTimelineStore = defineStore("timeline", () => {
   ) => {
     const location = findClipLocation(clipId);
     if (!location || location.clip.kind !== "resource" || location.track.locked) return null;
+    if (location.clip.animations?.length) return null;
 
     const nextKeyframe: TimelineKeyframe = {
       ...keyframe,
@@ -1158,6 +1146,7 @@ export const useTimelineStore = defineStore("timeline", () => {
   ) => {
     const location = findClipLocation(clipId);
     if (!location || location.clip.kind !== "resource" || location.track.locked) return null;
+    if (location.clip.animations?.length) return null;
 
     const clampedTime = clampKeyframeTime(timeMs, location.clip.duration);
     if (clampedTime <= 0) {
@@ -1269,6 +1258,8 @@ export const useTimelineStore = defineStore("timeline", () => {
     loadTimeline,
     tracks,
     currentTime,
+    canvasReferenceSize,
+    parentReferenceSizes,
     isPlaying,
     duration,
     zoomScale,

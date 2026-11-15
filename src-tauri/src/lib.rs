@@ -1,5 +1,6 @@
 mod commands;
 mod project_files;
+mod recent_projects;
 
 use tauri::Manager;
 use tauri_plugin_window_state::StateFlags;
@@ -31,7 +32,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             commands::write_text_file,
+            recent_projects::read_recent_projects,
+            recent_projects::write_recent_projects,
             project_files::create_disk_project,
+            project_files::reserve_project_support,
             project_files::restore_missing_disk_project,
             project_files::read_disk_project,
             project_files::save_disk_project,

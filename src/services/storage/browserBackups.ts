@@ -1,6 +1,6 @@
 const BACKUP_INTERVAL_MS = 5 * 60 * 1000;
 const MAX_BACKUPS = 10;
-const BACKUP_NAME = /^backup-(\d+)-[a-f0-9-]+\.basproj$/;
+const BACKUP_NAME = /^backup-(\d+)(?:-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?\.basproj$/i;
 
 type IterableDirectory = FileSystemDirectoryHandle & { values(): AsyncIterable<FileSystemHandle> };
 
