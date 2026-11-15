@@ -30,10 +30,9 @@ import { getItemName } from "@/utils/resourceUtils";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { useAudioStore } from "@/stores/audio";
-import { compileTimelineToBas } from "@/utils/compiler";
-import basService from "@/utils/bas";
 import { useContextMenuStore } from "@/stores/contextMenu";
 import { BASE_KEYFRAME_ID, clampKeyframeTime, normalizeKeyframes } from "@/utils/keyframes";
+import { runSplitAction } from "@/utils/splitAction";
 
 import type { AnimationSegment, TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
 import AudioWaveform from "./audio/AudioWaveform.vue";
@@ -51,7 +50,7 @@ const contextMenu = useContextMenuStore();
 const editingGroupId = ref<string | null>(null);
 const editingGroupName = ref("");
 const beginGroupRename = (clip: TimelineClip) => {
-  if (clip.kind !== "group" || timelineStore.tracks.find((track) => track.id === clip.trackId)?.locked) return;
+  if (clip.kind !== "group" || timelineStore.tracks.find(track => track.id === clip.trackId)?.locked) return;
   editingGroupName.value = clip.name ?? "";
   editingGroupId.value = clip.id;
   nextTick(() => {
@@ -68,15 +67,15 @@ const finishGroupRename = () => {
 };
 
 const TIMELINE_CLIP_THEME: Record<string, { backgroundColor: string; borderColor: string }> = {
-  text: { backgroundColor: "#5DBAA0", borderColor: "#75D2B8" },
-  button: { backgroundColor: "#BA5D7A", borderColor: "#D17B95" },
-  path: { backgroundColor: "#5d93ba", borderColor: "#78ADD2" },
-  audio: { backgroundColor: "#8F5DBA", borderColor: "#A979D1" },
-  default: { backgroundColor: "#5d93ba", borderColor: "#78ADD2" }
+  text: { backgroundColor: "var(--clip-text)", borderColor: "var(--clip-text-border)" },
+  button: { backgroundColor: "var(--clip-button)", borderColor: "var(--clip-button-border)" },
+  path: { backgroundColor: "var(--clip-path)", borderColor: "var(--clip-path-border)" },
+  audio: { backgroundColor: "var(--clip-audio)", borderColor: "var(--clip-audio-border)" },
+  default: { backgroundColor: "var(--clip-path)", borderColor: "var(--clip-path-border)" }
 };
 
 const getClipThemeStyle = (clip: any) => {
-  if (clip.kind === "group") return { backgroundColor: "#268c87", borderColor: "#52b9b2" };
+  if (clip.kind === "group") return { backgroundColor: "var(--clip-group)", borderColor: "var(--clip-group-border)" };
   const danmu = danmuStore.danmus.find(d => d.id === clip.resourceId);
   const isAudio = audioStore.audioResources.some(resource => resource.id === clip.resourceId);
   const type = isAudio ? "audio" : (danmu?.type ?? "default");
@@ -92,7 +91,8 @@ const handleContextMenu = (e: MouseEvent, type: "track" | "clip" | "background",
   } else if (type === "clip") {
     if (!timelineStore.selectedClipIds.includes(data.id)) timelineStore.setSelectedClip(data.id);
     // 音频片段使用独立的右键菜单（不包含"查看详情"等弹幕专属功能）
-    const menuId = data.kind === "group" ? "timeline-group-clip" : isAudioClip(data) ? "timeline-audio-clip" : "timeline-clip";
+    const menuId =
+      data.kind === "group" ? "timeline-group-clip" : isAudioClip(data) ? "timeline-audio-clip" : "timeline-clip";
     contextMenu.show(e, menuId, data, { "group.rename": () => beginGroupRename(data) });
   } else {
     // 背景右键：检测光标所在轨道和对应时间点
@@ -155,8 +155,8 @@ const getAnimationSegmentStyle = (clip: any, anim: AnimationSegment, index: numb
   const widthPercent = (duration / clip.duration) * 100;
 
   // Colors
-  const bgColor = anim.type === "set" ? "rgba(93, 186, 160, 0.88)" : "rgba(93, 147, 186, 0.88)";
-  const borderColor = anim.type === "set" ? "rgba(117, 210, 184, 1)" : "rgba(120, 173, 210, 1)";
+  const bgColor = anim.type === "set" ? "var(--clip-text)" : "var(--clip-path)";
+  const borderColor = anim.type === "set" ? "var(--clip-text-border)" : "var(--clip-path-border)";
 
   return {
     left: `${leftPercent}%`,
@@ -213,8 +213,7 @@ const setTimelineZoom = async (nextZoom: number) => {
   const container = timelineContentRef.value;
   const previousPixelsPerSecond = pixelsPerSecond.value;
   const currentScrollLeft = container?.scrollLeft ?? scrollLeft.value;
-  const playheadOffset =
-    (timelineStore.currentTime / 1000) * previousPixelsPerSecond - currentScrollLeft;
+  const playheadOffset = (timelineStore.currentTime / 1000) * previousPixelsPerSecond - currentScrollLeft;
   const clampedZoom = Math.max(10, Math.min(MAX_TIMELINE_ZOOM, nextZoom));
 
   if (clampedZoom === timelineStore.zoomScale) return;
@@ -224,8 +223,7 @@ const setTimelineZoom = async (nextZoom: number) => {
 
   if (!container) return;
 
-  const nextScrollLeft =
-    (timelineStore.currentTime / 1000) * pixelsPerSecond.value - playheadOffset;
+  const nextScrollLeft = (timelineStore.currentTime / 1000) * pixelsPerSecond.value - playheadOffset;
   const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
   container.scrollLeft = Math.max(0, Math.min(nextScrollLeft, maxScrollLeft));
   scrollLeft.value = container.scrollLeft;
@@ -389,20 +387,23 @@ const getClipName = (clip: any) => {
   return clip.name || t("common.unknown");
 };
 
-const getClipKeyframeMarkers = (clip: TimelineClip) => clip.kind === "group" ? [] : [
-  {
-    id: BASE_KEYFRAME_ID,
-    timeMs: 0,
-    isBase: true,
-    label: t("common.keyframeBase")
-  },
-  ...normalizeKeyframes(clip.keyframes, clip.duration).map((keyframe, index) => ({
-    id: keyframe.id,
-    timeMs: keyframe.timeMs,
-    isBase: false,
-    label: t("common.keyframeLabel", { n: index + 2 })
-  }))
-];
+const getClipKeyframeMarkers = (clip: TimelineClip) =>
+  clip.kind === "group"
+    ? []
+    : [
+        {
+          id: BASE_KEYFRAME_ID,
+          timeMs: 0,
+          isBase: true,
+          label: t("common.keyframeBase")
+        },
+        ...normalizeKeyframes(clip.keyframes, clip.duration).map((keyframe, index) => ({
+          id: keyframe.id,
+          timeMs: keyframe.timeMs,
+          isBase: false,
+          label: t("common.keyframeLabel", { n: index + 2 })
+        }))
+      ];
 
 const isKeyframeSelected = (clip: TimelineClip, keyframeId: string) =>
   timelineStore.selectedClipId === clip.id && timelineStore.selectedKeyframeId === keyframeId;
@@ -431,9 +432,6 @@ const selectKeyframeMarker = (clip: TimelineClip, marker: { id: string; isBase: 
 const handleKeyframeDblClick = (clip: TimelineClip, marker: { timeMs: number }) => {
   const absoluteTime = clip.startTime + marker.timeMs;
   timelineStore.setCurrentTime(absoluteTime);
-  if (!timelineStore.isPlaying) {
-    basService.seek(absoluteTime / 1000, true);
-  }
 };
 
 // 游标位置 (相对于内容区域)
@@ -455,9 +453,7 @@ const getPlayheadSnapText = (kind: PlayheadSemanticSnapKind) => {
   return t("timeline.snap.keyframe");
 };
 
-const playheadSnapText = computed(() =>
-  playheadSnapKind.value ? getPlayheadSnapText(playheadSnapKind.value) : ""
-);
+const playheadSnapText = computed(() => (playheadSnapKind.value ? getPlayheadSnapText(playheadSnapKind.value) : ""));
 
 const playheadSemanticSnapCandidates = computed<PlayheadSemanticSnapCandidate[]>(() => {
   const candidates = new Map<string, PlayheadSemanticSnapCandidate>();
@@ -558,10 +554,6 @@ const updateTime = (time: number, disableSnap = false) => {
   const resolved = resolvePlayheadSemanticSnap(time, disableSnap);
   playheadSnapKind.value = resolved.kind;
   timelineStore.setCurrentTime(resolved.timeMs);
-  // 如果是暂停状态，也要同步 BAS 引擎时间，方便预览静态帧
-  if (!timelineStore.isPlaying) {
-    basService.seek(timelineStore.currentTime / 1000, true);
-  }
 };
 
 // Clip 拖拽逻辑
@@ -610,14 +602,12 @@ const getTrackIdAtPoint = (event: MouseEvent) => {
 const getGroupIdAtPoint = (event: MouseEvent) => {
   const elements = document.elementsFromPoint(event.clientX, event.clientY);
   const groupElement = elements
-    .map((element) => element.closest<HTMLElement>('[data-clip-kind="group"]'))
+    .map(element => element.closest<HTMLElement>('[data-clip-kind="group"]'))
     .find((element): element is HTMLElement => element !== null && element.dataset.clipId !== draggedClipId.value);
   const groupId = groupElement?.dataset.clipId ?? null;
   if (!groupId) return null;
 
-  const group = timelineStore.tracks
-    .flatMap((track) => track.clips)
-    .find((clip) => clip.id === groupId);
+  const group = timelineStore.tracks.flatMap(track => track.clips).find(clip => clip.id === groupId);
   return group?.kind === "group" ? groupId : null;
 };
 
@@ -680,7 +670,7 @@ const startDragClip = (e: MouseEvent, clip: any) => {
   // 左键点击才触发
   if (e.button !== 0) return;
   if (e.ctrlKey || e.metaKey || e.shiftKey || editingGroupId.value === clip.id) return;
-  if (timelineStore.tracks.find((track) => track.id === clip.trackId)?.locked) return;
+  if (timelineStore.tracks.find(track => track.id === clip.trackId)?.locked) return;
 
   // 如果点击的是 resize handle，不要触发拖拽移动
   if ((e.target as HTMLElement).dataset.handle) return;
@@ -727,7 +717,7 @@ const onDragClip = (e: MouseEvent) => {
   tempState.startTime = newStartTime;
   const groupId = getGroupIdAtPoint(e);
   dragTargetGroupId.value = groupId;
-  dragTargetTrackId.value = groupId ? null : getTrackIdAtPoint(e) ?? dragTargetTrackId.value;
+  dragTargetTrackId.value = groupId ? null : (getTrackIdAtPoint(e) ?? dragTargetTrackId.value);
 
   // 跟踪 Alt 键状态：Alt + 跨轨道拖拽 = 复制
   isAltDragCopy.value = e.altKey;
@@ -751,14 +741,10 @@ const stopDragClip = () => {
       const targetTrackId = dragTargetTrackId.value ?? originalClipTrackId.value;
       const targetTrack = timelineStore.tracks.find(track => track.id === targetTrackId);
 
-      // Alt + 跨轨道拖拽 = 复制到目标轨道。弹幕会同时复制资源，
-      // 使两个片段之后能独立编辑；音频仍复用同一文件资源。
+      // Alt + 跨轨道拖拽复制片段，并保留其素材引用。
       if (isAltDragCopy.value && targetTrackId && targetTrackId !== originalClipTrackId.value && targetTrack) {
-        const sourceClip = timelineStore.tracks
-          .flatMap((track) => track.clips)
-          .find((clip) => clip.id === draggedClipId.value);
         timelineStore.copyClipToTrack(draggedClipId.value, targetTrackId, {
-          startTime: tempState.startTime,
+          startTime: tempState.startTime
         });
       } else {
         const moved =
@@ -805,9 +791,12 @@ const resizingHandle = ref<"left" | "right" | null>(null);
 const initialResizeStartTime = ref(0);
 const initialResizeDuration = ref(0);
 const resizeStartX = ref(0);
+const initialResizeSourceInMs = ref(0);
+const resizeAudioDurationMs = ref<number | null>(null);
+const resizingAudio = ref(false);
 
 const startResizeClip = (e: MouseEvent, clip: any, handle: "left" | "right") => {
-  if (clip.kind === "group") return;
+  if (clip.kind === "group" || timelineStore.tracks.find(track => track.id === clip.trackId)?.locked) return;
   e.stopPropagation();
   e.preventDefault(); // 防止选中文本
 
@@ -816,6 +805,10 @@ const startResizeClip = (e: MouseEvent, clip: any, handle: "left" | "right") => 
   resizingHandle.value = handle;
   initialResizeStartTime.value = clip.startTime;
   initialResizeDuration.value = clip.duration;
+  initialResizeSourceInMs.value = clip.sourceInMs ?? 0;
+  const audio = audioStore.audioResources.find(resource => resource.id === clip.resourceId);
+  resizingAudio.value = Boolean(audio);
+  resizeAudioDurationMs.value = audio?.duration && audio.duration > 0 ? audio.duration : null;
   resizeStartX.value = e.clientX;
 
   // 初始化临时状态
@@ -841,6 +834,9 @@ const onResizeClip = (e: MouseEvent) => {
     // 右侧拖拽：只改变时长
     let newDuration = initialResizeDuration.value + deltaMs;
     newDuration = Math.max(100, newDuration); // 最小 100ms
+    if (resizeAudioDurationMs.value !== null) {
+      newDuration = Math.min(newDuration, Math.max(0, resizeAudioDurationMs.value - initialResizeSourceInMs.value));
+    }
 
     // 更新临时状态
     tempState.duration = newDuration;
@@ -854,9 +850,14 @@ const onResizeClip = (e: MouseEvent) => {
       newStartTime = 0;
       newDuration = initialResizeStartTime.value + initialResizeDuration.value;
     }
-    if (newDuration < 100) {
-      newDuration = 100;
-      newStartTime = initialResizeStartTime.value + initialResizeDuration.value - 100;
+    if (resizingAudio.value && newStartTime < initialResizeStartTime.value - initialResizeSourceInMs.value) {
+      newStartTime = initialResizeStartTime.value - initialResizeSourceInMs.value;
+      newDuration = initialResizeStartTime.value + initialResizeDuration.value - newStartTime;
+    }
+    const minimumDuration = Math.min(100, initialResizeDuration.value);
+    if (newDuration < minimumDuration) {
+      newDuration = minimumDuration;
+      newStartTime = initialResizeStartTime.value + initialResizeDuration.value - minimumDuration;
     }
 
     // 更新临时状态
@@ -872,10 +873,15 @@ const onResizeClip = (e: MouseEvent) => {
 const stopResizeClip = () => {
   if (isResizingClip.value && resizingClipId.value) {
     // 调整结束，一次性提交到 Store
-    timelineStore.updateClip(resizingClipId.value, {
-      startTime: tempState.startTime,
-      duration: tempState.duration
-    });
+    const updates = { startTime: tempState.startTime, duration: tempState.duration };
+    if (resizingAudio.value && resizingHandle.value === "left") {
+      timelineStore.updateClip(resizingClipId.value, {
+        ...updates,
+        sourceInMs: initialResizeSourceInMs.value + tempState.startTime - initialResizeStartTime.value
+      });
+    } else {
+      timelineStore.updateClip(resizingClipId.value, updates);
+    }
   }
 
   isResizingClip.value = false;
@@ -1131,9 +1137,6 @@ const onDragPlayhead = (e: MouseEvent) => {
   playheadSnapKind.value = resolved.kind;
   playheadTooltipClientX.value = e.clientX;
   timelineStore.setCurrentTime(resolved.timeMs);
-  if (!timelineStore.isPlaying) {
-    basService.seek(timelineStore.currentTime / 1000, true);
-  }
 };
 
 const stopDragPlayhead = () => {
@@ -1143,9 +1146,6 @@ const stopDragPlayhead = () => {
   window.removeEventListener("mousemove", onDragPlayhead);
   window.removeEventListener("mouseup", stopDragPlayhead);
 
-  if (!timelineStore.isPlaying) {
-    basService.seek(timelineStore.currentTime / 1000, true);
-  }
 };
 
 // 键盘事件处理 (删除片段)
@@ -1163,7 +1163,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
   if (e.code === "KeyS" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !e.repeat) {
     if (timelineStore.canSplitClip(timelineStore.selectedClipId)) {
       e.preventDefault();
-      timelineStore.splitClip(timelineStore.selectedClipId);
+      runSplitAction(() => timelineStore.splitClip(timelineStore.selectedClipId));
     }
     return;
   }
@@ -1201,27 +1201,30 @@ onUnmounted(() => {
   window.removeEventListener("keydown", handleKeyDown);
 });
 
-watch(() => timelineStore.navigationRevision, async () => {
-  contextMenu.hide();
-  editingGroupId.value = null;
-  isDraggingClip.value = false;
-  isResizingClip.value = false;
-  isDraggingKeyframe.value = false;
-  isDraggingAnimation.value = false;
-  isResizingAnimation.value = false;
-  stopDragClip();
-  stopResizeClip();
-  stopDragKeyframe();
-  stopDragAnimation();
-  stopResizeAnimation();
-  stopDragPlayhead();
-  await nextTick();
-  if (timelineContentRef.value) {
-    timelineContentRef.value.scrollLeft = timelineStore.timelineScroll.left;
-    timelineContentRef.value.scrollTop = timelineStore.timelineScroll.top;
-    scrollLeft.value = timelineContentRef.value.scrollLeft;
+watch(
+  () => timelineStore.navigationRevision,
+  async () => {
+    contextMenu.hide();
+    editingGroupId.value = null;
+    isDraggingClip.value = false;
+    isResizingClip.value = false;
+    isDraggingKeyframe.value = false;
+    isDraggingAnimation.value = false;
+    isResizingAnimation.value = false;
+    stopDragClip();
+    stopResizeClip();
+    stopDragKeyframe();
+    stopDragAnimation();
+    stopResizeAnimation();
+    stopDragPlayhead();
+    await nextTick();
+    if (timelineContentRef.value) {
+      timelineContentRef.value.scrollLeft = timelineStore.timelineScroll.left;
+      timelineContentRef.value.scrollTop = timelineStore.timelineScroll.top;
+      scrollLeft.value = timelineContentRef.value.scrollLeft;
+    }
   }
-});
+);
 
 // ============================================================
 // 音频相关辅助函数
@@ -1292,25 +1295,34 @@ function handleVolumeSelect(clipId: string) {
 </script>
 
 <template>
-  <div
-    class="panel h-full w-full bg-background border border-border rounded-sm overflow-hidden flex flex-col select-none"
-    data-ui="timeline-panel"
-  >
+  <div class="panel workbench-panel h-full w-full overflow-hidden flex flex-col select-none" data-ui="timeline-panel">
     <!-- 顶部工具栏 -->
     <div
-      class="h-10 bg-background border-b border-border flex items-center justify-between px-2 py-1 text-xs text-muted-foreground gap-4 shrink-0"
+      class="toolbar h-10 bg-panel flex items-center justify-between px-2 py-1 text-xs text-muted-foreground gap-4 shrink-0"
     >
       <div class="flex items-center gap-2">
         <Clock class="size-3.5" />
         <span class="font-mono text-foreground/80">{{ currentTimeDisplay }}</span>
-        <button type="button" class="size-7 inline-flex items-center justify-center rounded-sm hover:bg-accent disabled:opacity-40"
-          data-ui="create-group" :title="t('groups.createHint')" :aria-label="t('groups.create')"
-          :disabled="!timelineStore.canCreateGroup()" @click="timelineStore.createGroup()">
+        <button
+          type="button"
+          class="size-7 inline-flex items-center justify-center rounded-sm hover:bg-accent disabled:opacity-40"
+          data-ui="create-group"
+          :title="t('groups.createHint')"
+          :aria-label="t('groups.create')"
+          :disabled="!timelineStore.canCreateGroup()"
+          @click="timelineStore.createGroup()"
+        >
           <FolderPlus class="size-4" />
         </button>
-        <button type="button" class="size-7 inline-flex items-center justify-center rounded-sm hover:bg-accent disabled:opacity-40"
-          data-ui="ungroup" :title="t('groups.ungroupHint')" :aria-label="t('groups.ungroup')"
-          :disabled="!timelineStore.canUngroupClip()" @click="timelineStore.ungroupClip()">
+        <button
+          type="button"
+          class="size-7 inline-flex items-center justify-center rounded-sm hover:bg-accent disabled:opacity-40"
+          data-ui="ungroup"
+          :title="t('groups.ungroupHint')"
+          :aria-label="t('groups.ungroup')"
+          :disabled="!timelineStore.canUngroupClip()"
+          @click="timelineStore.ungroupClip()"
+        >
           <Ungroup class="size-4" />
         </button>
         <button
@@ -1320,7 +1332,7 @@ function handleVolumeSelect(clipId: string) {
           :title="t('menus.splitElement')"
           :aria-label="t('menus.splitElement')"
           :disabled="!timelineStore.canSplitClip(timelineStore.selectedClipId)"
-          @click="timelineStore.splitClip(timelineStore.selectedClipId)"
+          @click="runSplitAction(() => timelineStore.splitClip(timelineStore.selectedClipId))"
         >
           <Scissors class="size-3.5" />
         </button>
@@ -1331,7 +1343,7 @@ function handleVolumeSelect(clipId: string) {
           :title="t('menus.splitLeft')"
           :aria-label="t('menus.splitLeft')"
           :disabled="!timelineStore.canSplitClip(timelineStore.selectedClipId)"
-          @click="timelineStore.splitClipLeft(timelineStore.selectedClipId)"
+          @click="runSplitAction(() => timelineStore.splitClipLeft(timelineStore.selectedClipId))"
         >
           <ScissorsLineDashed class="size-3.5 rotate-180" />
         </button>
@@ -1342,18 +1354,21 @@ function handleVolumeSelect(clipId: string) {
           :title="t('menus.splitRight')"
           :aria-label="t('menus.splitRight')"
           :disabled="!timelineStore.canSplitClip(timelineStore.selectedClipId)"
-          @click="timelineStore.splitClipRight(timelineStore.selectedClipId)"
+          @click="runSplitAction(() => timelineStore.splitClipRight(timelineStore.selectedClipId))"
         >
           <ScissorsLineDashed class="size-3.5" />
         </button>
       </div>
 
       <div class="flex items-center gap-2">
-        <span class="text-[10px] w-8 text-right">{{ timelineStore.zoomScale }}%</span>
+        <span class="text-xs w-10 text-right tabular-nums">{{ timelineStore.zoomScale }}%</span>
         <div class="flex gap-0.5 border border-border rounded-sm overflow-hidden bg-accent">
           <button
             class="size-7 inline-flex items-center justify-center hover:bg-foreground/10 cursor-pointer"
             @click="zoomOut"
+            :aria-label="t('preview.zoom.out')"
+            :title="t('preview.zoom.out')"
+            data-ui="timeline-zoom-out"
           >
             <ZoomOut class="size-3" />
           </button>
@@ -1361,6 +1376,9 @@ function handleVolumeSelect(clipId: string) {
           <button
             class="size-7 inline-flex items-center justify-center hover:bg-foreground/10 cursor-pointer"
             @click="zoomIn"
+            :aria-label="t('preview.zoom.in')"
+            :title="t('preview.zoom.in')"
+            data-ui="timeline-zoom-in"
           >
             <ZoomIn class="size-3" />
           </button>
@@ -1368,34 +1386,52 @@ function handleVolumeSelect(clipId: string) {
       </div>
     </div>
 
-    <nav class="flex min-h-8 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 text-xs"
-      data-ui="group-breadcrumb" :aria-label="t('groups.root')">
-      <button v-if="timelineStore.activeGroupPath.length" type="button"
+    <nav
+      class="flex min-h-8 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 text-xs"
+      data-ui="group-breadcrumb"
+      :aria-label="t('groups.root')"
+    >
+      <button
+        v-if="timelineStore.activeGroupPath.length"
+        type="button"
         class="inline-flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-accent"
-        :title="t('groups.back')" :aria-label="t('groups.back')" @click="timelineStore.leaveGroup()">
+        :title="t('groups.back')"
+        :aria-label="t('groups.back')"
+        @click="timelineStore.leaveGroup()"
+      >
         <ArrowLeft class="size-3.5" />
       </button>
-      <button type="button" class="shrink-0 rounded-sm px-2 py-1 hover:bg-accent"
-        @click="timelineStore.navigateToGroup(0)">{{ t('groups.root') }}</button>
+      <button
+        type="button"
+        class="shrink-0 rounded-sm px-2 py-1 hover:bg-accent"
+        @click="timelineStore.navigateToGroup(0)"
+      >
+        {{ t("groups.root") }}
+      </button>
       <template v-for="(group, index) in timelineStore.activeGroups" :key="group.id">
         <ChevronRight class="size-3 shrink-0 text-muted-foreground" />
-        <button type="button" class="max-w-48 shrink-0 truncate rounded-sm px-2 py-1 hover:bg-accent"
+        <button
+          type="button"
+          class="max-w-48 shrink-0 truncate rounded-sm px-2 py-1 hover:bg-accent"
           :class="{ 'text-primary font-medium': index === timelineStore.activeGroups.length - 1 }"
-          @click="timelineStore.navigateToGroup(index + 1)">{{ group.name }}</button>
+          @click="timelineStore.navigateToGroup(index + 1)"
+        >
+          {{ group.name }}
+        </button>
       </template>
     </nav>
 
     <!-- 头部区域 (Header Row) -->
-    <div class="flex h-[30px] shrink-0 bg-background border-b border-border">
+    <div class="flex h-8 shrink-0 bg-track-header border-b border-divider">
       <!-- 左上角：轨道列表头 -->
       <div
-        class="w-56 shrink-0 border-r border-border bg-background flex items-center justify-between px-3 text-xs font-medium text-muted-foreground z-20"
+        class="w-56 shrink-0 border-r border-divider bg-track-header flex items-center justify-between px-3 text-xs font-medium text-muted-foreground z-20"
       >
-        {{ t('timeline.trackList') }}
+        {{ t("timeline.trackList") }}
       </div>
 
       <!-- 右侧：时间刻度尺 (固定视口，内部 canvas 重绘) -->
-      <div class="flex-1 relative overflow-hidden cursor-pointer bg-background">
+      <div class="flex-1 relative overflow-hidden cursor-pointer bg-timeline">
         <TimeRuler
           :scale="timelineStore.zoomScale"
           :scroll-left="scrollLeft"
@@ -1415,12 +1451,17 @@ function handleVolumeSelect(clipId: string) {
     <!-- 主体区域 (Body Row) -->
     <div class="flex-1 min-h-0 flex overflow-hidden">
       <!-- 左侧：轨道列表 (无滚动条，由右侧控制 scrollTop) -->
-      <div class="w-56 border-r border-border bg-background flex flex-col shrink-0 overflow-hidden" ref="trackListRef">
+      <div
+        class="w-56 border-r border-divider bg-track-header flex flex-col shrink-0 overflow-hidden"
+        ref="trackListRef"
+        data-ui="track-headers"
+      >
         <!-- 轨道头列表 -->
         <template v-for="track in timelineStore.tracks" :key="track.id">
           <div
-            class="h-10 grid grid-cols-[1.25rem_minmax(4.5rem,1fr)_1.5rem_1.5rem_1.5rem_1.5rem] items-center gap-1 px-2 text-xs group border-b border-border/60 hover:bg-accent/50 transition-colors shrink-0"
+            class="h-10 grid grid-cols-[1rem_minmax(0,1fr)_1.25rem_1.25rem_1.25rem_1.25rem] items-center gap-1 px-2 text-xs group border-b border-divider hover:bg-accent/50 transition-colors shrink-0"
             :class="{ 'text-muted-foreground/55': !track.visible }"
+            :data-track-header-id="track.id"
             @contextmenu="handleContextMenu($event, 'track', track.id)"
           >
             <button
@@ -1461,7 +1502,7 @@ function handleVolumeSelect(clipId: string) {
               <Video class="size-3" />
             </span>
             <button
-              class="opacity-0 group-hover:opacity-100 size-5 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-opacity"
+              class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 size-5 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-opacity"
               :aria-label="t('timeline.track.remove')"
               :title="t('timeline.track.remove')"
               @click.stop="handleRemoveTrack(track.id)"
@@ -1473,10 +1514,10 @@ function handleVolumeSelect(clipId: string) {
           <!-- Expanded Panel Header -->
           <div
             v-if="track.expanded"
-            class="h-16 bg-muted/30 border-b border-border/60 flex items-center justify-end px-3 text-[10px] text-muted-foreground shrink-0"
+            class="h-16 bg-muted/30 border-b border-divider flex items-center justify-end px-3 text-xs text-muted-foreground shrink-0"
             :class="{ 'opacity-55': !track.visible }"
           >
-            <span class="opacity-70">{{ t('timeline.keyframes') }}</span>
+            <span class="opacity-70">{{ t("timeline.keyframes") }}</span>
           </div>
         </template>
 
@@ -1485,7 +1526,7 @@ function handleVolumeSelect(clipId: string) {
           class="w-full h-8 flex items-center justify-center gap-1 text-xs text-muted-foreground hover:text-primary hover:bg-accent transition-colors mt-1 shrink-0"
         >
           <Plus class="size-3" />
-          {{ t('timeline.addTrack') }}
+          {{ t("timeline.addTrack") }}
         </button>
 
         <!-- 底部占位，防止内容被遮挡 -->
@@ -1494,8 +1535,9 @@ function handleVolumeSelect(clipId: string) {
 
       <!-- 右侧：时间轴内容 (主滚动容器) -->
       <div
-        class="flex-1 min-h-0 min-w-0 flex flex-col overflow-auto scrollbar-thin relative bg-background"
+        class="flex-1 min-h-0 min-w-0 flex flex-col overflow-auto scrollbar-thin relative bg-timeline"
         ref="timelineContentRef"
+        data-ui="timeline-content"
         @scroll="handleScroll"
       >
         <!-- Tracks Container -->
@@ -1508,7 +1550,7 @@ function handleVolumeSelect(clipId: string) {
           <!-- 轨道行 -->
           <template v-for="track in timelineStore.tracks" :key="track.id">
             <div
-              class="h-10 relative group border-b border-border/60 hover:bg-accent/35 transition-colors"
+              class="h-10 relative group border-b border-divider hover:bg-accent/35 transition-colors"
               :class="{
                 'opacity-55': !track.visible,
                 'bg-primary/10 ring-1 ring-inset ring-primary/30':
@@ -1523,12 +1565,14 @@ function handleVolumeSelect(clipId: string) {
               <div
                 v-for="clip in track.clips"
                 :key="clip.id"
-                class="absolute top-1 bottom-1 rounded-sm border text-[10px] flex items-center px-2 text-white overflow-hidden cursor-move select-none shadow-sm hover:brightness-110 group/audio"
+                class="absolute top-1 bottom-1 rounded-sm border text-xs flex items-center px-2 text-white overflow-hidden cursor-move select-none transition-[filter,outline-color] hover:brightness-110 group/audio"
                 :class="{
-                  'ring-1 ring-primary z-10': timelineStore.selectedClipIds.includes(clip.id),
-                  'ring-2 ring-cyan-300 border-cyan-300 z-20':
+                  'outline outline-1 outline-primary outline-offset-0 z-10': timelineStore.selectedClipIds.includes(
+                    clip.id
+                  ),
+                  'outline outline-2 outline-primary z-20':
                     dragTargetGroupId === clip.id && canDropDraggedClipIntoGroup(clip.id),
-                  'ring-2 ring-destructive border-destructive z-20':
+                  'outline outline-2 outline-destructive z-20':
                     dragTargetGroupId === clip.id && !canDropDraggedClipIntoGroup(clip.id),
                   'opacity-35': isDraggedClipLeavingTrack(clip)
                 }"
@@ -1536,9 +1580,7 @@ function handleVolumeSelect(clipId: string) {
                 :data-clip-id="clip.id"
                 :data-clip-kind="clip.kind"
                 :title="
-                  clip.kind === 'group' && dragTargetGroupId === clip.id
-                    ? t('groups.dropIntoHint')
-                    : getClipName(clip)
+                  clip.kind === 'group' && dragTargetGroupId === clip.id ? t('groups.dropIntoHint') : getClipName(clip)
                 "
                 @click.stop="handleClipClick(clip, $event)"
                 @dblclick.stop="clip.kind === 'group' && timelineStore.enterGroup(clip.id)"
@@ -1550,7 +1592,9 @@ function handleVolumeSelect(clipId: string) {
                   v-if="isAudioClip(clip)"
                   class="absolute inset-0"
                   :audio-url="getAudioUrl(clip)"
-                  :clip-duration-ms="clip.duration"
+                  :clip-duration-ms="isResizingClip && resizingClipId === clip.id ? tempState.duration : clip.duration"
+                  :source-start-sec="clip.kind === 'resource' ? ((clip.sourceInMs ?? 0) + (isResizingClip && resizingClipId === clip.id && resizingHandle === 'left' ? tempState.startTime - initialResizeStartTime : 0)) / 1000 : 0"
+                  :clip-start-ms="isDraggingClip && draggedClipId === clip.id ? tempState.startTime : isResizingClip && resizingClipId === clip.id ? tempState.startTime : clip.startTime"
                   :gain-samples="buildGainSamples(clip)"
                   :pixels-per-second="pixelsPerSecond"
                   :scroll-left="scrollLeft"
@@ -1558,22 +1602,38 @@ function handleVolumeSelect(clipId: string) {
                 />
 
                 <FolderOpen v-if="clip.kind === 'group'" class="size-3 shrink-0 mr-1" />
-                <Input v-if="editingGroupId === clip.id" v-model="editingGroupName"
-                  data-ui="group-rename" class="h-6 min-w-8 text-xs" :aria-label="t('groups.name')"
-                  @mousedown.stop @click.stop @dblclick.stop @blur="finishGroupRename"
-                  @keydown.enter.prevent="finishGroupRename" @keydown.esc.prevent="editingGroupId = null" />
+                <Input
+                  v-if="editingGroupId === clip.id"
+                  v-model="editingGroupName"
+                  data-ui="group-rename"
+                  class="h-6 min-w-8 text-xs"
+                  :aria-label="t('groups.name')"
+                  @mousedown.stop
+                  @click.stop
+                  @dblclick.stop
+                  @blur="finishGroupRename"
+                  @keydown.enter.prevent="finishGroupRename"
+                  @keydown.esc.prevent="editingGroupId = null"
+                />
                 <span v-else class="truncate text-white/90 font-medium z-10 relative pointer-events-none">{{
                   getClipName(clip)
                 }}</span>
-                <span v-if="clip.kind === 'group' && editingGroupId !== clip.id"
-                  class="ml-2 shrink-0 text-[9px] text-white/75 pointer-events-none">
-                  {{ formatTime(clip.duration).str }} · {{ t('groups.members', { n: clip.tracks.reduce((count, childTrack) => count + childTrack.clips.length, 0) }) }}
+                <span
+                  v-if="clip.kind === 'group' && editingGroupId !== clip.id"
+                  class="ml-2 shrink-0 text-[11px] text-white/75 pointer-events-none"
+                >
+                  {{ formatTime(clip.duration).str }} ·
+                  {{
+                    t("groups.members", {
+                      n: clip.tracks.reduce((count, childTrack) => count + childTrack.clips.length, 0)
+                    })
+                  }}
                 </span>
                 <span
                   v-if="clip.kind === 'group' && dragTargetGroupId === clip.id"
-                  class="ml-2 shrink-0 rounded-sm bg-black/25 px-1 text-[9px] font-semibold pointer-events-none"
+                  class="ml-2 shrink-0 rounded-sm bg-black/25 px-1 text-[11px] font-semibold pointer-events-none"
                 >
-                  {{ canDropDraggedClipIntoGroup(clip.id) ? t('groups.dropInto') : t('groups.dropIntoUnavailable') }}
+                  {{ canDropDraggedClipIntoGroup(clip.id) ? t("groups.dropInto") : t("groups.dropIntoUnavailable") }}
                 </span>
 
                 <!-- 音频音量线 -->
@@ -1588,7 +1648,14 @@ function handleVolumeSelect(clipId: string) {
                 />
 
                 <!-- Resize Handles -->
-                <template v-if="clip.kind === 'resource' && timelineStore.selectedClipIds.length === 1 && timelineStore.selectedClipId === clip.id && !track.locked">
+                <template
+                  v-if="
+                    clip.kind === 'resource' &&
+                    timelineStore.selectedClipIds.length === 1 &&
+                    timelineStore.selectedClipId === clip.id &&
+                    !track.locked
+                  "
+                >
                   <div
                     class="absolute left-0 top-0 bottom-0 w-2 cursor-w-resize hover:bg-white/20 z-20 flex items-center justify-center group/handle"
                     data-handle="left"
@@ -1609,7 +1676,7 @@ function handleVolumeSelect(clipId: string) {
 
               <div
                 v-if="draggedClip && dragTargetTrackId === track.id && draggedClip.trackId !== track.id"
-                class="absolute top-1 bottom-1 rounded-sm border text-[10px] flex items-center px-2 text-white overflow-hidden pointer-events-none opacity-80 shadow-md"
+                class="absolute top-1 bottom-1 rounded-sm border text-xs flex items-center px-2 text-white overflow-hidden pointer-events-none opacity-80 shadow-md"
                 :class="{
                   'ring-1 ring-primary/80': canDropDraggedClipOnTrack(track) && !isAltDragCopy,
                   'ring-1 ring-green-400/80 border-green-400': canDropDraggedClipOnTrack(track) && isAltDragCopy,
@@ -1620,7 +1687,7 @@ function handleVolumeSelect(clipId: string) {
                 <span class="truncate text-white/90 font-medium">{{ getClipName(draggedClip) }}</span>
                 <span
                   v-if="isAltDragCopy && canDropDraggedClipOnTrack(track)"
-                  class="ml-1 px-1 text-[9px] font-bold bg-green-400 text-green-900 rounded-sm shrink-0"
+                  class="ml-1 px-1 text-[11px] font-bold bg-green-400 text-green-900 rounded-sm shrink-0"
                   >+</span
                 >
               </div>
@@ -1629,7 +1696,7 @@ function handleVolumeSelect(clipId: string) {
             <!-- Expanded Animation Row -->
             <div
               v-if="track.expanded"
-              class="h-16 relative bg-muted/30 border-b border-border/60"
+              class="h-16 relative bg-muted/30 border-b border-divider"
               :class="{
                 'bg-primary/10': isDragTargetTrack(track) && canDropDraggedClipOnTrack(track),
                 'bg-destructive/10': isInvalidDragTargetTrack(track)
@@ -1638,7 +1705,7 @@ function handleVolumeSelect(clipId: string) {
             >
               <!-- Keyframe Containers (aligned with clips) -->
               <div
-                v-for="clip in track.clips.filter((item) => item.kind === 'resource')"
+                v-for="clip in track.clips.filter(item => item.kind === 'resource')"
                 :key="clip.id"
                 class="absolute top-0 bottom-0 pointer-events-none"
                 :style="{ ...getClipStyle(clip), border: 'none', background: 'transparent' }"
@@ -1688,13 +1755,13 @@ function handleVolumeSelect(clipId: string) {
 
     <div
       v-if="isDraggingPlayhead"
-      class="pointer-events-none fixed z-50 -translate-x-1/2 rounded-sm border border-border bg-popover px-2 py-1 font-mono text-[10px] text-popover-foreground shadow-md"
+      class="pointer-events-none fixed z-50 -translate-x-1/2 rounded-sm border border-border bg-popover px-2 py-1 font-mono text-xs text-popover-foreground shadow-md"
       :style="playheadTooltipStyle"
     >
       {{ formatTime(timelineStore.currentTime).str }}
-      <span v-if="playheadSnapKind" class="ml-1 text-primary"> {{
-        t('timeline.snap.indicator', { label: playheadSnapText })
-      }} </span>
+      <span v-if="playheadSnapKind" class="ml-1 text-primary">
+        {{ t("timeline.snap.indicator", { label: playheadSnapText }) }}
+      </span>
     </div>
 
     <!-- Drag/Resize Tooltip -->
@@ -1705,15 +1772,13 @@ function handleVolumeSelect(clipId: string) {
     >
       <div v-if="isDraggingClip">
         <template v-if="isAltDragCopy && dragTargetTrackId !== originalClipTrackId">{{
-          t('timeline.tooltip.copyTo', { time: formatTime(tempState.startTime).str })
+          t("timeline.tooltip.copyTo", { time: formatTime(tempState.startTime).str })
         }}</template>
-        <template v-else>{{
-          t('timeline.tooltip.start', { time: formatTime(tempState.startTime).str })
-        }}</template>
+        <template v-else>{{ t("timeline.tooltip.start", { time: formatTime(tempState.startTime).str }) }}</template>
       </div>
       <div v-else-if="isResizingClip">
         {{
-          t('timeline.tooltip.resize', {
+          t("timeline.tooltip.resize", {
             start: formatTime(tempState.startTime).str,
             duration: formatTime(tempState.duration).str,
             end: formatTime(tempState.startTime + tempState.duration).str
@@ -1725,87 +1790,29 @@ function handleVolumeSelect(clipId: string) {
 </template>
 
 <style scoped>
-[data-ui="timeline-panel"] {
-  --timeline-playhead-core: color-mix(in oklab, var(--primary) 94%, var(--primary-foreground) 6%);
-  --timeline-playhead-edge: color-mix(in oklab, var(--primary) 76%, var(--primary-foreground) 24%);
-  --timeline-playhead-glow: color-mix(in oklab, var(--primary) 22%, transparent);
-}
-
 .timeline-track-surface {
   min-height: 100%;
 }
-
 .timeline-playhead::before {
   position: absolute;
   inset: 0;
   content: "";
-  background: linear-gradient(
-    180deg,
-    var(--timeline-playhead-core),
-    color-mix(in oklab, var(--timeline-playhead-core) 86%, transparent)
-  );
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--primary) 12%, transparent),
-    0 0 8px var(--timeline-playhead-glow);
+  background: var(--primary);
   pointer-events: none;
-  transition: box-shadow 140ms ease;
 }
-
 .timeline-playhead--ruler::before {
-  top: 14px;
+  top: 13px;
 }
-
-.timeline-playhead--content:hover::before {
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--primary) 18%, transparent),
-    0 0 10px color-mix(in oklab, var(--primary) 30%, transparent);
-}
-
 .timeline-playhead__head {
   position: absolute;
   top: 2px;
   left: 50%;
-  width: 14px;
-  height: 11px;
+  width: 10px;
+  height: 13px;
   transform: translateX(-50%);
-  border: 1px solid var(--timeline-playhead-edge);
-  border-radius: 4px 4px 3px 3px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in oklab, var(--primary) 82%, var(--primary-foreground) 18%),
-    var(--primary)
-  );
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--background) 76%, transparent),
-    0 3px 10px color-mix(in oklab, var(--primary) 30%, transparent),
-    inset 0 1px 0 color-mix(in oklab, var(--primary-foreground) 30%, transparent);
-}
-
-.timeline-playhead__head::before {
-  position: absolute;
-  top: 2px;
-  right: 3px;
-  left: 3px;
-  height: 1px;
-  border-radius: 999px;
-  content: "";
-  background: color-mix(in oklab, var(--primary-foreground) 55%, transparent);
-}
-
-.timeline-playhead__head::after {
-  position: absolute;
-  bottom: -4px;
-  left: 50%;
-  width: 6px;
-  height: 6px;
-  transform: translateX(-50%) rotate(45deg);
-  border-right: 1px solid var(--timeline-playhead-edge);
-  border-bottom: 1px solid var(--timeline-playhead-edge);
-  border-radius: 0 0 2px;
-  content: "";
   background: var(--primary);
+  clip-path: polygon(0 0, 100% 0, 100% 65%, 50% 100%, 0 65%);
 }
-
 .timeline-playhead__hit-area {
   position: absolute;
   inset-block: 0;
@@ -1814,11 +1821,5 @@ function handleVolumeSelect(clipId: string) {
   transform: translateX(-50%);
   background: transparent;
   cursor: ew-resize;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .timeline-playhead::before {
-    transition: none;
-  }
 }
 </style>

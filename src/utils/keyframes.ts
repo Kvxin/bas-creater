@@ -135,6 +135,11 @@ export const findKeyframeAtTime = (
   normalizeKeyframes(keyframes, Number.POSITIVE_INFINITY).find(
     (keyframe) => Math.abs(keyframe.timeMs - timeMs) <= toleranceMs
   ) ?? null;
+export interface KeyframeReferenceSize {
+  width: number;
+  height: number;
+}
+
 
 const toNumber = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -177,8 +182,11 @@ const interpolateValue = (
   key: AnimatableKey,
   from: unknown,
   to: unknown,
-  progress: number
+  progress: number,
+  reference?: KeyframeReferenceSize
 ) => {
+  if (progress <= 0) return from;
+  if (progress >= 1) return to;
   if (key === "color") {
     return interpolateColor(from, to, progress);
   }
@@ -187,11 +195,19 @@ const interpolateValue = (
     const start = toNumber(from);
     const end = toNumber(to);
     if (start !== null && end !== null) {
+      const fromPercent = typeof from === "string" && from.trim().endsWith("%");
+      const toPercent = typeof to === "string" && to.trim().endsWith("%");
+      if (fromPercent !== toPercent && (key === "x" || key === "y")) {
+        const size = key === "x" ? reference?.width : reference?.height;
+        if (!size || !Number.isFinite(size) || size <= 0) {
+          throw new Error(`Cannot interpolate mixed units for ${key} without a reference size`);
+        }
+        const startPx = fromPercent ? start * size / 100 : start;
+        const endPx = toPercent ? end * size / 100 : end;
+        return startPx + (endPx - startPx) * progress;
+      }
       const value = start + (end - start) * progress;
-      const usesPercentage =
-        (typeof from === "string" && from.trim().endsWith("%")) ||
-        (typeof to === "string" && to.trim().endsWith("%"));
-      return usesPercentage ? `${value}%` : value;
+      return fromPercent ? `${value}%` : value;
     }
   }
 
@@ -207,7 +223,7 @@ const mergeProperties = (
 });
 
 const getCumulativeKeyframes = (resource: AnyDanmu, clip: TimelineClip) => {
-  let accumulated = getBaseKeyframeProperties(resource);
+  let accumulated = getBaseKeyframeProperties(clip.kind === "resource" ? { ...resource, ...clip.overrides } as AnyDanmu : resource);
 
   return normalizeKeyframes(clip.keyframes, clip.duration).map((keyframe) => {
     accumulated = mergeProperties(
@@ -226,7 +242,7 @@ export const resolveKeyframeProperties = (
   clip: TimelineClip,
   keyframeId: string | null | undefined
 ): TimelineKeyframeProperties => {
-  const base = getBaseKeyframeProperties(resource);
+  const base = getBaseKeyframeProperties(clip.kind === "resource" ? { ...resource, ...clip.overrides } as AnyDanmu : resource);
   if (!keyframeId || isBaseKeyframeId(keyframeId)) return base;
 
   return getCumulativeKeyframes(resource, clip).find(
@@ -237,13 +253,14 @@ export const resolveKeyframeProperties = (
 export const getEffectiveKeyframePropertiesAtTime = (
   resource: AnyDanmu,
   clip: TimelineClip,
-  localTimeMs: number
+  localTimeMs: number,
+  reference?: KeyframeReferenceSize
 ): TimelineKeyframeProperties => {
-  const base = getBaseKeyframeProperties(resource);
+  const base = getBaseKeyframeProperties(clip.kind === "resource" ? { ...resource, ...clip.overrides } as AnyDanmu : resource);
   const keyframes = getCumulativeKeyframes(resource, clip);
   const timeMs = clampKeyframeTime(localTimeMs, clip.duration);
 
-  if (timeMs <= 0 || keyframes.length === 0) return base;
+  if (keyframes.length === 0) return base;
 
   const firstState = keyframes[0];
   const first = firstState?.keyframe;
@@ -259,7 +276,7 @@ export const getEffectiveKeyframePropertiesAtTime = (
           : 0
         : clamp(timeMs / first.timeMs, 0, 1);
     const target = firstState?.properties ?? base;
-    return interpolateProperties(base, target, progress);
+    return interpolateProperties(base, target, progress, reference);
   }
 
   for (let index = 1; index < keyframes.length; index += 1) {
@@ -277,7 +294,7 @@ export const getEffectiveKeyframePropertiesAtTime = (
           : 0
         : clamp((timeMs - previous.timeMs) / span, 0, 1);
 
-    return interpolateProperties(previousState.properties, nextState.properties, progress);
+    return interpolateProperties(previousState.properties, nextState.properties, progress, reference);
   }
 
   return keyframes[keyframes.length - 1]?.properties ?? base;
@@ -286,7 +303,8 @@ export const getEffectiveKeyframePropertiesAtTime = (
 const interpolateProperties = (
   from: TimelineKeyframeProperties,
   to: TimelineKeyframeProperties,
-  progress: number
+  progress: number,
+  reference?: KeyframeReferenceSize
 ): TimelineKeyframeProperties => {
   const result: TimelineKeyframeProperties = {};
 
@@ -299,7 +317,8 @@ const interpolateProperties = (
       key,
       start ?? end,
       end ?? start,
-      progress
+      progress,
+      reference
     );
   }
 
@@ -318,14 +337,13 @@ export const getEffectiveDanmuAtTime = (
   resource: AnyDanmu,
   clip: TimelineClip,
   timelineTimeMs: number,
-  selectedKeyframeId?: string | null
+  _selectedKeyframeId?: string | null,
+  reference?: KeyframeReferenceSize
 ) => {
   const localTimeMs = clampKeyframeTime(timelineTimeMs - clip.startTime, clip.duration);
-  const properties = selectedKeyframeId
-    ? resolveKeyframeProperties(resource, clip, selectedKeyframeId)
-    : getEffectiveKeyframePropertiesAtTime(resource, clip, localTimeMs);
+  const properties = getEffectiveKeyframePropertiesAtTime(resource, clip, localTimeMs, reference);
 
-  return applyKeyframeProperties(resource, properties);
+  return applyKeyframeProperties(clip.kind === "resource" ? { ...resource, ...clip.overrides } as AnyDanmu : resource, properties);
 };
 
 export const createKeyframeSnapshot = (

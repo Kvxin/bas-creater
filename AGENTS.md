@@ -83,7 +83,7 @@ pnpm preview         # 在本地提供前端构建结果预览
 
 ## 配置与数据说明
 
-- 应用使用 WebView / 浏览器的 IndexedDB 和 OPFS 存储项目及媒体数据。
+- 项目保存在用户选择的文件夹中；桌面端引用音频绝对路径，Web 端将音频复制到项目文件夹。近期项目元信息保存在 localStorage，不持久化浏览器文件句柄。
 - 不要提交用户媒体、生成的构建文件、本地密钥或其他敏感信息。
 - 修改依赖时保留 `pnpm-lock.yaml`。
 - 编辑 `vite.config.ts` 或部署工作流时，确认 GitHub Pages 的构建路径（`/bas-creater/`）与 Tauri 构建路径（`/`）均正确。

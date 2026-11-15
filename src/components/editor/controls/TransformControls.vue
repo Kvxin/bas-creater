@@ -3,8 +3,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { CSSProperties } from 'vue'
 import type { AnyDanmu } from '@/types/danmu'
 import { useI18n } from 'vue-i18n'
+import { basNameForClip } from '@/utils/compiler'
+import { useTimelineStore } from '@/stores/timeline'
 
 const { t } = useI18n()
+const timelineStore = useTimelineStore()
 
 const MIN_SCALE = 0.1
 const MIN_MEASURED_SIZE = 2
@@ -16,11 +19,12 @@ const ROTATION_SNAP_STEP = 90
 const ROTATION_SNAP_THRESHOLD = 5
 
 type Corner = 'nw' | 'ne' | 'se' | 'sw'
-type ActiveGesture = DragGesture | ScaleGesture | RotateGesture | AnchorGesture | null
+type ActiveGesture = DragGesture | ChildDragGesture | ScaleGesture | RotateGesture | AnchorGesture | null
 
 interface TransformOverlayItem {
   clipId: string
   danmu: AnyDanmu
+  parentClipId?: string
   coordinatePercentageMode?: {
     x: boolean
     y: boolean
@@ -62,6 +66,30 @@ interface DragGesture extends CapturedGesture {
   type: 'drag'
   startPoint: Point
   snapshots: GestureSnapshot[]
+  moved: boolean
+}
+
+interface ChildDragSnapshot {
+  clipId: string
+  startDraft: DraftTransform
+  element: HTMLElement
+  transform: DOMMatrix
+  inverseParent: DOMMatrix
+  parentWidth: number
+  parentHeight: number
+  canvasWidth: number
+  canvasHeight: number
+  inlineTransform: string
+  inlinePriority: string
+  localX: number
+  localY: number
+}
+
+interface ChildDragGesture extends CapturedGesture {
+  type: 'child-drag'
+  startPoint: Point
+  snapshots: ChildDragSnapshot[]
+  valid: boolean
   moved: boolean
 }
 
@@ -121,7 +149,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'select', payload: { clipIds: string[]; primaryClipId: string | null; primaryDanmuId: string | null }): void
-  (e: 'commit', updates: Array<{ id: string; changes: Partial<AnyDanmu> }>): void
+  (e: 'commit', updates: Array<{ clipId: string; changes: Partial<AnyDanmu> }>): void
 }>()
 
 const overlayRootRef = ref<HTMLElement | null>(null)
@@ -129,6 +157,7 @@ const textEditorRef = ref<HTMLTextAreaElement | null>(null)
 const activeGesture = ref<ActiveGesture>(null)
 const selectedClipIds = ref<string[]>([])
 const drafts = ref<Record<string, DraftTransform>>({})
+const unsupportedTransforms = ref<Set<string>>(new Set())
 const marquee = ref<MarqueeState | null>(null)
 const textEditor = ref<TextEditorState | null>(null)
 const snapLines = ref<SnapLine[]>([])
@@ -138,6 +167,7 @@ const actualElements = new Map<string, HTMLElement>()
 const actualInnerElements = new Map<string, HTMLElement>()
 
 let mutationObserver: MutationObserver | null = null
+let mounted = false
 let syncFrame = 0
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
@@ -158,6 +188,10 @@ const selectedDraft = computed(() => {
   const clipId = primarySelectedClipId.value
   return clipId ? getDraft(clipId) : null
 })
+
+const selectedTransformSupported = computed(() =>
+  selectedClipIds.value.every((clipId) => !unsupportedTransforms.value.has(clipId) && !itemByClipId.value.get(clipId)?.parentClipId)
+)
 
 const selectedSupportsTextTransform = computed(() => {
   const clipId = primarySelectedClipId.value
@@ -199,7 +233,6 @@ const shouldStoreCoordinateAsPercentage = (
     (typeof value === 'string' && value.trim().endsWith('%'))
 }
 
-const sanitizeClipId = (clipId: string) => clipId.replace(/[^a-zA-Z0-9]/g, '_')
 
 const cloneDraft = (draft: DraftTransform): DraftTransform => ({ ...draft })
 
@@ -431,7 +464,7 @@ function getBoundsStyle(draft: DraftTransform): CSSProperties {
 
 function getOverlayStyle(clipId: string): CSSProperties {
   const draft = getDraft(clipId)
-  if (!draft) return {}
+  if (!draft) return { display: 'none' }
 
   return {
     left: `${draft.x - draft.width * draft.anchorX}px`,
@@ -476,7 +509,7 @@ function getCornerCursor(corner: Corner, rotateZ: number) {
 
 const cornerEntries = computed(() => {
   const draft = selectedDraft.value
-  if (!draft || textEditor.value) return []
+  if (!draft || textEditor.value || !selectedTransformSupported.value) return []
   const corners = getDraftCorners(draft)
   return (Object.entries(corners) as Array<[Corner, Point]>).map(([corner, point]) => ({
     corner,
@@ -498,7 +531,7 @@ const anchorPoint = computed(() => {
 const anchorHandlePoint = computed(() => {
   const draft = selectedDraft.value
   const point = anchorPoint.value
-  if (!draft || !point || textEditor.value || !selectedSupportsTextTransform.value) return null
+  if (!draft || !point || textEditor.value || !selectedSupportsTextTransform.value || !selectedTransformSupported.value) return null
 
   const corners = Object.values(getDraftCorners(draft))
   const overlapThreshold = HANDLE_HIT_SCREEN_SIZE * getInverseCanvasScale()
@@ -522,7 +555,7 @@ const anchorHandlePoint = computed(() => {
 
 const rotationHandlePoint = computed(() => {
   const draft = selectedDraft.value
-  if (!draft || textEditor.value || !selectedSupportsTextTransform.value) return null
+  if (!draft || textEditor.value || !selectedSupportsTextTransform.value || !selectedTransformSupported.value) return null
 
   const center = getDraftCenter(draft)
   const topCenter = getDraftPoint(draft, 0.5, 0)
@@ -596,7 +629,43 @@ const setOverlayElement = (clipId: string, element: unknown) => {
 
 const findDanmakuElement = (clipId: string) => {
   const container = overlayRootRef.value?.parentElement ?? document
-  return container.querySelector(`.bas-danmaku-item--obj_${sanitizeClipId(clipId)}`) as HTMLElement | null
+  return container.querySelector(`.bas-danmaku-item--${basNameForClip(clipId)}`) as HTMLElement | null
+}
+
+function childDragGeometry(item: TransformOverlayItem, element: HTMLElement | null) {
+  if (!item.parentClipId || !element || typeof DOMMatrix === 'undefined') return null
+  const reference = timelineStore.parentReferenceSizes[item.parentClipId]
+  const canvas = timelineStore.canvasReferenceSize
+  if (!reference || !canvas ||
+    ![reference.width, reference.height, canvas.width, canvas.height].every((value) => Number.isFinite(value) && value > 0)) return null
+  const parent = findDanmakuElement(item.parentClipId)
+  const stage = overlayRootRef.value?.parentElement
+  if (!parent || !parent.contains(element) || !stage) return null
+  try {
+    const readMatrix = (node: Element) => {
+      const transform = getComputedStyle(node).transform
+      return transform === 'none' ? new DOMMatrix() : new DOMMatrix(transform)
+    }
+    const transform = readMatrix(element)
+    if (!transform.is2D) return null
+    let matrix = new DOMMatrix()
+    let node = element.parentElement
+    while (node && node !== stage) {
+      const next = readMatrix(node)
+      if (!next.is2D) return null
+      matrix = next.multiply(matrix)
+      node = node.parentElement
+    }
+    if (node !== stage) return null
+    const determinant = matrix.a * matrix.d - matrix.b * matrix.c
+    if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-6) return null
+    const inverseParent = matrix.inverse()
+    if (![transform.a, transform.b, transform.c, transform.d, transform.e, transform.f,
+      inverseParent.a, inverseParent.b, inverseParent.c, inverseParent.d].every(Number.isFinite)) return null
+    return { element, transform, inverseParent, parentWidth: reference.width, parentHeight: reference.height, canvasWidth: canvas.width, canvasHeight: canvas.height }
+  } catch {
+    return null
+  }
 }
 
 const buildInnerTransform = (anchorX: number, anchorY: number) => {
@@ -661,6 +730,8 @@ const syncStageState = async () => {
   const nextDrafts: Record<string, DraftTransform> = {}
   const nextActualElements = new Map<string, HTMLElement>()
   const nextActualInnerElements = new Map<string, HTMLElement>()
+  const nextUnsupported = new Set<string>()
+  const overlayRect = overlayRootRef.value?.getBoundingClientRect()
 
   for (const item of props.items) {
     const actualElement = findDanmakuElement(item.clipId)
@@ -670,6 +741,35 @@ const syncStageState = async () => {
       : ((actualElement?.querySelector('.bas-danmaku-item-inner') as HTMLElement | null) ?? actualElement)
     const currentDraft = drafts.value[item.clipId]
     const rect = resolveElementRect(item, measurementTarget, currentDraft)
+
+    const childGeometry = item.parentClipId ? childDragGeometry(item, actualElement) : null
+    const unsupported = (item.parentClipId ? !childGeometry : false) ||
+      !!item.danmu.rotateX || !!item.danmu.rotateY ||
+      !Number.isFinite(item.danmu.scale ?? 1) || (item.danmu.scale ?? 1) < MIN_SCALE
+    if (unsupported || item.parentClipId) {
+      if (unsupported) nextUnsupported.add(item.clipId)
+      const targetRect = measurementTarget?.getBoundingClientRect()
+      const scale = getCanvasScale()
+      if (targetRect && overlayRect && scale > 0 && targetRect.width > 0 && targetRect.height > 0) {
+        if (activeGesture.value?.type === 'child-drag' && activeGesture.value.snapshots.some((snapshot) => snapshot.clipId === item.clipId) && currentDraft) {
+          nextDrafts[item.clipId] = currentDraft
+          continue
+        }
+        nextDrafts[item.clipId] = {
+          x: (targetRect.left - overlayRect.left) / scale,
+          y: (targetRect.top - overlayRect.top) / scale,
+          width: targetRect.width / scale,
+          height: targetRect.height / scale,
+          scale: 1,
+          rotateX: 0,
+          rotateY: 0,
+          rotateZ: 0,
+          anchorX: 0,
+          anchorY: 0,
+        }
+      }
+      continue
+    }
 
     if (actualElement) {
       nextActualElements.set(item.clipId, actualElement)
@@ -697,9 +797,10 @@ const syncStageState = async () => {
   nextActualElements.forEach((value, key) => actualElements.set(key, value))
   nextActualInnerElements.forEach((value, key) => actualInnerElements.set(key, value))
 
+  unsupportedTransforms.value = nextUnsupported
   drafts.value = nextDrafts
 
-  const filteredSelection = selectedClipIds.value.filter((clipId) => nextDrafts[clipId])
+  const filteredSelection = selectedClipIds.value.filter((clipId) => itemByClipId.value.has(clipId))
   if (filteredSelection.length !== selectedClipIds.value.length) {
     emitSelection(filteredSelection, filteredSelection[0] ?? null)
   }
@@ -781,6 +882,7 @@ function snapDraftPosition(
 function applyGestureDraft(clipId: string, nextDraft: DraftTransform) {
   drafts.value[clipId] = nextDraft
   applyDraftToActualElement(clipId)
+  if (props.items.some((item) => item.parentClipId === clipId)) scheduleStageSync()
 }
 
 type DraftCommitField = 'x' | 'y' | 'scale' | 'rotateZ' | 'anchorX' | 'anchorY'
@@ -818,7 +920,7 @@ function commitDrafts(
       anchorY: round(clamp(draft.anchorY, 0, 1)),
     }
     updates.set(
-      item.danmu.id,
+      clipId,
       Object.fromEntries(changedFields.map((field) => [field, values[field]])) as Partial<AnyDanmu>
     )
   }
@@ -827,7 +929,7 @@ function commitDrafts(
 
   emit(
     'commit',
-    Array.from(updates.entries()).map(([id, changes]) => ({ id, changes }))
+    Array.from(updates.entries()).map(([clipId, changes]) => ({ clipId, changes }))
   )
 }
 
@@ -856,6 +958,39 @@ function startDragGesture(event: PointerEvent, clipId: string) {
   if (!startPoint) return
 
   const dragClipIds = selectedClipIdSet.value.has(clipId) ? selectedClipIds.value : [clipId]
+  if (dragClipIds.some((id) => unsupportedTransforms.value.has(id))) return
+  const childIds = dragClipIds.filter((id) => itemByClipId.value.get(id)?.parentClipId)
+  if (childIds.length) {
+    const parentId = itemByClipId.value.get(childIds[0]!)?.parentClipId
+    if (childIds.length !== dragClipIds.length ||
+      childIds.some((id) => itemByClipId.value.get(id)?.parentClipId !== parentId)) return
+    const snapshots: ChildDragSnapshot[] = []
+    for (const id of childIds) {
+      const item = itemByClipId.value.get(id)
+      const draft = getDraft(id)
+      const geometry = item ? childDragGeometry(item, findDanmakuElement(id)) : null
+      if (!draft || !geometry) return
+      snapshots.push({
+        clipId: id,
+        startDraft: cloneDraft(draft),
+        ...geometry,
+        inlineTransform: geometry.element.style.getPropertyValue('transform'),
+        inlinePriority: geometry.element.style.getPropertyPriority('transform'),
+        localX: geometry.transform.e,
+        localY: geometry.transform.f,
+      })
+    }
+    activeGesture.value = {
+      type: 'child-drag',
+      pointerId: event.pointerId,
+      startPoint,
+      snapshots,
+      moved: false,
+      valid: true,
+    }
+    capturePointer(event.pointerId)
+    return
+  }
   const snapshots = dragClipIds
     .map((selectedClipId) => {
       const draft = getDraft(selectedClipId)
@@ -978,6 +1113,26 @@ function updateDragGesture(gesture: DragGesture, point: Point, event: PointerEve
   }
 }
 
+function updateChildDragGesture(gesture: ChildDragGesture, point: Point) {
+  const dx = point.x - gesture.startPoint.x
+  const dy = point.y - gesture.startPoint.y
+  gesture.moved = gesture.moved || Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5
+  for (const snapshot of gesture.snapshots) {
+    const inverse = snapshot.inverseParent
+    const x = snapshot.transform.e + inverse.a * dx + inverse.c * dy
+    const y = snapshot.transform.f + inverse.b * dx + inverse.d * dy
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      gesture.valid = false
+      continue
+    }
+    snapshot.localX = x
+    snapshot.localY = y
+    const m = snapshot.transform
+    snapshot.element.style.setProperty('transform', `matrix(${m.a}, ${m.b}, ${m.c}, ${m.d}, ${x}, ${y})`, 'important')
+    drafts.value[snapshot.clipId] = { ...snapshot.startDraft, x: snapshot.startDraft.x + dx, y: snapshot.startDraft.y + dy }
+  }
+}
+
 function updateScaleGesture(gesture: ScaleGesture, point: Point) {
   const currentDistance = Math.max(
     1,
@@ -1051,8 +1206,50 @@ function finishGesture(event?: PointerEvent) {
   activeGesture.value = null
   snapLines.value = []
   releasePointer(gesture.pointerId)
+  if (gesture.type === 'child-drag') {
+    const updates: Array<{ clipId: string; changes: Partial<AnyDanmu> }> = []
+    let valid = event?.type !== 'pointercancel' && gesture.moved && gesture.valid
+    for (const snapshot of gesture.snapshots) {
+      const item = itemByClipId.value.get(snapshot.clipId)
+      const geometry = item ? childDragGeometry(item, findDanmakuElement(snapshot.clipId)) : null
+      const inverse = snapshot.inverseParent
+      const unchangedParent = geometry?.element === snapshot.element &&
+        (['a', 'b', 'c', 'd', 'e', 'f'] as const).every((key) => Math.abs(geometry.inverseParent[key] - inverse[key]) < 1e-6) &&
+        geometry.parentWidth === snapshot.parentWidth && geometry.parentHeight === snapshot.parentHeight &&
+        geometry.canvasWidth === snapshot.canvasWidth && geometry.canvasHeight === snapshot.canvasHeight
+      if (snapshot.inlineTransform) {
+        snapshot.element.style.setProperty('transform', snapshot.inlineTransform, snapshot.inlinePriority)
+      } else {
+        snapshot.element.style.removeProperty('transform')
+      }
+      if (!item || !unchangedParent || !Number.isFinite(snapshot.localX) || !Number.isFinite(snapshot.localY)) {
+        valid = false
+        continue
+      }
+      const changes: Partial<AnyDanmu> = {}
+      if (Math.abs(snapshot.localX - snapshot.transform.e) > DRAFT_CHANGE_EPSILON) {
+        changes.x = shouldStoreCoordinateAsPercentage(item, 'x')
+          ? `${round(snapshot.localX / snapshot.parentWidth * 100)}%`
+          : round(snapshot.localX / snapshot.parentWidth * snapshot.canvasWidth)
+      }
+      if (Math.abs(snapshot.localY - snapshot.transform.f) > DRAFT_CHANGE_EPSILON) {
+        changes.y = shouldStoreCoordinateAsPercentage(item, 'y')
+          ? `${round(snapshot.localY / snapshot.parentHeight * 100)}%`
+          : round(snapshot.localY / snapshot.parentHeight * snapshot.canvasHeight)
+      }
+      if (Object.keys(changes).length) updates.push({ clipId: snapshot.clipId, changes })
+    }
+    if (valid && updates.length) emit('commit', updates)
+    scheduleStageSync()
+    return
+  }
+
 
   if (gesture.type === 'drag') {
+    if (event?.type === 'pointercancel') {
+      for (const snapshot of gesture.snapshots) applyGestureDraft(snapshot.clipId, cloneDraft(snapshot))
+      return
+    }
     if (gesture.moved) {
       commitDrafts(
         gesture.snapshots.map((snapshot) => snapshot.clipId),
@@ -1194,11 +1391,14 @@ function updateMarqueeSelection() {
 function onWindowPointerMove(event: PointerEvent) {
   const gesture = activeGesture.value
   if (gesture) {
+    if (event.pointerId !== gesture.pointerId) return
     const point = screenToCanvas(event.clientX, event.clientY)
     if (!point) return
 
     if (gesture.type === 'drag') {
       updateDragGesture(gesture, point, event)
+    } else if (gesture.type === 'child-drag') {
+      updateChildDragGesture(gesture, point)
     } else if (gesture.type === 'scale') {
       updateScaleGesture(gesture, point)
     } else if (gesture.type === 'rotate') {
@@ -1220,6 +1420,7 @@ function onWindowPointerMove(event: PointerEvent) {
 
 function onWindowPointerUp(event: PointerEvent) {
   if (activeGesture.value) {
+    if (event.pointerId !== activeGesture.value.pointerId) return
     finishGesture(event)
     return
   }
@@ -1237,7 +1438,7 @@ function commitTextEdit() {
 
   emit('commit', [
     {
-      id: item.danmu.id,
+      clipId: currentEditor.clipId,
       changes: {
         [currentEditor.field]: currentEditor.value,
       } as Partial<AnyDanmu>,
@@ -1256,6 +1457,7 @@ function cancelTextEdit() {
 function startTextEdit(clipId: string) {
   const item = itemByClipId.value.get(clipId)
   if (!item) return
+  if (unsupportedTransforms.value.has(clipId)) return
   if (item.danmu.type !== 'text' && item.danmu.type !== 'button') return
 
   emitSelection([clipId], clipId)
@@ -1306,19 +1508,36 @@ function observeStageMutations() {
 }
 
 onMounted(() => {
+  mounted = true
   observeStageMutations()
   scheduleStageSync()
+  if (document.fonts) {
+    void document.fonts.ready.then(() => { if (mounted) scheduleStageSync() })
+    document.fonts.addEventListener?.('loadingdone', scheduleStageSync)
+  }
   window.addEventListener('pointermove', onWindowPointerMove)
   window.addEventListener('pointerup', onWindowPointerUp)
   window.addEventListener('pointercancel', onWindowPointerUp)
 })
 
 onBeforeUnmount(() => {
+  mounted = false
+  const gesture = activeGesture.value
+  if (gesture?.type === 'child-drag') {
+    for (const snapshot of gesture.snapshots) {
+      if (snapshot.inlineTransform) {
+        snapshot.element.style.setProperty('transform', snapshot.inlineTransform, snapshot.inlinePriority)
+      } else {
+        snapshot.element.style.removeProperty('transform')
+      }
+    }
+  }
   if (syncFrame) {
     cancelAnimationFrame(syncFrame)
   }
   mutationObserver?.disconnect()
   mutationObserver = null
+  document.fonts?.removeEventListener?.('loadingdone', scheduleStageSync)
   window.removeEventListener('pointermove', onWindowPointerMove)
   window.removeEventListener('pointerup', onWindowPointerUp)
   window.removeEventListener('pointercancel', onWindowPointerUp)
@@ -1349,6 +1568,12 @@ watch(
   },
   { deep: true, immediate: true }
 )
+
+watch(
+  () => [timelineStore.parentReferenceSizes, timelineStore.canvasReferenceSize],
+  scheduleStageSync,
+  { deep: true }
+)
 </script>
 
 <template>
@@ -1367,6 +1592,7 @@ watch(
         'transform-target--editing': textEditor?.clipId === item.clipId,
       }"
       :data-clip-id="item.clipId"
+      :title="unsupportedTransforms.has(item.clipId) ? '当前变换或父级尺寸不支持画布操作，请使用属性面板编辑' : item.parentClipId ? '支持单选或同一父级子对象多选拖动；其他多选、缩放、旋转和锚点请使用属性面板' : selectedClipIds.length > 1 && selectedClipIds.some((id) => itemByClipId.get(id)?.parentClipId) ? '根对象与子对象混合选择时不能拖动，请分别编辑' : undefined"
       :style="getOverlayStyle(item.clipId)"
       @pointerdown="(event) => onTargetPointerDown(event, item.clipId)"
       @dblclick.stop="onTargetDoubleClick(item.clipId)"
@@ -1561,9 +1787,7 @@ watch(
 
 .transform-handle--rotate > span {
   border-radius: 999px;
-  background:
-    radial-gradient(circle at 50% 50%, transparent 0 34%, rgb(18 18 18) 36% 46%, transparent 48%),
-    white;
+  background: radial-gradient(circle at 50% 50%, transparent 0 34%, rgb(18 18 18) 36% 46%, transparent 48%), white;
   border: 1px solid rgb(0 0 0 / 0.42);
   box-shadow:
     0 0 0 1px color-mix(in oklab, var(--primary) 62%, transparent),
@@ -1609,33 +1833,18 @@ watch(
   padding: 8px 10px;
   border: 1px solid var(--primary);
   border-radius: 4px;
-  background: rgb(0 0 0 / 0.88);
+  background: var(--popover);
   color: white;
   resize: none;
   outline: none;
-  box-shadow: 0 12px 30px rgb(0 0 0 / 0.28);
+  box-shadow: none;
 }
 
 .transform-marquee {
   pointer-events: none;
   z-index: 30;
-  border: 1px solid color-mix(in oklab, var(--primary) 90%, white 10%);
-  outline: 1px solid color-mix(in oklab, var(--primary) 18%, transparent);
-  outline-offset: -2px;
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--primary) 20%, transparent),
-      color-mix(in oklab, var(--primary) 10%, transparent)
-    ),
-    repeating-linear-gradient(
-      135deg,
-      color-mix(in oklab, var(--primary) 8%, transparent) 0 8px,
-      transparent 8px 16px
-    );
-  border-radius: 4px;
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--background) 75%, transparent),
-    inset 0 0 0 1px color-mix(in oklab, var(--primary) 22%, transparent);
+  border: 1px solid var(--primary);
+  background: color-mix(in oklab, var(--primary) 10%, transparent);
+  border-radius: 2px;
 }
 </style>

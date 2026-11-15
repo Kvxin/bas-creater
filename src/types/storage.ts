@@ -11,6 +11,21 @@ export interface SerializedAudioMetadata {
   coverUrl?: string; // Data URL 格式的封面
   size?: number;
   type?: string;
+  sourcePath?: string;
+  relativePath?: string;
+}
+
+/** File paths are relative to the project for owned files, absolute for desktop references. */
+export type AssetLocation = { kind: "external" | "project"; path: string };
+
+export type ProjectAsset =
+  | { id: string; type: "text" | "button" | "path"; binId: string | null; danmu: AnyDanmu }
+  | { id: string; type: "audio-file"; binId: string | null; audio: SerializedAudioMetadata; location?: AssetLocation };
+
+export interface ProjectBin {
+  id: string;
+  name: string;
+  parentId: string | null;
 }
 
 /**
@@ -32,6 +47,8 @@ export interface BasProjectData {
   };
   danmus: AnyDanmu[];
   tracks: TimelineTrack[];
+  assets: ProjectAsset[];
+  bins: ProjectBin[];
   audioMeta: SerializedAudioMetadata[];
 }
 

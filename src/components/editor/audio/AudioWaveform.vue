@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, watch, onMounted, onUnmounted } from "vue";
 import {
   BAR_WIDTH,
   BAR_STEP,
@@ -18,6 +18,7 @@ import {
 const props = defineProps<{
   audioUrl: string;
   clipDurationMs: number;
+  clipStartMs: number;
   /** 音频源中的起始偏移（秒），用于 trim */
   sourceStartSec?: number;
   /** 增益采样数组（200个点），每个点对应片段中一个位置的线性增益 */
@@ -306,11 +307,12 @@ onUnmounted(() => {
 
 // ---- 响应 props 变化 ----
 
+watch(() => props.audioUrl, () => void loadWaveform());
+
 watch(
-  () => [props.audioUrl, props.clipDurationMs, props.sourceStartSec],
-  () => {
-    void loadWaveform();
-  },
+  () => [props.clipDurationMs, props.sourceStartSec],
+  () => drawVisible(),
+  { flush: "post" },
 );
 
 watch(
@@ -318,6 +320,7 @@ watch(
     props.gainSamples,
     props.pixelsPerSecond,
     props.scrollLeft,
+    props.clipStartMs,
     props.trackWidth,
     props.color,
     props.burnColor,
@@ -325,6 +328,7 @@ watch(
   () => {
     drawVisible();
   },
+  { flush: "post" },
 );
 
 // 暴露方法供父组件调用

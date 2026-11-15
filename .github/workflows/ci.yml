@@ -35,6 +35,9 @@ jobs:
       - name: Type check and build renderer
         run: pnpm build:renderer
 
+      - name: Storage tests
+        run: pnpm test:storage
+
   backend:
     name: Backend Checks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -88,3 +91,6 @@ jobs:
 
       - name: Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+
+      - name: Native storage tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib

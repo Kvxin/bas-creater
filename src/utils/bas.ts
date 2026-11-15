@@ -48,9 +48,6 @@ class VirtualClock {
     this.baseMs = Math.max(0, ms);
     this.startPerf = performance.now();
   }
-  set(ms: number) {
-    this.baseMs = Math.max(0, ms);
-  }
 }
 
 class BasService {
@@ -72,8 +69,8 @@ class BasService {
         "BasDanmaku not found. Ensure bas.js is included in index.html"
       );
 
-    this.clock.set(0);
-    this.clock.play();
+    this.clock.pause();
+    this.clock.seek(0);
 
     this.bas = new BasDanmaku({
       container: opts.container,
@@ -84,6 +81,7 @@ class BasService {
     });
     this.bas.workerDisabled = true;
     this.bas.init?.();
+    this.bas.pause();
   }
 
   // 完全重置实例（用于编辑器重新编译运行）
@@ -101,7 +99,7 @@ class BasService {
         console.warn("Clear BAS failed", e);
       }
 
-      this.clock.set(0);
+      this.clock.seek(0);
       return;
     }
 
@@ -113,21 +111,16 @@ class BasService {
     return !!this.bas;
   }
   play() {
-    this.clock.play();
+    if (this.clock.isRunning()) return;
+    const timeSec = this.clock.nowMs() / 1000;
     this.bas?.play?.();
+    this.bas?.seek?.(timeSec + this.seekEpsilonSec, true);
+    this.clock.play();
   }
   pause() {
-    this.bas?.pause?.();
+    if (!this.clock.isRunning()) return;
     this.clock.pause();
-  }
-  toggle() {
-    if (!this.bas) return;
-    // 简单根据内部 flag 判断：调用 pause/play 前后同步虚拟时钟
-    // 由于 bas 没有公开 paused 状态，这里采用“先暂停再恢复”的策略：
-    // 调用 pause 后立刻调用 play 会破坏暂停，这里用 try 方式：
-    // 推荐直接在 UI 用显式按钮分别调用 play/pause。
-    this.pause();
-    this.play();
+    this.bas?.pause?.();
   }
   clear() {
     this.bas?.clear?.();
@@ -139,10 +132,9 @@ class BasService {
     this.bas?.resize?.(width, height);
   }
   seek(sec: number, refresh = true) {
-    const safeSec = Math.max(0, sec || 0) + (refresh ? this.seekEpsilonSec : 0);
-    const ms = safeSec * 1000;
-    this.clock.seek(ms);
-    this.bas?.seek?.(safeSec, refresh);
+    const safeSec = Number.isFinite(sec) ? Math.max(0, sec) : 0;
+    this.clock.seek(safeSec * 1000);
+    this.bas?.seek?.(safeSec + (refresh ? this.seekEpsilonSec : 0), refresh);
   }
   
   getCurrentTime() {
@@ -170,6 +162,23 @@ class BasService {
         options?.success?.(addedDm);
       },
       error: options?.error,
+    });
+  }
+
+  addParsedAsync(dm: BasDanmakuObj): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (!this.bas) {
+        reject(new Error("BAS engine is not initialized"));
+        return;
+      }
+      try {
+        this.addParsed(dm, {
+          success: () => resolve(),
+          error: message => reject(new Error(message || "BAS engine failed to add parsed data"))
+        });
+      } catch (error) {
+        reject(error);
+      }
     });
   }
 

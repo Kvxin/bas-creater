@@ -52,6 +52,9 @@ export interface TimelineResourceClip extends TimelineClipBase {
   kind: 'resource';
   resourceId: string;
   params?: TimelineClipParams; // 音频/视频参数（音量、静音等）
+  overrides?: Partial<AnyDanmu>;
+  parentClipId?: string;
+  sourceInMs?: number;
 
   animations?: AnimationSegment[]; // 动画片段列表
   keyframes?: TimelineKeyframe[]; // AE/视频编辑器式关键帧，优先用于新动画系统
@@ -64,6 +67,9 @@ export interface TimelineGroupClip extends TimelineClipBase {
   params?: never;
   animations?: never;
   keyframes?: never;
+  overrides?: never;
+  parentClipId?: never;
+  sourceInMs?: never;
 }
 
 export type TimelineClip = TimelineResourceClip | TimelineGroupClip;

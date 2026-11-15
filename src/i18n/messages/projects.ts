@@ -1,4 +1,15 @@
 const zhCN = {
+  saveConflict: "项目文件已被外部修改，请返回项目列表重新打开。", savePermission: "没有项目文件写入权限，请重新授权或检查文件权限。", saveSpace: "存储空间不足，请释放空间后重试。",
+  discardAfterSaveFailed: "保存失败。放弃未保存的更改并返回项目列表？选择取消以继续编辑并重试。",
+  browserStorageNotice: "当前浏览器不支持选择项目文件夹，无法创建或打开项目。请使用支持 File System Access API 的浏览器。",
+  browserCreateWarning: "浏览器无法阻止其他程序同时创建同名文件。创建期间请勿在其他程序中操作该目录。",
+  copyAudioFailed: "音频导入失败，未添加素材。", selectAudioInstead: "请使用资源栏中的音频按钮选择原始文件，以便项目保留文件路径。",
+  openExisting: "打开本地项目",
+  backups: "历史备份", noBackups: "暂无历史备份。", restoreBackup: "恢复", confirmRestore: "恢复此版本会替换当前项目文件，确认继续？", backupFailed: "备份操作失败，请检查文件权限和项目状态。",
+  offlineMedia: "素材离线", relink: "重新链接", relinkFailed: "重新链接失败，请检查文件和权限。", relinkConfirm: "选择的文件：{name}（{size} 字节）。确认用于重新链接？",
+  removeTitle: "移除项目", removeDescription: "删除磁盘文件仅删除项目文件，素材、备份和原始文件会保留。", listOnly: "仅从列表移除", deleteFiles: "同时删除项目文件", confirmFileDelete: "确定永久删除显示的项目文件吗？此操作无法撤销。", folderLocation: "项目文件夹（需要重新选择）",
+  deleteOneAtATime: "浏览器需要逐个授权文件夹，请每次删除一个项目，直到全部完成。",
+  selectFolder: "选择文件夹", emptyFolder: "请选择已有文件夹", folderFailed: "无法选择文件夹，请重试。", openFailed: "无法打开项目，请检查文件夹权限和项目文件。",
   title: "项目", search: "搜索项目...", newProject: "新建项目", createFirst: "创建第一个项目",
   empty: "还没有项目", emptyDescription: "创建你的第一个项目，开始制作属于你的弹幕作品。",
   noResults: "没有找到项目", noResultsDescription: "换个关键词试试，或创建一个新项目。",
@@ -9,6 +20,17 @@ const zhCN = {
   listFailed: "项目列表加载失败，请刷新重试。", createFailed: "创建项目失败，请重试。", deleteFailed: "删除失败，请重试。"
 };
 const en: typeof zhCN = {
+  saveConflict: "Project changed externally. Return to the project list and reopen it.", savePermission: "Project write permission denied. Grant access or check file permissions.", saveSpace: "Storage is full. Free space and retry.",
+  discardAfterSaveFailed: "Save failed. Discard unsaved changes and return to projects? Cancel to stay and retry.",
+  browserStorageNotice: "This browser cannot select project folders. Use a browser that supports the File System Access API to create or open projects.",
+  browserCreateWarning: "The browser cannot prevent another application from creating the same file simultaneously. Avoid using this folder elsewhere while creating the project.",
+  copyAudioFailed: "Audio import failed; the resource was not added.", selectAudioInstead: "Use the audio button to select the original file and preserve its path.",
+  openExisting: "Open local project",
+  backups: "Backups", noBackups: "No backups yet.", restoreBackup: "Restore", confirmRestore: "Replace the current project with this backup?", backupFailed: "Backup operation failed. Check the project and file permissions.",
+  offlineMedia: "Offline media", relink: "Relink", relinkFailed: "Could not relink this file. Check file access and permissions.", relinkConfirm: "Use {name} ({size} bytes) for this media?",
+  removeTitle: "Remove projects", removeDescription: "Deleting the project file preserves assets, backups and original files.", listOnly: "Remove from list only", deleteFiles: "Also delete project files", confirmFileDelete: "Permanently delete the displayed project files? This cannot be undone.", folderLocation: "Project folder (select again)",
+  deleteOneAtATime: "The browser requires a folder selection for each project. Delete them one at a time.",
+  selectFolder: "Choose folder", emptyFolder: "Select an existing folder", folderFailed: "Unable to select folder.", openFailed: "Could not open project. Check the folder permission and project file.",
   title: "Projects", search: "Search projects...", newProject: "New project", createFirst: "Create your first project",
   empty: "No projects yet", emptyDescription: "Create your first project and start making danmaku.",
   noResults: "No projects found", noResultsDescription: "Try another search, or create a new project.",
@@ -19,6 +41,17 @@ const en: typeof zhCN = {
   listFailed: "Could not load projects. Refresh and try again.", createFailed: "Could not create project.", deleteFailed: "Could not delete projects."
 };
 const ja: typeof zhCN = {
+  saveConflict: "プロジェクトが外部で変更されました。一覧から開き直してください。", savePermission: "書き込み権限がありません。権限を確認してください。", saveSpace: "空き容量が不足しています。",
+  discardAfterSaveFailed: "保存に失敗しました。未保存の変更を破棄して戻りますか？",
+  browserStorageNotice: "このブラウザーではプロジェクトフォルダーを選択できません。File System Access API に対応したブラウザーを使用してください。",
+  browserCreateWarning: "ブラウザーは他のアプリによる同名ファイルの同時作成を防げません。作成中は他のアプリでこのフォルダーを操作しないでください。",
+  copyAudioFailed: "音声を取り込めませんでした。素材は追加されません。", selectAudioInstead: "音声ボタンから元のファイルを選択してください。",
+  openExisting: "ローカルプロジェクトを開く",
+  backups: "バックアップ", noBackups: "バックアップはありません。", restoreBackup: "復元", confirmRestore: "現在のプロジェクトをこのバックアップで置き換えますか？", backupFailed: "バックアップ操作に失敗しました。",
+  offlineMedia: "オフライン素材", relink: "再リンク", relinkFailed: "再リンクできません。権限とファイルを確認してください。", relinkConfirm: "{name}（{size} バイト）を使用しますか？",
+  removeTitle: "プロジェクトを削除", removeDescription: "プロジェクトファイルのみ削除し、素材とバックアップは保持します。", listOnly: "一覧からのみ削除", deleteFiles: "プロジェクトファイルも削除", confirmFileDelete: "表示されたファイルを完全に削除しますか？元に戻せません。", folderLocation: "プロジェクトフォルダー（再選択が必要）",
+  deleteOneAtATime: "ブラウザーではプロジェクトごとにフォルダーの選択が必要です。1 件ずつ削除してください。",
+  selectFolder: "フォルダーを選択", emptyFolder: "既存のフォルダーを選択", folderFailed: "フォルダーを選択できません。", openFailed: "プロジェクトを開けません。権限とファイルを確認してください。",
   title: "プロジェクト", search: "プロジェクトを検索...", newProject: "新規プロジェクト", createFirst: "最初のプロジェクトを作成",
   empty: "プロジェクトはまだありません", emptyDescription: "プロジェクトを作成して弾幕の制作を始めましょう。",
   noResults: "プロジェクトが見つかりません", noResultsDescription: "別のキーワードで検索するか、プロジェクトを作成してください。",

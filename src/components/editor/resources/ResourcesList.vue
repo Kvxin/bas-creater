@@ -1,26 +1,15 @@
 <script setup lang="ts">
-import { ref, nextTick } from "vue";
+import { computed, ref, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
-import {
-  Folder,
-  MessageSquareText,
-  SquareMousePointer,
-  Waypoints,
-  AudioLines,
-  Plus,
-  Trash2,
-} from "lucide-vue-next";
+import { ArrowDown, ArrowUp, ArrowUpDown, Folder, MessageSquareText, SquareMousePointer, Waypoints, AudioLines, Plus, Trash2 } from "lucide-vue-next";
+import { getCoreRowModel, getSortedRowModel, useVueTable, type ColumnDef, type SortingState } from "@tanstack/vue-table";
 import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useTimelineStore } from "@/stores/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 
-import {
-  getDefaultName,
-  getItemName,
-  getItemTypeLabel,
-  formatDuration,
-} from "@/utils/resourceUtils";
+import { getDefaultName, getItemName, getItemTypeLabel, formatDuration } from "@/utils/resourceUtils";
 
 const props = defineProps<{
   items: Array<AnyDanmu | AudioResource>;
@@ -38,7 +27,7 @@ const emit = defineEmits<{
 
 const timelineStore = useTimelineStore();
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 // 编辑状态
 const editingId = ref<string | null>(null);
@@ -72,13 +61,60 @@ const getIcon = (type: string) => {
   }
 };
 
-const getItemDuration = (
-  item: AnyDanmu | AudioResource
-): number | undefined => {
+const getItemDuration = (item: AnyDanmu | AudioResource): number | undefined => {
   if (item.type === "audio-file") {
     return (item as AudioResource).duration;
   }
   return (item as AnyDanmu).durationMs;
+};
+
+type ResourceSortRow = {
+  item: AnyDanmu | AudioResource;
+  name: string;
+  type: string;
+  duration: number | undefined;
+};
+type SortColumn = "name" | "type" | "duration";
+const collator = computed(() => new Intl.Collator(locale.value, { numeric: true, sensitivity: "base" }));
+const tableData = computed<ResourceSortRow[]>(() => props.items.map(item => {
+  const duration = getItemDuration(item);
+  return {
+    item,
+    name: getItemName(item),
+    type: getItemTypeLabel(item.type),
+    duration: duration && Number.isFinite(duration) && duration > 0 ? duration : undefined
+  };
+}));
+const columns: ColumnDef<ResourceSortRow>[] = [
+  { accessorKey: "name", sortingFn: (a, b) => collator.value.compare(a.original.name, b.original.name) },
+  { accessorKey: "type", sortingFn: (a, b) => collator.value.compare(a.original.type, b.original.type) },
+  { accessorKey: "duration", sortUndefined: "last" }
+];
+const sorting = ref<SortingState>([]);
+const table = useVueTable({
+  get data() { return tableData.value; },
+  columns,
+  getCoreRowModel: getCoreRowModel(),
+  getSortedRowModel: getSortedRowModel(),
+  getRowId: row => row.item.id,
+  enableSortingRemoval: false,
+  state: { get sorting() { return sorting.value; } },
+  onSortingChange: updater => {
+    sorting.value = typeof updater === "function" ? updater(sorting.value) : updater;
+  }
+});
+const sortedItems = computed(() => table.getRowModel().rows.map(row => row.original.item));
+const toggleSort = (id: SortColumn) => {
+  const column = table.getColumn(id);
+  column?.toggleSorting(column.getIsSorted() === "asc");
+};
+const sortState = (id: SortColumn) => {
+  const value = table.getColumn(id)?.getIsSorted();
+  return value === "asc" ? "ascending" : value === "desc" ? "descending" : undefined;
+};
+const sortIcon = (id: SortColumn) => {
+  const value = table.getColumn(id)?.getIsSorted();
+  return value === "asc" ? ArrowUp : value === "desc" ? ArrowDown : ArrowUpDown;
 };
 
 // 点击列表项
@@ -113,10 +149,7 @@ const cancelEdit = () => {
 };
 
 // 处理编辑输入框按键
-const handleEditKeydown = (
-  event: KeyboardEvent,
-  item: AnyDanmu | AudioResource
-) => {
+const handleEditKeydown = (event: KeyboardEvent, item: AnyDanmu | AudioResource) => {
   if (event.key === "Enter") {
     saveEdit(item);
   } else if (event.key === "Escape") {
@@ -131,10 +164,7 @@ const handleDeleteItem = (item: AnyDanmu | AudioResource, event: Event) => {
 };
 
 // 拖拽处理
-const handleDragStart = (
-  item: AnyDanmu | AudioResource,
-  event: DragEvent
-) => {
+const handleDragStart = (item: AnyDanmu | AudioResource, event: DragEvent) => {
   emit("drag-start", item, event);
 };
 
@@ -148,25 +178,102 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
 
 <template>
   <div class="flex-1 flex flex-col min-w-0 overflow-hidden" data-ui="resources-list">
-    <!-- List Header -->
-    <div
-      v-if="layout === 'list'"
-      class="flex items-center px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border/70 bg-background"
-    >
-      <div class="flex-1">{{ t('common.name') }}</div>
-      <div class="w-16 text-center">{{ t('common.type') }}</div>
-      <div class="w-16 text-right">{{ t('common.duration') }}</div>
-      <div class="w-8"></div>
+    <div v-if="layout === 'list'" class="flex-1 overflow-y-auto scrollbar-hidden">
+      <Table class="table-fixed text-xs">
+        <colgroup>
+          <col />
+          <col class="w-16" />
+          <col class="w-20" />
+        </colgroup>
+        <TableHeader class="sticky top-0 z-10 bg-background">
+          <TableRow class="border-border/70 hover:bg-transparent">
+            <TableHead scope="col" class="h-9 pl-3 text-xs" :aria-sort="sortState('name')">
+              <button type="button" class="flex w-full items-center gap-1 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary" @click="toggleSort('name')">
+                {{ t("common.name") }} <component :is="sortIcon('name')" class="size-3 shrink-0" aria-hidden="true" />
+              </button>
+            </TableHead>
+            <TableHead scope="col" class="h-9 px-1 text-xs" :aria-sort="sortState('type')">
+              <button type="button" class="flex w-full items-center justify-center gap-0.5 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary" @click="toggleSort('type')">
+                {{ t("common.type") }} <component :is="sortIcon('type')" class="size-3 shrink-0" aria-hidden="true" />
+              </button>
+            </TableHead>
+            <TableHead scope="col" class="h-9 px-1 text-xs" :aria-sort="sortState('duration')">
+              <button type="button" class="flex w-full items-center justify-end gap-0.5 hover:text-foreground focus-visible:outline focus-visible:outline-1 focus-visible:outline-primary" @click="toggleSort('duration')">
+                {{ t("common.duration") }} <component :is="sortIcon('duration')" class="size-3 shrink-0" aria-hidden="true" />
+              </button>
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow
+            v-for="item in sortedItems"
+            :key="item.id"
+            draggable="true"
+            tabindex="0"
+            :aria-selected="selectedId === item.id"
+            :data-state="selectedId === item.id ? 'selected' : undefined"
+            class="resource-item group cursor-pointer border-0 hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary"
+            @dragstart="handleDragStart(item, $event)"
+            @click="handleItemClick(item)"
+            @contextmenu.prevent="emit('contextmenu', item, $event)"
+            @keydown.enter.self.prevent="handleItemClick(item)"
+            @keydown.space.self.prevent="handleItemClick(item)"
+          >
+            <TableCell class="h-9 pl-3">
+              <div class="flex min-w-0 items-center gap-2.5">
+                <component :is="getIcon(item.type)" class="size-4 shrink-0 text-muted-foreground" :class="{ 'text-primary': selectedId === item.id }" />
+                <Input
+                  v-if="editingId === item.id"
+                  :ref="setEditInputRef"
+                  v-model="editingName"
+                  type="text"
+                  :placeholder="getDefaultName(item)"
+                  class="h-6 min-w-0 px-1.5 text-xs"
+                  @click.stop
+                  @keydown="handleEditKeydown($event, item)"
+                  @blur="saveEdit(item)"
+                />
+                <div
+                  v-else
+                  class="min-w-0 truncate font-medium text-foreground"
+                  :class="{ 'text-muted-foreground': !item.name }"
+                  :title="t('resources.itemTooltip', { name: getItemName(item) })"
+                  @dblclick="startEdit(item, $event)"
+                >
+                  {{ getItemName(item) }}
+                </div>
+              </div>
+            </TableCell>
+            <TableCell class="text-center">
+              <span class="rounded-sm bg-surface px-1.5 py-0.5 text-[11px] text-muted-foreground">{{ getItemTypeLabel(item.type) }}</span>
+            </TableCell>
+            <TableCell class="relative pr-3 text-right font-mono text-muted-foreground">
+              <span class="group-hover:opacity-0 group-focus-within:opacity-0">{{ formatDuration(getItemDuration(item)) }}</span>
+              <div class="absolute right-1 top-1/2 flex -translate-y-1/2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
+                <button type="button" class="size-6 rounded-sm inline-flex items-center justify-center hover:bg-accent text-muted-foreground hover:text-foreground" :title="t('resources.addToNewTrack')" :aria-label="t('resources.addToNewTrack')" @click="addToNewTrack(item, $event)">
+                  <Plus class="size-3" />
+                </button>
+                <button type="button" class="size-6 rounded-sm inline-flex items-center justify-center hover:bg-destructive/15 text-destructive" :title="t('common.delete')" :aria-label="t('common.delete')" @click="handleDeleteItem(item, $event)">
+                  <Trash2 class="size-3.5" />
+                </button>
+              </div>
+            </TableCell>
+          </TableRow>
+          <TableRow v-if="items.length === 0" class="border-0 hover:bg-transparent">
+            <TableCell colspan="3">
+              <div class="flex h-36 flex-col items-center justify-center text-muted-foreground">
+                <Folder class="size-6 mb-3 text-tertiary" />
+                <span>{{ t("resources.empty") }}</span>
+                <span class="mt-1 text-xs">{{ t("resources.emptyHint") }}</span>
+              </div>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
     </div>
-
-    <!-- List Body -->
     <div
-      class="flex-1 overflow-y-auto scrollbar-hidden"
-      :class="
-        layout === 'grid'
-          ? 'grid auto-rows-min grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] content-start gap-2 p-2'
-          : 'space-y-0.5 p-1'
-      "
+      v-else
+      class="flex-1 overflow-y-auto scrollbar-hidden grid auto-rows-min grid-cols-[repeat(auto-fill,minmax(9rem,1fr))] content-start gap-2 p-2"
     >
       <div
         v-for="item in items"
@@ -175,18 +282,19 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
         @dragstart="handleDragStart(item, $event)"
         @click="handleItemClick(item)"
         @contextmenu.prevent="emit('contextmenu', item, $event)"
-        class="group cursor-pointer text-xs transition-colors"
+        class="resource-item group cursor-pointer text-xs transition-colors"
+        role="button"
+        tabindex="0"
+        :aria-pressed="selectedId === item.id"
+        @keydown.enter.self.prevent="handleItemClick(item)"
+        @keydown.space.self.prevent="handleItemClick(item)"
         :class="[
-          layout === 'grid'
-            ? 'relative flex min-h-28 flex-col justify-between rounded-sm border border-border bg-background p-3 hover:border-primary/60 hover:bg-accent/60'
-            : 'flex h-8 items-center rounded-sm px-2 hover:bg-accent',
-          selectedId === item.id
-            ? 'bg-secondary text-secondary-foreground ring-1 ring-secondary-border'
-            : '',
+          'relative flex min-h-28 flex-col justify-between rounded-sm border border-divider p-3 hover:border-border hover:bg-accent/60',
+          selectedId === item.id ? 'bg-secondary text-secondary-foreground ring-1 ring-inset ring-primary/60' : ''
         ]"
       >
         <div
-          v-if="layout === 'grid' && item.type === 'audio-file'"
+          v-if="item.type === 'audio-file'"
           class="mb-1 flex h-20 w-full items-center justify-center overflow-hidden rounded-sm bg-accent"
         >
           <img
@@ -201,13 +309,10 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
           v-else
           :is="getIcon(item.type)"
           class="text-muted-foreground group-hover:text-foreground transition-colors shrink-0"
-          :class="[
-            layout === 'grid' ? 'mb-1 size-5' : 'mr-2.5 size-4',
-            { 'text-primary': selectedId === item.id },
-          ]"
+          :class="['mb-1 size-5', { 'text-primary': selectedId === item.id }]"
         />
         <!-- 名称显示/编辑 -->
-        <div :class="layout === 'grid' ? 'w-full min-w-0 pr-10' : 'mr-2 min-w-0 flex-1'">
+        <div class="w-full min-w-0 pr-10">
           <!-- 编辑模式 -->
           <Input
             v-if="editingId === item.id"
@@ -231,50 +336,17 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
             {{ getItemName(item) }}
           </div>
         </div>
-        <div
-          v-if="layout === 'list'"
-          class="w-14 text-center text-muted-foreground/70 shrink-0"
-        >
-          <span
-            class="px-1.5 py-0.5 rounded-sm text-[10px] bg-accent"
-            :class="{
-              'bg-blue-500/20 text-blue-400': item.type === 'text',
-              'bg-orange-500/20 text-orange-400': item.type === 'button',
-              'bg-green-500/20 text-green-400': item.type === 'path',
-              'bg-purple-500/20 text-purple-400': item.type === 'audio-file',
-            }"
-          >
+        <div class="flex w-full items-center justify-between gap-2 text-muted-foreground">
+          <span class="rounded-sm bg-surface px-1.5 py-0.5 text-[11px]">
             {{ getItemTypeLabel(item.type) }}
           </span>
-        </div>
-        <div
-          v-if="layout === 'list'"
-          class="w-14 text-right text-muted-foreground/70 font-mono shrink-0"
-        >
-          {{ formatDuration(getItemDuration(item)) }}
-        </div>
-        <div
-          v-else
-          class="flex w-full items-center justify-between gap-2 text-muted-foreground/70"
-        >
-          <span
-            class="rounded-sm bg-accent px-1.5 py-0.5 text-[10px]"
-            :class="{
-              'bg-blue-500/20 text-blue-400': item.type === 'text',
-              'bg-orange-500/20 text-orange-400': item.type === 'button',
-              'bg-green-500/20 text-green-400': item.type === 'path',
-              'bg-purple-500/20 text-purple-400': item.type === 'audio-file',
-            }"
-          >
-            {{ getItemTypeLabel(item.type) }}
-          </span>
-          <span class="font-mono text-[10px]">{{ formatDuration(getItemDuration(item)) }}</span>
+          <span class="font-mono text-[11px]">{{ formatDuration(getItemDuration(item)) }}</span>
         </div>
         <!-- 添加到轨道按钮 -->
         <button
           @click="addToNewTrack(item, $event)"
-          class="size-6 rounded-sm inline-flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-accent text-muted-foreground hover:text-foreground transition-all"
-          :class="layout === 'grid' ? 'absolute right-8 top-2' : 'ml-1'"
+          type="button"
+          class="absolute right-8 top-2 size-6 rounded-sm inline-flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-accent text-muted-foreground hover:text-foreground transition-all"
           :title="t('resources.addToNewTrack')"
         >
           <Plus class="size-3" />
@@ -282,8 +354,8 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
         <!-- 删除按钮 -->
         <button
           @click="handleDeleteItem(item, $event)"
-          class="size-6 rounded-sm inline-flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-destructive/15 text-destructive transition-all"
-          :class="layout === 'grid' ? 'absolute right-2 top-2' : ''"
+          type="button"
+          class="absolute right-2 top-2 size-6 rounded-sm inline-flex items-center justify-center opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-destructive/15 text-destructive transition-all"
           :title="t('common.delete')"
         >
           <Trash2 class="size-3.5" />
@@ -292,12 +364,11 @@ const addToNewTrack = (item: AnyDanmu | AudioResource, event: Event) => {
 
       <div
         v-if="items.length === 0"
-        class="flex h-36 flex-col items-center justify-center border border-dashed border-border text-muted-foreground"
-        :class="layout === 'grid' ? '' : 'mx-2'"
+        class="flex h-36 flex-col items-center justify-center text-muted-foreground"
       >
-        <Folder class="size-8 mb-2 opacity-20" />
-        <span>{{ t('resources.empty') }}</span>
-        <span class="mt-1 text-xs">{{ t('resources.emptyHint') }}</span>
+        <Folder class="size-6 mb-3 text-tertiary" />
+        <span>{{ t("resources.empty") }}</span>
+        <span class="mt-1 text-xs">{{ t("resources.emptyHint") }}</span>
       </div>
     </div>
   </div>

@@ -29,7 +29,10 @@ const currentResource = computed(() => {
 })
 const resolvedCurrentResource = computed(() => {
   if (!currentResource.value) return null
-  return resolveDanmuDefaults(currentResource.value)
+  const clip = currentClip.value
+  return resolveDanmuDefaults(clip?.kind === 'resource'
+    ? { ...currentResource.value, ...clip.overrides, id: currentResource.value.id, type: currentResource.value.type } as typeof currentResource.value
+    : currentResource.value)
 })
 const resolvedResourceColor = computed(() => {
   const resource = resolvedCurrentResource.value
@@ -39,10 +42,15 @@ const resolvedResourceColor = computed(() => {
   return resource.fillColor
 })
 
-const generatedCode = computed(() => {
-  if (!currentClip.value || !currentResource.value) return ''
-  return compileClipToBas(currentClip.value, currentResource.value)
+const generatedResult = computed(() => {
+  if (!currentClip.value || !currentResource.value) return { code: '', error: '' }
+  try {
+    return { code: compileClipToBas(currentClip.value, currentResource.value), error: '' }
+  } catch (error) {
+    return { code: '', error: error instanceof Error ? error.message : String(error) }
+  }
 })
+const generatedCode = computed(() => generatedResult.value.code)
 
 const copied = ref(false)
 const handleCopy = async () => {
@@ -62,8 +70,9 @@ const handleOpenChange = (open: boolean) => {
 
 // Helpers
 const updateResource = (key: string, val: any) => {
-    if(!currentResource.value) return
-    danmuStore.updateDanmu(currentResource.value.id, { [key]: val })
+    const clip = currentClip.value
+    if (!clip || clip.kind !== 'resource') return
+    timelineStore.updateClip(clip.id, { overrides: { ...clip.overrides, [key]: val } })
 }
 const updateClip = (key: string, val: any) => {
     if(!currentClip.value) return
@@ -103,7 +112,7 @@ const updateResourceColor = (val: string | number) => {
                 </button>
             </div>
             <div class="flex-1 bg-muted p-4 rounded-md font-mono text-xs whitespace-pre overflow-auto h-[400px] border border-border">
-                {{ generatedCode }}
+                {{ generatedResult.error || generatedCode }}
             </div>
         </div>
 
@@ -128,7 +137,7 @@ const updateResourceColor = (val: string | number) => {
                     <!-- ID / Name -->
                      <div class="space-y-1">
                         <Label>{{ t('dialogs.alias') }}</Label>
-                        <Input :model-value="currentResource.name" @update:model-value="v => updateResource('name', v)" />
+                        <Input :model-value="resolvedCurrentResource?.name" @update:model-value="v => updateResource('name', v)" />
                     </div>
                     
                     <!-- Content based on type -->
