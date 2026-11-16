@@ -3,6 +3,7 @@ import { ArrowLeft, ExternalLink, Github, Languages, Monitor, Moon, Sun } from "
 import { useI18n } from "vue-i18n";
 import { SUPPORTED_LOCALES } from "@/i18n";
 import { openExternalUrl } from "@/utils/desktop";
+import AppUpdatePanel from "@/components/AppUpdatePanel.vue";
 
 const isDark = defineModel<boolean>("isDark", { required: true });
 defineEmits<{ close: [] }>();
@@ -79,6 +80,8 @@ const repositoryUrl = "https://github.com/Kvxin/bas-creater";
           </select>
         </div>
       </section>
+
+      <AppUpdatePanel class="panel workbench-panel mt-4 p-5 sm:p-6" />
 
       <section class="panel workbench-panel mt-4 p-5 sm:p-6">
         <div class="flex flex-wrap items-center justify-between gap-4">

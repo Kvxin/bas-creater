@@ -38,6 +38,9 @@ jobs:
       - name: Storage tests
         run: pnpm test:storage
 
+      - name: Updater manifest tests
+        run: pnpm test:updater
+
   backend:
     name: Backend Checks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

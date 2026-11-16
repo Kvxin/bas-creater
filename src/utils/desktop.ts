@@ -1,6 +1,8 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { listen } from "@tauri-apps/api/event";
+import type { AppUpdateStatus, UpdateProgress } from "@/types/appUpdate";
 
 /** 当前是否运行在 Tauri 桌面客户端中 */
 export const isDesktopApp = (): boolean => isTauri();
@@ -53,3 +55,22 @@ export const openExternalUrl = async (url: string): Promise<void> => {
   }
   window.open(url, "_blank", "noopener,noreferrer");
 };
+
+export const RELEASES_URL = "https://github.com/Kvxin/bas-creater/releases/latest";
+
+export const getAppUpdateStatus = async (): Promise<AppUpdateStatus | null> =>
+  isDesktopApp() ? invoke<AppUpdateStatus>("app_update_status") : null;
+
+export const checkAppUpdate = async (): Promise<AppUpdateStatus | null> =>
+  isDesktopApp() ? invoke<AppUpdateStatus>("check_app_update") : null;
+
+export const downloadAppUpdate = async (): Promise<AppUpdateStatus | null> =>
+  isDesktopApp() ? invoke<AppUpdateStatus>("download_app_update") : null;
+
+export const installAppUpdate = async (): Promise<void> => {
+  if (!isDesktopApp()) return openExternalUrl(RELEASES_URL);
+  await invoke("install_app_update");
+};
+
+export const listenToUpdateProgress = async (handler: (progress: UpdateProgress) => void): Promise<() => void> =>
+  isDesktopApp() ? listen<UpdateProgress>("app-update-progress", event => handler(event.payload)) : () => {};

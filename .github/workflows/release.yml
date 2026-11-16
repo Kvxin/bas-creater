@@ -43,6 +43,9 @@ jobs:
     name: Build ${{ matrix.platform }}
     needs: version-check
     runs-on: ${{ matrix.os }}
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
     strategy:
       fail-fast: false
       matrix:
@@ -107,6 +110,14 @@ jobs:
       - name: Install frontend deps
         run: pnpm install --frozen-lockfile
 
+      - name: Check updater signing key
+        shell: bash
+        run: |
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "::error::Configure TAURI_SIGNING_PRIVATE_KEY before building updater artifacts"
+            exit 1
+          fi
+
       # macOS 签名与公证为可选项：仓库配置了对应 secrets 时 Tauri CLI 会自动签名、公证
       - name: Prepare macOS signing env
         if: runner.os == 'macOS'
@@ -145,9 +156,9 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if ('${{ matrix.target }}') {
-            pnpm tauri build --target ${{ matrix.target }} --bundles msi,nsis
+            pnpm tauri build --target ${{ matrix.target }} --bundles "msi,nsis"
           } else {
-            pnpm tauri build --bundles msi,nsis
+            pnpm tauri build --bundles "msi,nsis"
           }
 
       - name: Build Tauri App (Linux)
@@ -157,6 +168,21 @@ jobs:
           # linuxdeploy 依赖 FUSE，GitHub runner 上改为解包运行
           APPIMAGE_EXTRACT_AND_RUN: "1"
         run: pnpm tauri build --bundles appimage,deb,rpm
+
+      # 打包器会改写安装版 EXE 的 bundle type；单独编译便携版并显式禁用原地安装。
+      - name: Build Windows portable executable
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:TARGET) {
+            pnpm tauri build --no-bundle --features portable --target $env:TARGET
+          } else {
+            pnpm tauri build --no-bundle --features portable
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Tauri App (macOS)
         if: runner.os == 'macOS'
@@ -179,17 +205,21 @@ jobs:
           $msi = Get-ChildItem -Path (Join-Path $targetRoot 'bundle/msi') -Filter *.msi | Select-Object -First 1
           if ($null -eq $msi) { throw "No MSI installer found" }
           Copy-Item $msi.FullName "release-assets/$prefix.msi"
+          Copy-Item "$($msi.FullName).sig" "release-assets/$prefix.msi.sig"
 
           $nsis = Get-ChildItem -Path (Join-Path $targetRoot 'bundle/nsis') -Filter *.exe | Select-Object -First 1
           if ($null -eq $nsis) { throw "No NSIS installer found" }
           Copy-Item $nsis.FullName "release-assets/$prefix-Setup.exe"
+          Copy-Item "$($nsis.FullName).sig" "release-assets/$prefix-Setup.exe.sig"
 
-          # 绿色版（portable）：仅可执行文件打 zip
+          # 免安装版依赖系统 WebView2；同时提供单文件 EXE 和 ZIP
           $exePath = Join-Path $targetRoot 'bas-creater.exe'
           if (-not (Test-Path $exePath)) { throw "Portable exe not found: $exePath" }
+          Copy-Item $exePath "release-assets/$prefix-Portable.exe"
           $portableDir = 'release-assets/portable'
           New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
           Copy-Item $exePath (Join-Path $portableDir "$env:APP_ASSET_PREFIX.exe")
+          Set-Content -Path (Join-Path $portableDir 'portable.ini') -Value 'portable=true' -Encoding utf8
           Compress-Archive -Path "$portableDir/*" -DestinationPath "release-assets/$prefix-Portable.zip" -Force
           Remove-Item -Recurse -Force $portableDir
 
@@ -210,6 +240,9 @@ jobs:
               exit 1
             fi
             cp "$file" "release-assets/${PREFIX}.${ext}"
+            if [ "$ext" = AppImage ]; then
+              cp "$file.sig" "release-assets/${PREFIX}.${ext}.sig"
+            fi
           done
 
       - name: Prepare macOS Assets
@@ -232,6 +265,9 @@ jobs:
           cp "$DMG" "release-assets/${PREFIX}.dmg"
           # .app 压缩包（解压即用），使用 ditto 保留扩展属性与签名
           ditto -c -k --sequesterRsrc --keepParent "$APP" "release-assets/${PREFIX}.zip"
+          # 使用 Tauri 生成并签名的专用更新包，不能用上面的手动 ZIP 替代
+          cp "$APP.tar.gz" "release-assets/${PREFIX}.app.tar.gz"
+          cp "$APP.tar.gz.sig" "release-assets/${PREFIX}.app.tar.gz.sig"
 
       - name: List prepared assets
         shell: bash
@@ -251,6 +287,14 @@ jobs:
     # 只有推 tag 才发布，手动触发仅为干跑
     if: github.event_name == 'push' && github.ref_type == 'tag'
     steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+
       - name: Download built release artifacts
         uses: actions/download-artifact@v8
         with:
@@ -260,6 +304,12 @@ jobs:
 
       - name: List downloaded release artifacts
         run: ls -la release-assets
+
+      - name: Generate updater manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+        run: node scripts/generate-updater-manifest.mjs release-assets
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v3
@@ -274,11 +324,15 @@ jobs:
 
             ### 下载
 
-            - **Windows (x86_64)**: `DanmakuCut-${{ github.ref_name }}-Windows-x86_64-Setup.exe` / `.msi`（安装版）或 `-Portable.zip`（绿色版）
-            - **Windows (ARM64)**: `DanmakuCut-${{ github.ref_name }}-Windows-arm64-Setup.exe` / `.msi` 或 `-Portable.zip`
+            - **Windows (x86_64)**: `DanmakuCut-${{ github.ref_name }}-Windows-x86_64-Setup.exe` / `.msi`（安装版），`-Portable.exe`（单文件免安装版）或 `-Portable.zip`（压缩包）
+            - **Windows (ARM64)**: `DanmakuCut-${{ github.ref_name }}-Windows-arm64-Setup.exe` / `.msi`（安装版），`-Portable.exe`（单文件免安装版）或 `-Portable.zip`（压缩包）
             - **macOS (Universal)**: `DanmakuCut-${{ github.ref_name }}-macOS.dmg`（推荐）或 `.zip`（解压即用）
             - **Linux (x86_64)**: `DanmakuCut-${{ github.ref_name }}-Linux-x86_64.AppImage` / `.deb` / `.rpm`
             - **Linux (ARM64)**: `DanmakuCut-${{ github.ref_name }}-Linux-arm64.AppImage` / `.deb` / `.rpm`
+
+            > Windows 免安装版需要系统已安装 Microsoft Edge WebView2 Runtime；缺少时请先安装 WebView2，或使用 Setup.exe 安装版。免安装版仍将设置及近期项目记录保存在系统用户数据目录中，并通过下载页手动更新。
+
+            > `latest.json`、`.sig` 和 `.app.tar.gz` 用于应用内自动更新，无需手动下载。草稿发布为正式版本后，客户端才能检测到本次更新。
 
             > 未配置 Apple 签名证书时，macOS 版本为未签名应用，首次打开需在「系统设置 → 隐私与安全性」中允许。
           files: release-assets/*

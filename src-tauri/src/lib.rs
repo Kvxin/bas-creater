@@ -1,3 +1,4 @@
+mod app_update;
 mod commands;
 mod project_files;
 mod recent_projects;
@@ -22,6 +23,8 @@ pub fn run() {
     }
 
     builder
+        .manage(app_update::UpdateState::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         // 标题栏由前端自绘，不能让旧版本保存的 decorations 状态把系统标题栏恢复回来
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -31,6 +34,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            app_update::app_update_status,
+            app_update::check_app_update,
+            app_update::download_app_update,
+            app_update::install_app_update,
             commands::write_text_file,
             recent_projects::read_recent_projects,
             recent_projects::write_recent_projects,

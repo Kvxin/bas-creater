@@ -35,15 +35,16 @@
     "targets": "all",
     "category": "Video",
     "shortDescription": "BAS 弹幕时间轴编辑器",
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/128x128@2x.png",
-      "icons/icon.icns",
-      "icons/icon.ico"
-    ],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "macOS": {
       "minimumSystemVersion": "12.0"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": ["https://github.com/Kvxin/bas-creater/releases/latest/download/latest.json"],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMxQzY1RkMxODhFRDMzQUIKUldTck0rMkl3Vi9HTVg3Um9KQy8yZ2NFTXlOYTMzZUlaVGV2eE5OQ21wcmdBZDhGUjFtNktiYVEK"
     }
   }
 }

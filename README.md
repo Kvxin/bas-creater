@@ -46,12 +46,26 @@ pnpm tauri icon assets/app-icon.svg -o src-tauri/icons  # 重新生成图标
 
 1. 同步修改 `package.json` 与 `src-tauri/Cargo.toml` 中的 `version`
 2. 推送 `v<版本号>` tag（如 `v0.1.0`），`Release` workflow 会构建：
-   - Windows x86_64 / ARM64：`.msi`、NSIS `-Setup.exe`、`-Portable.zip`
+   - Windows x86_64 / ARM64：`.msi`、NSIS `-Setup.exe`、单文件 `-Portable.exe`、`-Portable.zip`
    - macOS Universal：`.dmg`、`.zip`
    - Linux x86_64 / ARM64：`.AppImage`、`.deb`、`.rpm`
 3. 产物上传到草稿（draft）GitHub Release，确认后手动发布
 
 手动触发 `Release` workflow 为干跑，仅在 workflow artifacts 中保留产物。
+
+Windows 的 `-Portable.exe` 可直接运行，无需安装应用；`-Portable.zip` 解压后使用方式相同。两者均依赖系统已安装 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)，不包含独立浏览器运行时；缺少时请先安装 WebView2，或使用 `-Setup.exe` 安装版。免安装版仍将设置及近期项目记录保存在系统用户数据目录中，项目文件保存在用户选择的位置。
+
+## 应用内更新
+
+正式桌面构建启动 1 秒后检查最新正式版本，之后每 6 小时检查一次；设置页也可手动检查。自动下载默认关闭，可在设置中开启。更新下载后先验证签名，用户点击“保存工程并安装重启”后才安装；当前工程保存失败时中止安装。下载包缓存在 Rust 进程内存中，退出应用后需重新下载。选择“稍后”会隐藏该版本提示，设置页仍可安装。
+
+Windows MSI 与 NSIS 安装版分别下载同类型安装包，macOS 使用 Universal `.app.tar.gz` 更新包，Linux AppImage 支持应用内安装。Windows 便携版、Linux DEB/RPM 和开发构建仅提供手动下载入口。Web 版随网站部署更新，不调用桌面更新接口。
+
+Release workflow 要求仓库 Actions Secret `TAURI_SIGNING_PRIVATE_KEY`；加密私钥还需配置 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`。私钥必须与 `src-tauri/tauri.conf.json` 中 updater 的公钥配对，不能随意轮换，也不要提交到仓库。可用 `pnpm tauri signer generate --ci -w <仓库外的私钥路径>` 为新项目生成密钥。已有客户端只能接受原公钥对应私钥签名的更新。
+
+构建会生成安装包签名，并在发布前生成 `latest.json`，任一平台的更新包或签名缺失都会导致发布失败。`.sig`、`latest.json`、`.app.tar.gz` 属于自动更新文件，无需手动下载。草稿和预发布版本不会通过 `releases/latest` 推送；检查完产物后将草稿发布为正式版本，客户端才能检测到。首次接入此功能之前的旧客户端不含更新器，需要先手动安装一次带更新功能的新版本。
+
+本地仅编译可运行 `pnpm tauri build --no-bundle`；生成便携版使用 `pnpm tauri build --no-bundle --features portable`，该构建明确禁用自动安装，即使 EXE 被重命名也不会改变。workflow 在安装包生成后单独编译便携版，避免沿用打包器写入的安装类型标识。生成带更新签名的安装包时，需要在本机设置对应的 `TAURI_SIGNING_PRIVATE_KEY`。验证命令：`pnpm test:updater`、`pnpm test:storage`、`pnpm build:renderer`，以及 `src-tauri` 下的 `cargo fmt --check`、`cargo clippy -- -D warnings` 和 `cargo test --lib`。
 
 macOS 签名/公证为可选项：在仓库 secrets 中配置 `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`（以及公证用的 `APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID`）后自动启用。
 

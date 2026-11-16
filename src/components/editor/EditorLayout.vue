@@ -13,6 +13,7 @@ import { bundleProject } from "@/services/storage/projectBundle";
 import { useTitleBarDrag } from "@/composables/useTitleBarDrag";
 import { useI18n } from "vue-i18n";
 import SettingsView from "@/views/SettingsView.vue";
+import { registerUpdatePreparation } from "@/services/updatePreparation";
 import { useProjectAutoSave } from "@/composables/useProjectAutoSave";
 import {
   Dialog,
@@ -70,7 +71,7 @@ const exportTimelineAsTxt = async () => {
   try {
     const ranges: Array<{ clipId: string; startLine: number; endLine: number }> = [];
     const content = compileTimelineToBas(timelineStore.rootTracks, danmuStore.danmus, {
-      audioResourceIds: autoSave.getProjectSnapshot().audioMeta.map((audio) => audio.id),
+      audioResourceIds: autoSave.getProjectSnapshot().audioMeta.map(audio => audio.id),
       onRange: (clipId, startLine, endLine) => ranges.push({ clipId, startLine, endLine })
     });
     if (content.trim()) {
@@ -107,6 +108,13 @@ const flushBeforeLeaving = async (): Promise<boolean> => {
   return true;
 };
 
+const unregisterUpdatePreparation = registerUpdatePreparation(async () => {
+  timelineStore.isPlaying = false;
+  if (!isReady.value || loadFailed.value) return false;
+  if (!(await autoSave.saveNow())) return false;
+  return !autoSave.isDirty.value;
+});
+
 onMounted(async () => {
   if (isDesktop) {
     const appWindow = getCurrentWindow();
@@ -138,6 +146,7 @@ onMounted(async () => {
   loadFailed.value = !isReady.value;
 });
 onBeforeUnmount(() => {
+  unregisterUpdatePreparation();
   unmounted = true;
   unlistenClose?.();
   stopResize();
@@ -354,10 +363,7 @@ useEventListener("mouseleave", stopResize);
       <div class="flex-1 flex min-h-0 px-1.5">
         <!-- Left Panel: Resources -->
         <div class="shrink-0 flex min-w-0" :style="{ width: `${visibleLeftWidth}px` }">
-          <ResourcesPanel
-            :project-id="props.projectId"
-            :offline-audio="autoSave.importedAudioMeta.value"
-          />
+          <ResourcesPanel :project-id="props.projectId" :offline-audio="autoSave.importedAudioMeta.value" />
         </div>
 
         <!-- Resizer -->

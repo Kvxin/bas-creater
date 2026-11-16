@@ -1,15 +1,16 @@
-import app from './app'
-import projects from './projects'
-import audio from './audio'
-import common from './common'
-import danmu from './danmu'
-import dialogs from './dialogs'
-import menus from './menus'
-import preview from './preview'
-import properties from './properties'
-import resources from './resources'
-import timeline from './timeline'
-import groups from './groups'
+import app from "./app";
+import projects from "./projects";
+import audio from "./audio";
+import common from "./common";
+import danmu from "./danmu";
+import dialogs from "./dialogs";
+import menus from "./menus";
+import preview from "./preview";
+import properties from "./properties";
+import resources from "./resources";
+import timeline from "./timeline";
+import groups from "./groups";
+import updates from "./updates";
 
 /**
  * Aggregates every namespace module into the per-locale message tree consumed
@@ -24,21 +25,23 @@ import groups from './groups'
  * identical — the per-namespace `typeof zhCN` annotations already guarantee it.
  */
 export const messages = {
-  'zh-CN': {
-    groups: groups['zh-CN'],
-    common: common['zh-CN'],
-    app: app['zh-CN'],
-    projects: projects['zh-CN'],
-    danmu: danmu['zh-CN'],
-    resources: resources['zh-CN'],
-    properties: properties['zh-CN'],
-    timeline: timeline['zh-CN'],
-    preview: preview['zh-CN'],
-    audio: audio['zh-CN'],
-    menus: menus['zh-CN'],
-    dialogs: dialogs['zh-CN'],
+  "zh-CN": {
+    updates: updates["zh-CN"],
+    groups: groups["zh-CN"],
+    common: common["zh-CN"],
+    app: app["zh-CN"],
+    projects: projects["zh-CN"],
+    danmu: danmu["zh-CN"],
+    resources: resources["zh-CN"],
+    properties: properties["zh-CN"],
+    timeline: timeline["zh-CN"],
+    preview: preview["zh-CN"],
+    audio: audio["zh-CN"],
+    menus: menus["zh-CN"],
+    dialogs: dialogs["zh-CN"]
   },
   en: {
+    updates: updates.en,
     groups: groups.en,
     common: common.en,
     app: app.en,
@@ -50,9 +53,10 @@ export const messages = {
     preview: preview.en,
     audio: audio.en,
     menus: menus.en,
-    dialogs: dialogs.en,
+    dialogs: dialogs.en
   },
   ja: {
+    updates: updates.ja,
     groups: groups.ja,
     common: common.ja,
     app: app.ja,
@@ -64,8 +68,8 @@ export const messages = {
     preview: preview.ja,
     audio: audio.ja,
     menus: menus.ja,
-    dialogs: dialogs.ja,
-  },
-}
+    dialogs: dialogs.ja
+  }
+};
 
-export type MessageSchema = (typeof messages)['zh-CN']
+export type MessageSchema = (typeof messages)["zh-CN"];
