@@ -6,11 +6,24 @@ use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
-#[derive(Default, Deserialize, Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedPreferences {
-    #[serde(default)]
+    #[serde(default = "default_use_app_window_controls")]
     use_app_window_controls: bool,
+}
+
+// Linux 未保存设置时默认使用应用内窗口按钮。
+fn default_use_app_window_controls() -> bool {
+    true
+}
+
+impl Default for SavedPreferences {
+    fn default() -> Self {
+        Self {
+            use_app_window_controls: default_use_app_window_controls(),
+        }
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -80,7 +93,7 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
     let path = app.path().app_config_dir()?.join("window-preferences.json");
     let saved = if cfg!(target_os = "linux") {
         read_preferences(&path).unwrap_or_else(|error| {
-            eprintln!("读取窗口设置失败，使用系统窗口装饰: {error}");
+            eprintln!("读取窗口设置失败，使用应用内窗口按钮: {error}");
             SavedPreferences::default()
         })
     } else {
@@ -147,21 +160,23 @@ mod tests {
 
     #[test]
     fn platform_defaults_and_linux_override() {
-        for (platform, expected) in [("windows", true), ("linux", false), ("macos", false)] {
+        for (platform, expected) in [("windows", true), ("linux", true), ("macos", false)] {
             assert_eq!(
                 preferences_for(platform, SavedPreferences::default()).use_app_window_controls,
                 expected
             );
         }
         assert!(
-            preferences_for(
+            !preferences_for(
                 "linux",
                 SavedPreferences {
-                    use_app_window_controls: true
+                    use_app_window_controls: false
                 }
             )
             .use_app_window_controls
         );
+        let legacy: SavedPreferences = serde_json::from_str("{}").unwrap();
+        assert!(legacy.use_app_window_controls);
         assert!(
             !preferences_for(
                 "macos",
@@ -183,14 +198,11 @@ mod tests {
             std::env::temp_dir().join(format!("bas-window-prefs-{}-{nonce}", std::process::id()));
         fs::create_dir(&directory).unwrap();
         let path = directory.join("window-preferences.json");
+        assert!(read_preferences(&path).unwrap().use_app_window_controls);
+        write_preferences(&path, false).unwrap();
         assert!(!read_preferences(&path).unwrap().use_app_window_controls);
         write_preferences(&path, true).unwrap();
         assert!(read_preferences(&path).unwrap().use_app_window_controls);
-        #[cfg(target_os = "linux")]
-        {
-            write_preferences(&path, false).unwrap();
-            assert!(!read_preferences(&path).unwrap().use_app_window_controls);
-        }
         fs::write(&path, "invalid").unwrap();
         assert!(read_preferences(&path).is_err());
         assert_eq!(fs::read_to_string(&path).unwrap(), "invalid");
