@@ -90,6 +90,8 @@ pub fn initialize(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>
     #[cfg(not(target_os = "macos"))]
     if let Some(window) = app.get_webview_window("main") {
         window.set_decorations(!preferences.use_app_window_controls)?;
+        #[cfg(target_os = "linux")]
+        super::window_geometry::initialize(&window)?;
         #[cfg(target_os = "windows")]
         window.set_shadow(true)?;
     }
