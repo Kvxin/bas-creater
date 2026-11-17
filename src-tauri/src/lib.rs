@@ -2,6 +2,8 @@ mod app_update;
 mod commands;
 mod project_files;
 mod recent_projects;
+#[cfg(target_os = "linux")]
+mod window_geometry;
 mod window_preferences;
 
 use tauri::Manager;
