@@ -41,6 +41,9 @@ jobs:
       - name: Updater manifest tests
         run: pnpm test:updater
 
+      - name: Window controls tests
+        run: pnpm test:window-controls
+
   backend:
     name: Backend Checks (${{ matrix.os }})
     runs-on: ${{ matrix.os }}

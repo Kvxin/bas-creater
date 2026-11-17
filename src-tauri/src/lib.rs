@@ -2,6 +2,7 @@ mod app_update;
 mod commands;
 mod project_files;
 mod recent_projects;
+mod window_preferences;
 
 use tauri::Manager;
 use tauri_plugin_window_state::StateFlags;
@@ -25,15 +26,20 @@ pub fn run() {
     builder
         .manage(app_update::UpdateState::default())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        // 标题栏由前端自绘，不能让旧版本保存的 decorations 状态把系统标题栏恢复回来
+        // 装饰与首次显示由平台设置决定，不恢复旧版本缓存的装饰或可见性。
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_state_flags(StateFlags::all() & !StateFlags::DECORATIONS)
+                .with_state_flags(
+                    StateFlags::all() & !(StateFlags::DECORATIONS | StateFlags::VISIBLE),
+                )
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .setup(window_preferences::initialize)
         .invoke_handler(tauri::generate_handler![
+            window_preferences::get_window_preferences,
+            window_preferences::set_app_window_controls,
             app_update::app_update_status,
             app_update::check_app_update,
             app_update::download_app_update,

@@ -69,6 +69,10 @@ Release workflow 要求仓库 Actions Secret `TAURI_SIGNING_PRIVATE_KEY`；加�
 
 macOS 签名/公证为可选项：在仓库 secrets 中配置 `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`（以及公证用的 `APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID`）后自动启用。
 
+## 窗口控制
+
+窗口控制按平台适配：macOS 使用原生红绿灯和叠加式标题栏，Windows 使用右上角应用内按钮，Linux 默认使用桌面环境提供的原生标题栏和按钮。Linux 用户可在设置中切换“使用应用内窗口按钮”，立即生效；偏好保存在应用配置目录的 `window-preferences.json`，下次启动会在窗口显示前恢复。按钮位置和外观由 Linux 桌面环境决定，程序不识别或模拟红绿灯主题。Web 版不显示桌面窗口控制选项。
+
 ## 数据存储
 
 项目以 `<项目名>.basproj` 保存在用户选定的目录，不要求目录为空；同名项目文件不会被覆盖。已有的 `project.basproj` 仍可打开。桌面端近期项目列表保存在 Tauri 应用配置目录的 `recent-projects.json`。Web 端在 localStorage 保存近期列表，并在 IndexedDB 中仅保存项目文件夹句柄；项目内容和素材仍保存在文件系统。重新打开时会检查文件夹权限；如原文件夹不可用，可通过“打开本地项目”重新选择。

@@ -29,7 +29,8 @@ import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { compileTimelineToBas, formatBasParseError } from "@/utils/compiler";
 import { parseBasDSL } from "@/utils/bas";
-import { isDesktopApp, isMacOS, saveTextFile } from "@/utils/desktop";
+import { isDesktopApp, saveTextFile } from "@/utils/desktop";
+import { useWindowPreferencesStore } from "@/stores/windowPreferences";
 
 const props = defineProps<{ projectId: string }>();
 const emit = defineEmits<{ close: [] }>();
@@ -55,11 +56,12 @@ const collectProject = () => bundleProject(props.projectId, autoSave.getProjectS
 const exportFileName = ref("bas-creater-timeline");
 const exportError = ref("");
 const isSettingsOpen = ref(false);
-// 桌面端隐藏系统标题栏，由顶部 header 充当可拖动的标题栏
+// 原生 Linux 标题栏由桌面环境处理拖动；其余模式使用应用页头。
 const isDesktop = isDesktopApp();
-const hasCustomWindowControls = isDesktop && !isMacOS();
-const hasTrafficLights = isDesktop && isMacOS();
-const titleBarListeners = isDesktop ? useTitleBarDrag() : {};
+const windowPreferences = useWindowPreferencesStore();
+const hasCustomWindowControls = computed(() => windowPreferences.hasCustomControls);
+const hasTrafficLights = computed(() => windowPreferences.hasTrafficLights);
+const titleBarListeners = useTitleBarDrag(() => windowPreferences.usesCustomTitleBar);
 
 const openExportDialog = () => {
   exportError.value = "";

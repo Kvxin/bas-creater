@@ -4,11 +4,14 @@ import { useI18n } from "vue-i18n";
 import { SUPPORTED_LOCALES } from "@/i18n";
 import { openExternalUrl } from "@/utils/desktop";
 import AppUpdatePanel from "@/components/AppUpdatePanel.vue";
+import { useWindowPreferencesStore } from "@/stores/windowPreferences";
+import { Switch } from "@/components/ui/switch";
 
 const isDark = defineModel<boolean>("isDark", { required: true });
 defineEmits<{ close: [] }>();
 const { t, locale } = useI18n();
 const repositoryUrl = "https://github.com/Kvxin/bas-creater";
+const windowPreferences = useWindowPreferencesStore();
 </script>
 
 <template>
@@ -78,6 +81,24 @@ const repositoryUrl = "https://github.com/Kvxin/bas-creater";
           >
             <option v-for="item in SUPPORTED_LOCALES" :key="item.value" :value="item.value">{{ item.label }}</option>
           </select>
+        </div>
+        <div
+          v-if="windowPreferences.isLinux"
+          class="mt-4 flex items-center justify-between gap-4 border-t border-border pt-4"
+        >
+          <div>
+            <label for="app-window-controls" class="font-medium">{{ t("app.useAppWindowControls") }}</label>
+            <p class="mt-1 text-xs text-muted-foreground">{{ t("app.windowControlsDescription") }}</p>
+            <p v-if="windowPreferences.hasError" role="alert" class="mt-1 text-xs text-destructive">
+              {{ t("app.windowControlsFailed") }}
+            </p>
+          </div>
+          <Switch
+            id="app-window-controls"
+            :model-value="windowPreferences.hasCustomControls"
+            :disabled="windowPreferences.isSaving"
+            @update:model-value="windowPreferences.setCustomControls"
+          />
         </div>
       </section>
 

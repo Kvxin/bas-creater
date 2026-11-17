@@ -28,17 +28,21 @@ const runWindowAction = (action: () => Promise<void>) => {
  * 自绘标题栏的拖动与双击最大化。
  * 鼠标移动超过阈值后才开始拖动，避免 Linux 下拖动抓取指针后吞掉双击的第二次点击。
  */
-export function useTitleBarDrag() {
+export function useTitleBarDrag(isEnabled: () => boolean = () => true) {
   let pressPoint: { x: number; y: number } | null = null;
 
   const onMousedown = (event: MouseEvent) => {
     pressPoint = null;
-    if (event.button !== 0 || event.detail > 1 || isInteractiveTarget(event.target)) return;
+    if (!isEnabled() || event.button !== 0 || event.detail > 1 || isInteractiveTarget(event.target)) return;
     event.preventDefault();
     pressPoint = { x: event.screenX, y: event.screenY };
   };
 
   const onMousemove = (event: MouseEvent) => {
+    if (!isEnabled()) {
+      pressPoint = null;
+      return;
+    }
     if (!pressPoint) return;
     if ((event.buttons & 1) === 0) {
       pressPoint = null;
@@ -57,7 +61,7 @@ export function useTitleBarDrag() {
 
   const onDblclick = (event: MouseEvent) => {
     pressPoint = null;
-    if (event.button !== 0 || isInteractiveTarget(event.target)) return;
+    if (!isEnabled() || event.button !== 0 || isInteractiveTarget(event.target)) return;
     runWindowAction(() => getCurrentWindow().toggleMaximize());
   };
 

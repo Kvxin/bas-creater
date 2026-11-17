@@ -30,14 +30,16 @@ import {
 import { pickDesktopDirectory, pickDesktopProjectFile } from "@/services/storage/desktopProjectFile";
 import { pickProjectDirectory } from "@/services/storage/browserProjectFile";
 import type { RecentProject } from "@/services/storage/projectStorage";
-import { isDesktopApp, isMacOS } from "@/utils/desktop";
+import { isDesktopApp } from "@/utils/desktop";
+import { useWindowPreferencesStore } from "@/stores/windowPreferences";
 
 const emit = defineEmits<{ open: [id: string] }>();
 const { t, locale } = useI18n();
 const isDark = useDark({ initialValue: "dark" });
 const isDesktop = isDesktopApp();
-const hasControls = isDesktop && !isMacOS();
-const titleBarListeners = isDesktop ? useTitleBarDrag() : {};
+const windowPreferences = useWindowPreferencesStore();
+const hasControls = computed(() => windowPreferences.hasCustomControls);
+const titleBarListeners = useTitleBarDrag(() => windowPreferences.usesCustomTitleBar);
 const projects = ref<RecentProject[]>([]);
 const search = ref("");
 const selected = ref<string[]>([]);
@@ -171,9 +173,7 @@ const toggleAll = () => {
 const removeSelected = async () => {
   if (!selected.value.length) return;
   const locations = await Promise.all(selected.value.map(async id => [id, await getProjectLocationLabel(id)] as const));
-  removeLocations.value = Object.fromEntries(
-    locations.map(([id, path]) => [id, path || t("projects.folderLocation")])
-  );
+  removeLocations.value = Object.fromEntries(locations.map(([id, path]) => [id, path || t("projects.folderLocation")]));
   deleteDiskFiles.value = false;
   isRemoveOpen.value = true;
 };
@@ -204,7 +204,7 @@ const confirmRemove = async () => {
     <header
       v-if="isDesktop"
       class="h-12 shrink-0 flex items-center justify-between bg-workspace text-foreground pl-3 select-none"
-      :class="{ 'pl-[5.5rem]': isMacOS(), 'pr-3': !hasControls }"
+      :class="{ 'pl-[5.5rem]': windowPreferences.hasTrafficLights, 'pr-3': !hasControls }"
       v-on="titleBarListeners"
       data-ui="title-bar"
     >
@@ -342,8 +342,8 @@ const confirmRemove = async () => {
             {{ t("projects.backups") }}
           </button>
           <button class="p-4 text-left min-w-0 flex-1 w-full" @click.stop="open(project.id)">
-            <span class="block truncate font-medium">{{ project.name }}</span
-            ><span class="block mt-2 text-xs text-muted-foreground"
+            <span class="block truncate font-medium">{{ project.name }}</span><span
+              class="block mt-2 text-xs text-muted-foreground"
               >{{ t("projects.modified") }} · {{ formatDate(project.updatedAt) }}</span
             >
           </button>
@@ -359,8 +359,9 @@ const confirmRemove = async () => {
         <p v-if="!backupNames.length" class="text-sm text-muted-foreground">{{ t("projects.noBackups") }}</p>
         <ul v-else class="max-h-64 overflow-auto space-y-2">
           <li v-for="name in backupNames" :key="name" class="flex items-center justify-between gap-3 text-sm">
-            <span class="break-all">{{ name }}</span
-            ><button class="underline" @click="restoreBackup(name)">{{ t("projects.restoreBackup") }}</button>
+            <span class="break-all">{{ name }}</span><button class="underline" @click="restoreBackup(name)">
+              {{ t("projects.restoreBackup") }}
+            </button>
           </li>
         </ul></DialogContent
       ></Dialog
@@ -373,8 +374,9 @@ const confirmRemove = async () => {
         >
         <ul class="max-h-44 overflow-auto text-sm space-y-2">
           <li v-for="id in selected" :key="id" class="break-all">
-            <strong>{{ projects.find(p => p.id === id)?.name }}</strong
-            ><br /><span class="text-muted-foreground">{{ removeLocations[id] }}</span>
+            <strong>{{ projects.find(p => p.id === id)?.name }}</strong><br /><span class="text-muted-foreground">{{
+              removeLocations[id]
+            }}</span>
           </li>
         </ul>
         <label class="flex gap-2 text-sm"
@@ -401,8 +403,7 @@ const confirmRemove = async () => {
           ><DialogDescription>{{ t("projects.createDescription") }}</DialogDescription></DialogHeader
         >
         <form @submit.prevent="create">
-          <Label for="project-name">{{ t("projects.name") }}</Label
-          ><Input
+          <Label for="project-name">{{ t("projects.name") }}</Label><Input
             id="project-name"
             v-model="name"
             class="mt-2"
@@ -413,12 +414,15 @@ const confirmRemove = async () => {
           <p v-if="!supportsFolder" class="mt-4 text-xs text-muted-foreground">
             {{ t("projects.browserStorageNotice") }}
           </p>
-          <p v-if="!isDesktop && supportsFolder" class="mt-3 text-xs text-muted-foreground">{{ t("projects.browserCreateWarning") }}</p>
+          <p v-if="!isDesktop && supportsFolder" class="mt-3 text-xs text-muted-foreground">
+            {{ t("projects.browserCreateWarning") }}
+          </p>
           <div v-if="supportsFolder" class="mt-4">
-            <button type="button" class="ui-button" @click="selectDirectory">{{ t("projects.selectFolder") }}</button
-            ><span class="mt-2 block break-all text-xs text-muted-foreground">{{
-              desktopDirectory || directory?.name || t("projects.emptyFolder")
-            }}</span>
+            <button type="button" class="ui-button" @click="selectDirectory">
+              {{ t("projects.selectFolder") }}</button><span
+              class="mt-2 block break-all text-xs text-muted-foreground"
+              >{{ desktopDirectory || directory?.name || t("projects.emptyFolder") }}</span
+            >
           </div>
           <DialogFooter class="mt-6"
             ><button type="button" class="ui-button" @click="isCreateOpen = false">{{ t("app.cancel") }}</button

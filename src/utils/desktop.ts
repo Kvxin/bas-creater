@@ -3,12 +3,20 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
 import type { AppUpdateStatus, UpdateProgress } from "@/types/appUpdate";
+import type { WindowPreferences } from "@/types/windowPreferences";
 
 /** 当前是否运行在 Tauri 桌面客户端中 */
 export const isDesktopApp = (): boolean => isTauri();
 
-/** macOS 使用系统红绿灯按钮，其余平台由前端绘制窗口按钮 */
-export const isMacOS = (): boolean => /Mac/i.test(navigator.userAgent);
+export const getWindowPreferences = async (): Promise<WindowPreferences> =>
+  isDesktopApp()
+    ? invoke<WindowPreferences>("get_window_preferences")
+    : { platform: "web", useAppWindowControls: false };
+
+export const setAppWindowControls = async (enabled: boolean): Promise<WindowPreferences> => {
+  if (!isDesktopApp()) return { platform: "web", useAppWindowControls: false };
+  return invoke<WindowPreferences>("set_app_window_controls", { enabled });
+};
 
 export type SaveTextFileOptions = {
   fileName: string;
