@@ -1,6 +1,7 @@
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { useClipDetailsStore } from "@/stores/clipDetails";
+import { useBasImportStore } from "@/stores/basImport";
 import { runSplitAction } from "@/utils/splitAction";
 
 /**
@@ -35,7 +36,7 @@ import { runSplitAction } from "@/utils/splitAction";
  * 不显示分组标签的区域直接省略该字段即可。
  *
  * [文案键一览] 每个区域实际使用的译文键 (改文案时到 src/i18n/messages/ 里找)：
- *   track-header        : t('menus.trackDelete')
+ *   track-header        : t('menus.trackImportBas') / t('menus.trackDelete')
  *   timeline-clip       : t('menus.clipActions') / t('common.details') /
  *                         t('common.copy') / t('common.cut') / t('common.delete')
  *   timeline-audio-clip : t('menus.audioClipActions') / t('common.copy') /
@@ -80,6 +81,8 @@ export const MENU_REGISTRY: Record<string, MenuConfig> = {
   "track-header": {
     // 该区域当前不显示分组标签 (如需启用请添加 labelKey 并在 src/i18n/messages/menus.ts 中补键)
     items: [
+      { id: "importBas", labelKey: "menus.trackImportBas", action: "track.importBas" },
+      { id: "sep0", separator: true, labelKey: "" },
       {
         id: "del",
         labelKey: "menus.trackDelete",
@@ -178,6 +181,9 @@ export const GLOBAL_COMMANDS: Record<string, (data: any) => void> = {
   "track.add": () => {
     const store = useTimelineStore();
     store.addTrack();
+  },
+  "track.importBas": (data) => {
+    useBasImportStore().open(typeof data?.id === "string" ? data.id : null);
   },
 
   // 片段命令

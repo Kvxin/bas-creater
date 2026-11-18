@@ -24,9 +24,10 @@ export const ANIMATABLE_KEYS = [
   "fontSize",
 ] as const;
 
-type AnimatableKey = (typeof ANIMATABLE_KEYS)[number];
+export type AnimatableKey = (typeof ANIMATABLE_KEYS)[number];
 
-const ANIMATABLE_KEYS_BY_TYPE: Record<DanmuType, readonly AnimatableKey[]> = {
+/** 各资源类型可被关键帧插值的属性；BAS 导入据此判断哪些 `set` 能无损落成关键帧。 */
+export const ANIMATABLE_KEYS_BY_TYPE: Record<DanmuType, readonly AnimatableKey[]> = {
   text: ["x", "y", "content", "scale", "rotateX", "rotateY", "rotateZ", "opacity", "color", "fontSize"],
   button: ["x", "y", "text", "fontSize"],
   path: ["x", "y"],

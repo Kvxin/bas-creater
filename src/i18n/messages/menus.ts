@@ -14,11 +14,13 @@
  * duplicated in this namespace.
  *
  * Wording covered (from the pre-migration audit):
- *   '删除轨道', '片段操作', '音频片段操作', '时间轴', '添加轨道',
+ *   '删除轨道', '导入 BAS 弹幕', '片段操作', '音频片段操作', '时间轴', '添加轨道',
  *   '资源操作', '添加到轨道', '未定义的菜单: {menuId}'
  */
 const zhCN = {
   trackDelete: '删除轨道',
+  /** Track context menu: opens the BAS import dialog for that track. */
+  trackImportBas: '导入 BAS 弹幕',
   /** Group labels of the registry entries (rendered as the menu header). */
   clipActions: '片段操作',
   splitElement: '拆分元素',
@@ -36,6 +38,7 @@ const zhCN = {
 
 const en: typeof zhCN = {
   trackDelete: 'Delete track',
+  trackImportBas: 'Import BAS danmaku',
   clipActions: 'Clip actions',
   splitElement: 'Split element',
   splitLeft: 'Split left',
@@ -51,6 +54,7 @@ const en: typeof zhCN = {
 
 const ja: typeof zhCN = {
   trackDelete: 'トラックを削除',
+  trackImportBas: 'BAS 弾幕をインポート',
   clipActions: 'クリップの操作',
   splitElement: '要素を分割',
   splitLeft: '分割して左側を削除',

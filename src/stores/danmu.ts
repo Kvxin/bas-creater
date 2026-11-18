@@ -28,10 +28,17 @@ export const useDanmuStore = defineStore("danmu", () => {
     selectedId.value = id
   }
 
-  function add(type: DanmuType, payload: Partial<AnyDanmu> = {}) {
+  /**
+   * 新增弹幕资源。
+   *
+   * @param type 资源类型
+   * @param payload 初始字段
+   * @param options `select: false` 时不切换选中项，供批量导入使用
+   */
+  function add(type: DanmuType, payload: Partial<AnyDanmu> = {}, options: { select?: boolean } = {}) {
     const dm = createDanmuByKey(type, payload)
     danmus.value.push(dm)
-    select(dm.id)
+    if (options.select !== false) select(dm.id)
     return dm
   }
 

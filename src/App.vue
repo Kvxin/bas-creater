@@ -2,6 +2,7 @@
 import { RouterView } from "vue-router";
 import GlobalContextMenu from "@/components/GlobalContextMenu.vue";
 import ClipDetailsDialog from "@/components/dialogs/ClipDetailsDialog.vue";
+import BasImportDialog from "@/components/dialogs/BasImportDialog.vue";
 import { onBeforeUnmount } from "vue";
 import { useEventListener } from "@vueuse/core";
 import { useI18n } from "vue-i18n";
@@ -29,6 +30,7 @@ useEventListener(
     <RouterView />
     <GlobalContextMenu />
     <ClipDetailsDialog />
+    <BasImportDialog />
   </div>
   <AppUpdatePanel
     v-if="updates.showPrompt && !updates.isInstalling"

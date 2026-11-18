@@ -379,6 +379,17 @@ const handleTransformCommit = (updates: Array<{ clipId: string; changes: Partial
 
 // Computed isPlaying synced with timelineStore
 const isPlaying = computed(() => timelineStore.isPlaying);
+
+// 视频编辑器风格时间码：hh:mm:ss:ff（按 30fps 显示帧）
+const toTimecode = (timeMs: number) => {
+  const totalMs = Math.max(0, timeMs);
+  const totalSeconds = Math.floor(totalMs / 1000);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const frames = Math.floor(((totalMs % 1000) / 1000) * 30);
+  return `${pad(Math.floor(totalSeconds / 3600))}:${pad(Math.floor(totalSeconds / 60) % 60)}:${pad(totalSeconds % 60)}:${pad(frames)}`;
+};
+const currentTimecode = computed(() => toTimecode(timelineStore.currentTime));
+const durationTimecode = computed(() => toTimecode(timelineStore.duration));
 const basInitialized = ref(false);
 let animationFrameId: number | null = null;
 let publishingClock = false;
@@ -951,26 +962,34 @@ const skipForward = () => {
 
     <!-- Playback Controls -->
     <div
-      class="preview-playback flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-1 border-t border-divider bg-panel px-2 py-1.5 text-foreground z-20"
+      class="preview-playback z-20 grid h-12 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-t border-divider bg-panel px-3 text-foreground"
       data-ui="preview-playback"
     >
-      <div class="flex items-center justify-center gap-1.5">
-        <button @click="playFromStart" class="ui-icon-button" :title="t('preview.playback.fromStart')">
-          <RotateCcw class="size-4" />
+      <!-- Left: Timecode -->
+      <div class="flex min-w-0 items-baseline gap-1.5 font-mono text-xs tabular-nums select-none">
+        <span class="text-[13px] font-medium text-foreground">{{ currentTimecode }}</span>
+        <span class="text-muted-foreground/60">/</span>
+        <span class="truncate text-muted-foreground">{{ durationTimecode }}</span>
+      </div>
+
+      <!-- Center: Transport -->
+      <div class="flex items-center gap-1">
+        <button @click="playFromStart" class="transport-button" :title="t('preview.playback.fromStart')">
+          <RotateCcw class="size-3.5" />
         </button>
-        <button @click="seekToStart" class="ui-icon-button" :title="t('preview.playback.seekToStart')">
-          <SkipBack class="size-4" />
+        <button @click="seekToStart" class="transport-button" :title="t('preview.playback.seekToStart')">
+          <SkipBack class="size-4 fill-current" />
         </button>
         <button
           @click="togglePlay"
-          class="ui-icon-button bg-secondary text-secondary-foreground"
+          class="mx-1 inline-flex size-9 items-center justify-center rounded-full bg-foreground text-background shadow-sm transition-transform hover:scale-105 active:scale-95"
           :title="isPlaying ? t('preview.playback.pause') : t('preview.playback.play')"
         >
-          <Pause v-if="isPlaying" class="size-5 fill-current" />
-          <Play v-else class="size-5 fill-current" />
+          <Pause v-if="isPlaying" class="size-4 fill-current" />
+          <Play v-else class="ml-0.5 size-4 fill-current" />
         </button>
-        <button @click="skipForward" class="ui-icon-button" :title="t('preview.playback.skipForward')">
-          <SkipForward class="size-4" />
+        <button @click="skipForward" class="transport-button" :title="t('preview.playback.skipForward')">
+          <SkipForward class="size-4 fill-current" />
         </button>
       </div>
 

@@ -369,6 +369,26 @@
     width: 16px;
     height: 16px;
   }
+  .transport-button {
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    color: var(--muted-foreground);
+    transition:
+      color 120ms ease,
+      background-color 120ms ease;
+  }
+  .transport-button:hover {
+    color: var(--foreground);
+    background: var(--accent);
+  }
+  .transport-button:active {
+    background: var(--active);
+  }
   .panel-resizer {
     flex-shrink: 0;
     background: transparent;

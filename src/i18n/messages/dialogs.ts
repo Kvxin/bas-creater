@@ -4,6 +4,10 @@
  * Clip details dialog (src/components/dialogs/ClipDetailsDialog.vue): the BAS
  * code preview and the clip / resource field editors.
  *
+ * `basImport` covers the BAS import dialog (src/components/dialogs/BasImportDialog.vue):
+ * its fields, the live parse preview and the structured warnings produced by
+ * `convertParsedBas` (each warning carries a `code` that maps to `warnings.*`).
+ *
  * `*Section` labels name the data model being edited (Clip / Resource) and keep
  * that token in every locale; the pure translation glosses of the zh-CN labels
  * ('内容 (Content)', '字号 (FontSize)', ...) are dropped in en/ja.
@@ -27,6 +31,45 @@ const zhCN = {
   opacity: '透明度 (Opacity)',
   color: '颜色 (Color/Hex)',
   loadFailed: '无法加载弹幕数据',
+  basImport: {
+    title: '导入 BAS 弹幕',
+    description: '粘贴 BAS 源码，解析成时间轴上的弹幕资源、片段与关键帧。',
+    targetTrack: '目标轨道',
+    targetCurrent: '导入到当前轨道',
+    targetNew: '新建轨道',
+    targetUnavailable: '当前轨道不可用（已锁定或为音频轨道），请改用新建轨道。',
+    startTime: '开始时间',
+    startTimeHint: '支持 5、5.5s、00:00:05.000',
+    startTimeInvalid: '开始时间格式不正确',
+    source: 'BAS 源码',
+    // 花括号是 BAS 语法的一部分，必须用 vue-i18n 的字面量语法转义。
+    sourcePlaceholder: `def text t {'{'} content = "你好" duration = 3s {'}'}`,
+    parsing: '解析中…',
+    preview: '解析结果',
+    objectCount: '{n} 个对象',
+    durationText: '片段时长 {duration}',
+    warningTitle: '警告（{n}）',
+    overlapHint: '有 {n} 个已有片段与导入区间重叠，导入后可再调整位置。',
+    import: '导入',
+    importFailed: '导入失败：{message}',
+    groupName: 'BAS 导入 {n}',
+    warnings: {
+      easingApproximated: '对象 {object} 的 {property} 缓动（{easing}）已近似为线性关键帧',
+      unsupportedAnimation: '对象 {object} 的 {property} 动画不受支持，已忽略',
+      unsupportedTarget: '对象 {object} 的 target 类型不受支持，已忽略',
+      unknownObject: '无法识别的对象 {object}，已跳过',
+      unknownNode: '存在无法识别的动画节点，已忽略',
+      invalidParent: '对象 {object} 的父对象 {parent} 不是文本对象，已忽略父子关系',
+      noObjects: '没有找到可导入的弹幕对象',
+    },
+    errors: {
+      empty: '没有可导入的对象',
+      trackMissing: '目标轨道不存在，请重新选择',
+      trackLocked: '目标轨道已锁定，请先解锁或改用新建轨道',
+      trackType: '音频轨道不能导入弹幕，请改用新建轨道',
+      parent: '对象 {object} 的父对象 {parent} 无效',
+    },
+  },
 }
 
 const en: typeof zhCN = {
@@ -46,6 +89,44 @@ const en: typeof zhCN = {
   opacity: 'Opacity',
   color: 'Color (hex)',
   loadFailed: 'Could not load danmaku data',
+  basImport: {
+    title: 'Import BAS danmaku',
+    description: 'Paste BAS source and convert it into danmaku resources, a clip and keyframes.',
+    targetTrack: 'Target track',
+    targetCurrent: 'Import into the current track',
+    targetNew: 'Create a new track',
+    targetUnavailable: 'The current track is unavailable (locked or an audio track). Use a new track instead.',
+    startTime: 'Start time',
+    startTimeHint: 'Accepts 5, 5.5s, 00:00:05.000',
+    startTimeInvalid: 'Invalid start time',
+    source: 'BAS source',
+    sourcePlaceholder: `def text t {'{'} content = "Hello" duration = 3s {'}'}`,
+    parsing: 'Parsing…',
+    preview: 'Parse result',
+    objectCount: '{n} objects',
+    durationText: 'Clip duration {duration}',
+    warningTitle: 'Warnings ({n})',
+    overlapHint: '{n} existing clips overlap the imported range; adjust them afterwards if needed.',
+    import: 'Import',
+    importFailed: 'Import failed: {message}',
+    groupName: 'BAS import {n}',
+    warnings: {
+      easingApproximated: 'Easing ({easing}) of {property} on {object} is approximated with linear keyframes',
+      unsupportedAnimation: 'Animation of {property} on {object} is not supported and was ignored',
+      unsupportedTarget: 'The target type of {object} is not supported and was ignored',
+      unknownObject: 'Unrecognized object {object} was skipped',
+      unknownNode: 'Unrecognized animation node was ignored',
+      invalidParent: 'The parent {parent} of {object} is not a text object; the parent link was ignored',
+      noObjects: 'No importable danmaku objects were found',
+    },
+    errors: {
+      empty: 'There is nothing to import',
+      trackMissing: 'The target track no longer exists; choose another one',
+      trackLocked: 'The target track is locked; unlock it or create a new track',
+      trackType: 'Danmaku cannot be imported into an audio track; create a new track',
+      parent: 'The parent {parent} of {object} is invalid',
+    },
+  },
 }
 
 const ja: typeof zhCN = {
@@ -65,6 +146,44 @@ const ja: typeof zhCN = {
   opacity: '不透明度',
   color: '色 (16 進数)',
   loadFailed: '弾幕データを読み込めません',
+  basImport: {
+    title: 'BAS 弾幕をインポート',
+    description: 'BAS ソースを貼り付けて、弾幕リソース・クリップ・キーフレームに変換します。',
+    targetTrack: '対象トラック',
+    targetCurrent: '現在のトラックにインポート',
+    targetNew: '新しいトラックを作成',
+    targetUnavailable: '現在のトラックは使用できません（ロック中または音声トラック）。新しいトラックを使用してください。',
+    startTime: '開始時間',
+    startTimeHint: '5、5.5s、00:00:05.000 に対応',
+    startTimeInvalid: '開始時間の形式が正しくありません',
+    source: 'BAS ソース',
+    sourcePlaceholder: `def text t {'{'} content = "こんにちは" duration = 3s {'}'}`,
+    parsing: '解析中…',
+    preview: '解析結果',
+    objectCount: '{n} 個のオブジェクト',
+    durationText: 'クリップの長さ {duration}',
+    warningTitle: '警告（{n}）',
+    overlapHint: '{n} 個の既存クリップがインポート範囲と重なっています。インポート後に位置を調整できます。',
+    import: 'インポート',
+    importFailed: 'インポートに失敗しました: {message}',
+    groupName: 'BAS インポート {n}',
+    warnings: {
+      easingApproximated: 'オブジェクト {object} の {property} のイージング（{easing}）は線形キーフレームで近似しました',
+      unsupportedAnimation: 'オブジェクト {object} の {property} のアニメーションは未対応のため無視しました',
+      unsupportedTarget: 'オブジェクト {object} の target の種類は未対応のため無視しました',
+      unknownObject: '不明なオブジェクト {object} をスキップしました',
+      unknownNode: '不明なアニメーションノードを無視しました',
+      invalidParent: 'オブジェクト {object} の親 {parent} はテキストではないため、親子関係を無視しました',
+      noObjects: 'インポートできる弾幕オブジェクトが見つかりません',
+    },
+    errors: {
+      empty: 'インポートするオブジェクトがありません',
+      trackMissing: '対象トラックが見つかりません。選択し直してください',
+      trackLocked: '対象トラックはロックされています。解除するか新しいトラックを作成してください',
+      trackType: '音声トラックには弾幕をインポートできません。新しいトラックを作成してください',
+      parent: 'オブジェクト {object} の親 {parent} が無効です',
+    },
+  },
 }
 
 export default { 'zh-CN': zhCN, en, ja }
