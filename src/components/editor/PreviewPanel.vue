@@ -892,27 +892,31 @@ const skipForward = () => {
 </script>
 
 <template>
-  <div class="panel workbench-panel h-full w-full overflow-hidden flex flex-col" data-ui="preview-panel">
+  <div class="preview-panel panel workbench-panel flex h-full w-full flex-col overflow-hidden" data-ui="preview-panel">
     <!-- Canvas Area -->
     <div
       ref="containerRef"
       data-ui="preview-viewport"
-      class="flex-1 relative overflow-hidden bg-preview cursor-grab active:cursor-grabbing"
+      class="preview-viewport relative flex-1 cursor-grab overflow-hidden bg-preview active:cursor-grabbing"
       @wheel="handleWheel"
       @mousedown="startDrag"
     >
-      <div v-if="previewErrors.length" role="alert" class="absolute left-2 top-2 z-20 max-w-96 rounded-sm bg-destructive p-2 text-xs text-white">
+      <div
+        v-if="previewErrors.length"
+        role="alert"
+        class="absolute top-2 left-2 z-20 max-w-96 rounded-sm bg-destructive p-2 text-xs text-white"
+      >
         {{ `Preview may be out of date: ${previewErrors.join("; ")}` }}
       </div>
       <!-- Controls Overlay: Zoom + Fullscreen -->
-      <div class="absolute top-2 right-2 z-10 flex items-center gap-0.5 rounded-sm border border-border bg-panel p-0.5">
+      <div class="preview-view-tools absolute top-2.5 right-2.5 z-10 flex items-center gap-0.5 rounded-lg border p-0.5">
         <button @click="nudgeViewportZoom(1)" class="ui-icon-button" :title="t('preview.zoom.in')">
           <Plus class="size-4" />
         </button>
 
         <button
           @click="fitToScreen()"
-          class="inline-flex h-7 min-w-9 items-center justify-center rounded-sm px-1 font-mono text-xs tabular-nums text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          class="inline-flex h-7 min-w-12 items-center justify-center rounded-sm bg-surface px-1.5 font-mono text-xs text-foreground tabular-nums transition-colors hover:bg-accent"
           :title="t('preview.zoom.fitToWindow')"
         >
           {{ zoomDisplayLabel }}
@@ -939,7 +943,7 @@ const skipForward = () => {
         <div
           ref="danmakuRef"
           id="danmaku"
-          class="bg-black rounded-sm border border-border flex items-center justify-center relative group select-none"
+          class="preview-canvas group relative flex items-center justify-center border bg-black select-none"
           :style="{ width: canvasWidth + 'px', height: canvasHeight + 'px' }"
         >
           <!-- BAS renders danmaku items here -->
@@ -962,18 +966,18 @@ const skipForward = () => {
 
     <!-- Playback Controls -->
     <div
-      class="preview-playback z-20 grid h-12 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-t border-divider bg-panel px-3 text-foreground"
+      class="preview-playback z-20 grid shrink-0 items-center gap-x-3 border-t border-divider bg-panel px-3 text-foreground"
       data-ui="preview-playback"
     >
       <!-- Left: Timecode -->
-      <div class="flex min-w-0 items-baseline gap-1.5 font-mono text-xs tabular-nums select-none">
-        <span class="text-[13px] font-medium text-foreground">{{ currentTimecode }}</span>
+      <div class="preview-timecode flex min-w-0 items-center gap-1.5 font-mono text-xs tabular-nums select-none">
+        <span class="shrink-0 rounded-sm bg-surface px-1.5 py-1 font-medium text-foreground">{{ currentTimecode }}</span>
         <span class="text-muted-foreground/60">/</span>
-        <span class="truncate text-muted-foreground">{{ durationTimecode }}</span>
+        <span class="truncate text-muted-foreground" :title="durationTimecode">{{ durationTimecode }}</span>
       </div>
 
       <!-- Center: Transport -->
-      <div class="flex items-center gap-1">
+      <div class="preview-transport flex items-center gap-1">
         <button @click="playFromStart" class="transport-button" :title="t('preview.playback.fromStart')">
           <RotateCcw class="size-3.5" />
         </button>
@@ -982,7 +986,7 @@ const skipForward = () => {
         </button>
         <button
           @click="togglePlay"
-          class="mx-1 inline-flex size-9 items-center justify-center rounded-full bg-foreground text-background shadow-sm transition-transform hover:scale-105 active:scale-95"
+          class="preview-play-button mx-1 inline-flex h-8 w-10 items-center justify-center rounded-md text-primary-foreground transition-colors"
           :title="isPlaying ? t('preview.playback.pause') : t('preview.playback.play')"
         >
           <Pause v-if="isPlaying" class="size-4 fill-current" />
@@ -994,7 +998,7 @@ const skipForward = () => {
       </div>
 
       <!-- Right: Zoom + Resolution -->
-      <div class="justify-self-end flex items-center gap-2">
+      <div class="preview-settings flex items-center gap-1.5 justify-self-end">
         <!-- Zoom Select -->
         <div class="relative" ref="zoomMenuRef">
           <button
@@ -1002,7 +1006,8 @@ const skipForward = () => {
               isZoomMenuOpen = !isZoomMenuOpen;
               isResolutionMenuOpen = false;
             "
-            class="inline-flex h-7 min-w-[4.5rem] items-center justify-between gap-2 rounded-sm border border-border bg-input px-2 font-mono text-xs tabular-nums text-foreground transition-colors hover:bg-accent"
+            class="preview-menu-trigger"
+            :aria-expanded="isZoomMenuOpen"
             :title="t('preview.zoom.menu')"
           >
             <span>{{ zoomDisplayLabel }}</span>
@@ -1010,7 +1015,7 @@ const skipForward = () => {
           </button>
           <div
             v-if="isZoomMenuOpen"
-            class="absolute right-0 bottom-full z-50 mb-2 w-44 overflow-hidden rounded-md border border-border bg-popover p-1.5 text-popover-foreground shadow-sm"
+            class="preview-menu absolute right-0 bottom-full z-50 mb-2 w-44 overflow-hidden rounded-lg border border-border bg-popover p-1.5 text-popover-foreground"
           >
             <button
               @click.stop="
@@ -1051,7 +1056,8 @@ const skipForward = () => {
               isResolutionMenuOpen = !isResolutionMenuOpen;
               isZoomMenuOpen = false;
             "
-            class="inline-flex h-7 min-w-[6.5rem] items-center justify-between gap-2 rounded-sm border border-border bg-input px-2 font-mono text-xs tabular-nums text-foreground transition-colors hover:bg-accent"
+            class="preview-menu-trigger"
+            :aria-expanded="isResolutionMenuOpen"
             :title="t('preview.resolution.menu')"
           >
             <span>{{ canvasSizeLabel }}</span>
@@ -1059,7 +1065,7 @@ const skipForward = () => {
           </button>
           <div
             v-if="isResolutionMenuOpen"
-            class="absolute right-0 bottom-full z-50 mb-2 w-72 overflow-hidden rounded-md border border-border bg-popover p-2 text-popover-foreground shadow-sm"
+            class="preview-menu absolute right-0 bottom-full z-50 mb-2 w-72 overflow-hidden rounded-lg border border-border bg-popover p-2 text-popover-foreground"
           >
             <!-- 快捷预设 -->
             <div class="flex flex-col gap-1">
@@ -1127,3 +1133,112 @@ const skipForward = () => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.preview-panel {
+  container: preview-panel / inline-size;
+}
+
+.preview-viewport {
+  background-image: radial-gradient(
+    circle,
+    color-mix(in oklab, var(--muted-foreground) 25%, transparent) 0.75px,
+    transparent 1px
+  );
+  background-position: center;
+  background-size: 16px 16px;
+}
+
+.preview-canvas {
+  border-color: color-mix(in oklab, var(--muted-foreground) 40%, var(--preview));
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.16), 0 8px 24px rgb(0 0 0 / 0.24);
+}
+
+.preview-view-tools {
+  border-color: var(--border);
+  background: var(--panel);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.12);
+}
+
+.preview-playback {
+  min-height: 3rem;
+  grid-template-columns: minmax(0, 1fr) auto minmax(max-content, 1fr);
+  grid-template-areas: "time transport settings";
+}
+
+.preview-timecode {
+  grid-area: time;
+}
+
+.preview-transport {
+  grid-area: transport;
+  justify-self: center;
+}
+
+.preview-transport .transport-button {
+  border-radius: var(--radius-sm);
+}
+
+.preview-settings {
+  grid-area: settings;
+}
+
+.preview-play-button {
+  background: var(--primary-button);
+}
+
+.preview-play-button:hover {
+  background: var(--primary-button-hover);
+}
+
+.preview-play-button:active {
+  background: color-mix(in oklab, var(--primary-button-hover) 84%, black);
+}
+
+.preview-menu-trigger {
+  display: inline-flex;
+  min-height: 1.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.375rem;
+  padding-inline: 0.375rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--motion-fast) ease, border-color var(--motion-fast) ease;
+}
+
+.preview-menu-trigger:hover {
+  background: var(--accent);
+}
+
+.preview-menu-trigger[aria-expanded="true"] {
+  border-color: var(--secondary-border);
+  background: var(--secondary);
+}
+
+.preview-menu {
+  max-width: calc(100cqw - 1.5rem);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.2);
+}
+
+.preview-view-tools button:focus-visible,
+.preview-playback button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+@container preview-panel (width < 28rem) {
+  .preview-playback {
+    grid-template-columns: minmax(0, 1fr) max-content;
+    grid-template-areas:
+      "transport transport"
+      "time settings";
+    gap: 0.25rem 0.5rem;
+    padding-block: 0.25rem;
+  }
+}
+</style>

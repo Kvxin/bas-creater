@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { CSSProperties } from 'vue'
 import type { AnyDanmu } from '@/types/danmu'
 import { useI18n } from 'vue-i18n'
+import { RotateCw } from "lucide-vue-next";
 import { basNameForClip } from '@/utils/compiler'
 import { useTimelineStore } from '@/stores/timeline'
 
@@ -11,7 +12,6 @@ const timelineStore = useTimelineStore()
 
 const MIN_SCALE = 0.1
 const MIN_MEASURED_SIZE = 2
-const HANDLE_SCREEN_SIZE = 10
 const HANDLE_HIT_SCREEN_SIZE = 20
 const ROTATION_HANDLE_SCREEN_OFFSET = 28
 const SNAP_SCREEN_THRESHOLD = 8
@@ -473,16 +473,6 @@ function getOverlayStyle(clipId: string): CSSProperties {
     height: `${draft.height}px`,
     transformOrigin: `${draft.anchorX * 100}% ${draft.anchorY * 100}%`,
     transform: `rotate(${draft.rotateZ}deg) scale(${draft.scale})`,
-  }
-}
-
-function getHandleSizeStyle(size: number): CSSProperties {
-  const logicalSize = size * getInverseCanvasScale()
-  return {
-    width: `${logicalSize}px`,
-    height: `${logicalSize}px`,
-    marginLeft: `${-logicalSize / 2}px`,
-    marginTop: `${-logicalSize / 2}px`,
   }
 }
 
@@ -1580,6 +1570,7 @@ watch(
   <div
     ref="overlayRootRef"
     class="transform-controls absolute inset-0"
+    :style="{ '--transform-inverse-zoom': getInverseCanvasScale() }"
     @pointerdown="onStagePointerDown"
   >
     <div
@@ -1597,7 +1588,7 @@ watch(
       @pointerdown="(event) => onTargetPointerDown(event, item.clipId)"
       @dblclick.stop="onTargetDoubleClick(item.clipId)"
     >
-      <div class="transform-target__chrome" />
+      <div v-if="!selectedBoundsStyle || !selectedClipIdSet.has(item.clipId)" class="transform-target__chrome" />
     </div>
 
     <div
@@ -1610,41 +1601,54 @@ watch(
       v-if="selectedBoundsStyle"
       class="transform-selection-bounds absolute"
       :style="selectedBoundsStyle"
-    />
+    >
+      <span
+        v-if="rotationHandlePoint"
+        class="transform-rotation-stem"
+        :style="{ height: `${ROTATION_HANDLE_SCREEN_OFFSET * getInverseCanvasScale()}px` }"
+      />
+    </div>
 
     <button
       v-for="entry in cornerEntries"
       :key="entry.corner"
       type="button"
       class="transform-handle transform-handle--corner absolute"
-      :class="`transform-handle--${entry.corner}`"
+      :class="[
+        `transform-handle--${entry.corner}`,
+        { 'transform-handle--engaged': activeGesture?.type === 'scale' && activeGesture.corner === entry.corner }
+      ]"
       :style="{ ...getHandlePositionStyle(entry.point), cursor: entry.cursor }"
       :aria-label="t('preview.transform.scaleHandle', { corner: entry.corner })"
       @pointerdown="(event) => onCornerPointerDown(event, entry.corner)"
     >
-      <span :style="getHandleSizeStyle(HANDLE_SCREEN_SIZE)" />
+      <span class="transform-handle__cap" />
     </button>
 
     <button
       v-if="rotationHandlePoint"
       type="button"
       class="transform-handle transform-handle--rotate absolute"
+      :class="{ 'transform-handle--engaged': activeGesture?.type === 'rotate' }"
       :style="getHandlePositionStyle(rotationHandlePoint)"
       :aria-label="t('preview.transform.rotateHandle')"
       @pointerdown="onRotatePointerDown"
     >
-      <span :style="getHandleSizeStyle(18)" />
+      <span class="transform-handle__cap">
+        <RotateCw :size="11" :stroke-width="2.25" aria-hidden="true" />
+      </span>
     </button>
 
     <button
       v-if="anchorHandlePoint"
       type="button"
       class="transform-handle transform-handle--anchor absolute"
+      :class="{ 'transform-handle--engaged': activeGesture?.type === 'anchor' }"
       :style="getHandlePositionStyle(anchorHandlePoint, 18)"
       :aria-label="t('preview.transform.anchorHandle')"
       @pointerdown="onAnchorPointerDown"
     >
-      <span :style="getHandleSizeStyle(8)" />
+      <span class="transform-handle__cap" />
     </button>
 
     <div
@@ -1677,6 +1681,9 @@ watch(
 
 <style scoped>
 .transform-controls {
+  --transform-selection: color-mix(in oklab, var(--primary) 56%, #d9edff);
+  --transform-ink: #172541;
+  --transform-screen-pixel: calc(var(--transform-inverse-zoom) * 1px);
   z-index: 100;
   pointer-events: auto;
   isolation: isolate;
@@ -1693,7 +1700,7 @@ watch(
   z-index: 1;
 }
 
-.transform-target:hover {
+.transform-target:not(.transform-target--selected, .transform-target--editing):hover {
   border-color: color-mix(in oklab, var(--primary) 42%, transparent);
   background: color-mix(in oklab, var(--primary) 5%, transparent);
 }
@@ -1734,15 +1741,24 @@ watch(
 }
 
 .transform-selection-bounds {
-  border: 1px solid rgb(255 255 255 / 0.76);
   box-shadow:
-    0 0 0 1px rgb(0 0 0 / 0.4),
-    0 0 0 2px color-mix(in oklab, var(--primary) 45%, transparent);
+    inset 0 0 0 var(--transform-screen-pixel) var(--transform-selection),
+    0 0 0 var(--transform-screen-pixel) rgb(12 22 41 / 0.7);
+}
+
+.transform-rotation-stem {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  width: var(--transform-screen-pixel);
+  background: var(--transform-selection);
+  box-shadow: 0 0 0 var(--transform-screen-pixel) rgb(12 22 41 / 0.45);
+  transform: translateX(-50%);
 }
 
 .transform-group-bounds {
-  border: 1px dashed color-mix(in oklab, var(--primary) 75%, white 15%);
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.38);
+  border: var(--transform-screen-pixel) dashed var(--transform-selection);
+  box-shadow: 0 0 0 var(--transform-screen-pixel) rgb(12 22 41 / 0.58);
 }
 
 .transform-handle {
@@ -1757,23 +1773,27 @@ watch(
   touch-action: none;
 }
 
-.transform-handle > span {
-  display: block;
+.transform-handle__cap {
+  display: grid;
+  flex: none;
+  place-items: center;
   box-sizing: border-box;
   pointer-events: none;
-}
-
-.transform-handle--corner > span {
-  border-radius: 2px;
-  background: white;
-  border: 1px solid rgb(0 0 0 / 0.42);
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--primary) 68%, transparent),
-    0 1px 3px rgb(0 0 0 / 0.32);
+  /* 画布缩放仅影响位置，手柄图形和边框保持屏幕像素尺寸。 */
+  transform: scale(var(--transform-inverse-zoom));
 }
 
 .transform-handle--corner {
   z-index: 27;
+}
+
+.transform-handle--corner .transform-handle__cap {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--transform-ink);
+  background: var(--transform-selection);
+  box-shadow: 0 0 0 1px var(--transform-selection);
 }
 
 .transform-handle--rotate {
@@ -1781,17 +1801,18 @@ watch(
   cursor: grab;
 }
 
-.transform-handle--rotate:active {
+.transform-handle--rotate.transform-handle--engaged {
   cursor: grabbing;
 }
 
-.transform-handle--rotate > span {
-  border-radius: 999px;
-  background: radial-gradient(circle at 50% 50%, transparent 0 34%, rgb(18 18 18) 36% 46%, transparent 48%), white;
-  border: 1px solid rgb(0 0 0 / 0.42);
-  box-shadow:
-    0 0 0 1px color-mix(in oklab, var(--primary) 62%, transparent),
-    0 2px 5px rgb(0 0 0 / 0.35);
+.transform-handle--rotate .transform-handle__cap {
+  width: 18px;
+  height: 18px;
+  border-radius: 6px;
+  border: 1px solid var(--transform-selection);
+  background: var(--transform-ink);
+  color: var(--transform-selection);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.55);
 }
 
 .transform-handle--anchor {
@@ -1799,13 +1820,25 @@ watch(
   cursor: crosshair;
 }
 
-.transform-handle--anchor > span {
-  border-radius: 999px;
-  background: color-mix(in oklab, var(--primary) 82%, white 18%);
-  border: 2px solid white;
-  box-shadow:
-    0 0 0 1px rgb(0 0 0 / 0.42),
-    0 1px 3px rgb(0 0 0 / 0.3);
+.transform-handle--anchor .transform-handle__cap {
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--transform-selection);
+  border-radius: 1px;
+  background: var(--transform-ink);
+  box-shadow: 0 0 0 1px var(--transform-ink);
+  transform: scale(var(--transform-inverse-zoom)) rotate(45deg);
+}
+
+.transform-handle:hover .transform-handle__cap,
+.transform-handle:focus-visible .transform-handle__cap,
+.transform-handle--engaged .transform-handle__cap {
+  outline: 1px solid var(--transform-selection);
+  outline-offset: 2px;
+}
+
+.transform-handle:focus-visible {
+  outline: none;
 }
 
 .transform-snap-line {
