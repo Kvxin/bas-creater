@@ -20,10 +20,12 @@ import {
   ScissorsLineDashed,
   Video,
   FolderOpen,
+  Layers2,
   FolderPlus,
   Ungroup,
   ArrowLeft
 } from "lucide-vue-next";
+import { draggedEffect, EFFECT_DRAG_TYPE, effectCatalog } from "@/effects/registry";
 import TimeRuler from "./TimeRuler.vue";
 import { formatTime } from "@/utils/timeline";
 import { getItemName } from "@/utils/resourceUtils";
@@ -246,6 +248,44 @@ const currentTimeDisplay = computed(() => {
     "0"
   )}:${String(s).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
 });
+
+const effectHoverId = ref<string | null>(null);
+const effectDropError = ref("");
+watch(draggedEffect, plugin => {
+  effectHoverId.value = null;
+  if (plugin) effectDropError.value = "";
+});
+const isEffectDrag = (event: DragEvent) => event.dataTransfer?.types.includes(EFFECT_DRAG_TYPE);
+function trackDragOver(event: DragEvent) {
+  event.preventDefault();
+  if (isEffectDrag(event) && event.dataTransfer) {
+    effectHoverId.value = null;
+    event.dataTransfer.dropEffect = "none";
+  }
+}
+function clipDragOver(event: DragEvent, id: string) {
+  if (!isEffectDrag(event) || !event.dataTransfer) return;
+  event.stopPropagation();
+  event.preventDefault();
+  const target = timelineStore.getEffectTarget(id);
+  const compatible = target && draggedEffect.value?.targets.includes(target.resource.type);
+  effectHoverId.value = compatible ? id : null;
+  event.dataTransfer.dropEffect = compatible ? "copy" : "none";
+}
+function dropEffect(event: DragEvent, id: string) {
+  if (!isEffectDrag(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  effectHoverId.value = null;
+  const pluginId = event.dataTransfer?.getData(EFFECT_DRAG_TYPE);
+  const plugin = effectCatalog.value?.plugins.find(item => item.id === pluginId);
+  if (!plugin) return;
+  try {
+    timelineStore.attachEffect(id, plugin);
+  } catch (error) {
+    effectDropError.value = error instanceof Error ? error.message : String(error);
+  }
+}
 
 // 处理拖拽放置
 const handleDrop = (event: DragEvent, trackId: string) => {
@@ -880,7 +920,7 @@ const stopResizeClip = () => {
         sourceInMs: initialResizeSourceInMs.value + tempState.startTime - initialResizeStartTime.value
       });
     } else {
-      timelineStore.updateClip(resizingClipId.value, updates);
+      timelineStore.trimClip(resizingClipId.value, updates.startTime, updates.duration);
     }
   }
 
@@ -1296,6 +1336,7 @@ function handleVolumeSelect(clipId: string) {
 
 <template>
   <div class="panel workbench-panel h-full w-full overflow-hidden flex flex-col select-none" data-ui="timeline-panel">
+    <p v-if="effectDropError" role="alert" class="px-3 py-1 text-xs text-destructive">{{ effectDropError }}</p>
     <!-- 顶部工具栏 -->
     <div
       class="toolbar h-10 bg-panel flex items-center justify-between px-2 py-1 text-xs text-muted-foreground gap-4 shrink-0"
@@ -1460,7 +1501,7 @@ function handleVolumeSelect(clipId: string) {
         <template v-for="track in timelineStore.tracks" :key="track.id">
           <div
             class="h-10 grid grid-cols-[1rem_minmax(0,1fr)_1.25rem_1.25rem_1.25rem_1.25rem] items-center gap-1 px-2 text-xs group border-b border-divider hover:bg-accent/50 transition-colors shrink-0"
-            :class="{ 'text-muted-foreground/55': !track.visible }"
+            :class="{ 'text-muted-foreground/55': !track.visible, 'bg-secondary': timelineStore.selectedTrackId === track.id }"
             :data-track-header-id="track.id"
             @contextmenu="handleContextMenu($event, 'track', track.id)"
           >
@@ -1472,12 +1513,16 @@ function handleVolumeSelect(clipId: string) {
               <component :is="track.expanded ? ChevronDown : ChevronRight" class="size-3 text-muted-foreground" />
             </button>
 
-            <div
-              class="min-w-0 truncate text-left font-medium text-muted-foreground group-hover:text-foreground"
+            <button
+              type="button"
+              class="min-w-0 truncate text-left font-medium text-muted-foreground hover:text-foreground"
+              :aria-label="t('effects.selectTrack', { name: track.name })"
+              :aria-pressed="timelineStore.selectedTrackId === track.id"
+              @click="timelineStore.selectTrack(track.id)"
               :title="track.name"
             >
               {{ track.name }}
-            </div>
+            </button>
             <button
               class="size-5 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
               :class="{ 'text-primary bg-primary/10': isTrackPrimaryActive(track) }"
@@ -1558,7 +1603,7 @@ function handleVolumeSelect(clipId: string) {
                 'bg-destructive/10 ring-1 ring-inset ring-destructive/30': isInvalidDragTargetTrack(track)
               }"
               :data-timeline-track-id="track.id"
-              @dragover.prevent
+              @dragover="trackDragOver"
               @drop="handleDrop($event, track.id)"
             >
               <!-- Clips -->
@@ -1571,7 +1616,7 @@ function handleVolumeSelect(clipId: string) {
                     clip.id
                   ),
                   'outline outline-2 outline-primary z-20':
-                    dragTargetGroupId === clip.id && canDropDraggedClipIntoGroup(clip.id),
+                    effectHoverId === clip.id || (dragTargetGroupId === clip.id && canDropDraggedClipIntoGroup(clip.id)),
                   'outline outline-2 outline-destructive z-20':
                     dragTargetGroupId === clip.id && !canDropDraggedClipIntoGroup(clip.id),
                   'opacity-35': isDraggedClipLeavingTrack(clip)
@@ -1582,6 +1627,9 @@ function handleVolumeSelect(clipId: string) {
                 :title="
                   clip.kind === 'group' && dragTargetGroupId === clip.id ? t('groups.dropIntoHint') : getClipName(clip)
                 "
+                @dragover="clipDragOver($event, clip.id)"
+                @dragleave="effectHoverId === clip.id && (effectHoverId = null)"
+                @drop="dropEffect($event, clip.id)"
                 @click.stop="handleClipClick(clip, $event)"
                 @dblclick.stop="clip.kind === 'group' && timelineStore.enterGroup(clip.id)"
                 @mousedown.stop="startDragClip($event, clip)"
@@ -1602,6 +1650,14 @@ function handleVolumeSelect(clipId: string) {
                 />
 
                 <FolderOpen v-if="clip.kind === 'group'" class="size-3 shrink-0 mr-1" />
+                <span
+                  v-else-if="clip.effects?.length"
+                  class="mr-1 inline-flex shrink-0 items-center gap-0.5 text-[10px] tabular-nums"
+                  :title="t('effects.count', { n: clip.effects.length })"
+                  :aria-label="t('effects.count', { n: clip.effects.length })"
+                >
+                  <Layers2 class="size-3" aria-hidden="true" />{{ clip.effects.length }}
+                </span>
                 <Input
                   v-if="editingGroupId === clip.id"
                   v-model="editingGroupName"

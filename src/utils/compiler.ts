@@ -1,6 +1,9 @@
+import { applyOpacityLimits, opacityAt } from "@/effects/opacity";
+import type { EffectPoint } from "@/effects/types";
 import type {
   AnimationSegment,
   TimelineClip,
+  TimelineResourceClip,
   TimelineKeyframeProperties,
   TimelineTrack,
 } from "@/types/timeline";
@@ -10,7 +13,7 @@ import {
   pickKeyframePropertiesForResource,
 } from "@/utils/keyframes";
 import { isDanmuFieldBasDefault, resolveDanmuDefaults } from "@/utils/danmuDefaults";
-import { flattenTimelineClips } from "@/utils/timelineGroups";
+import { flattenTimelineClips, visitTimelineClips } from "@/utils/timelineGroups";
 
 const PERCENTAGE_VALUE_KEYS = new Set(["x", "y", "fontSize", "width", "height"]);
 
@@ -271,26 +274,29 @@ export const compileDanmuDefinition = (
 };
 
 
-const compileKeyframesToBas = (
-  clip: TimelineClip,
-  resource: AnyDanmu,
-  varName: string
-) => {
+type SetProperties = Partial<AnyDanmu> | TimelineKeyframeProperties;
+interface BasUnit {
+  command: "set" | "then set";
+  properties: SetProperties;
+  duration: number;
+}
+type WriteSet = (command: BasUnit["command"], properties: SetProperties, duration: number) => void;
+
+const appendKeyframeSets = (clip: TimelineClip, resource: AnyDanmu, write: WriteSet) => {
   const keyframes = normalizeKeyframes(clip.keyframes, clip.duration);
   const targetAlpha = resource.opacity ?? 1;
   const startDelayMs = Math.max(0, clip.startTime);
 
-  let basCode = "";
   let command: "set" | "then set" = "set";
 
   if (startDelayMs > 0) {
-    basCode += formatSetStatement("set", varName, {}, startDelayMs);
-    basCode += formatSetStatement("then set", varName, { opacity: targetAlpha }, 0);
+    write("set", {}, startDelayMs);
+    write("then set", { opacity: targetAlpha }, 0);
     command = "then set";
   }
 
   let previousTimeMs = 0;
-  keyframes.forEach((keyframe) => {
+  keyframes.forEach(keyframe => {
     if (keyframe.easing && keyframe.easing !== "linear") {
       throw new Error(`Unsupported keyframe easing: ${keyframe.easing}`);
     }
@@ -303,43 +309,35 @@ const compileKeyframesToBas = (
     const { content, text, fontSize, ...continuous } = properties;
     if (keyframe.interpolation === "step") {
       if (durationMs > 0) {
-        basCode += formatSetStatement(command, varName, {}, durationMs);
+        write(command, {}, durationMs);
         command = "then set";
       }
-      basCode += formatSetStatement(command, varName, properties, 0);
+      write(command, properties, 0);
     } else {
       if (durationMs > 0 || Object.keys(continuous).length > 0) {
-        basCode += formatSetStatement(command, varName, continuous, durationMs);
+        write(command, continuous, durationMs);
         command = "then set";
       }
       if (content !== undefined || text !== undefined || fontSize !== undefined) {
-        basCode += formatSetStatement(command, varName, { content, text, fontSize }, 0);
+        write(command, { content, text, fontSize }, 0);
       }
     }
     command = "then set";
     previousTimeMs = keyframe.timeMs;
   });
-
-  return basCode;
 };
 
-const compileLegacyAnimationsToBas = (
-  clip: TimelineClip,
-  resource: AnyDanmu,
-  varName: string,
-  animations: AnimationSegment[]
-) => {
+const appendLegacySets = (clip: TimelineClip, resource: AnyDanmu, write: WriteSet, animations: AnimationSegment[]) => {
   const targetAlpha = resource.opacity ?? 1;
-  let basCode = "";
   let hasSerialRoot = false;
 
   if (clip.startTime > 0) {
-    basCode += formatSetStatement("set", varName, {}, clip.startTime);
-    basCode += formatSetStatement("then set", varName, { opacity: targetAlpha }, 0);
+    write("set", {}, clip.startTime);
+    write("then set", { opacity: targetAlpha }, 0);
     hasSerialRoot = true;
   }
 
-  animations.forEach((animation) => {
+  animations.forEach(animation => {
     const allowed = new Set([...DEFINITION_FIELDS_BY_TYPE[resource.type], "content", "text", "d"]);
     const unsupported = Object.keys(animation.properties).filter(key => !allowed.has(key) || key === "parentId");
     if (unsupported.length) throw new Error(`Unsupported animation properties: ${unsupported.join(", ")}`);
@@ -347,39 +345,27 @@ const compileLegacyAnimationsToBas = (
     const absoluteDelay = Math.max(0, clip.startTime) + Math.max(0, animation.delay ?? 0);
 
     if (animation.type === "set" && absoluteDelay > 0) {
-      basCode += formatSetStatement("set", varName, {}, absoluteDelay);
-      basCode += formatSetStatement(
-        "then set",
-        varName,
-        properties,
-        animation.duration
-      );
+      write("set", {}, absoluteDelay);
+      write("then set", properties, animation.duration);
       hasSerialRoot = true;
       return;
     }
 
     if (animation.type === "set") {
-      basCode += formatSetStatement("set", varName, properties, animation.duration);
+      write("set", properties, animation.duration);
       hasSerialRoot = true;
       return;
     }
 
     const delay = Math.max(0, animation.delay ?? 0);
     if (delay > 0) {
-      basCode += formatSetStatement(hasSerialRoot ? "then set" : "set", varName, {}, delay);
+      write(hasSerialRoot ? "then set" : "set", {}, delay);
       hasSerialRoot = true;
     }
 
-    basCode += formatSetStatement(
-      hasSerialRoot ? "then set" : "set",
-      varName,
-      properties,
-      animation.duration
-    );
+    write(hasSerialRoot ? "then set" : "set", properties, animation.duration);
     hasSerialRoot = true;
   });
-
-  return basCode;
 };
 
 export const basNameForClip = (id: string) => {
@@ -388,37 +374,135 @@ export const basNameForClip = (id: string) => {
   return `obj_encoded_${Array.from(id, character => character.codePointAt(0)!.toString(16)).join("_") || "empty"}`;
 };
 
-const compileResolvedClip = (clip: TimelineClip, resource: AnyDanmu, varName: string): string => {
-  if (clip.kind === "group") throw new Error("Cannot compile a group as a single clip");
-  const keyframes = normalizeKeyframes(clip.keyframes, clip.duration);
-  const legacyAnimations = clip.animations ?? [];
-  if (keyframes.length > 0 && legacyAnimations.length > 0) {
+function hostSets(clip: TimelineResourceClip, resource: AnyDanmu): BasUnit[] {
+  const units: BasUnit[] = [];
+  const write: WriteSet = (command, properties, duration) => units.push({ command, properties, duration });
+  if (clip.keyframes?.length && clip.animations?.length)
     throw new Error(`Clip ${clip.id} mixes keyframes and legacy animations`);
+  if (clip.keyframes?.length) appendKeyframeSets(clip, resource, write);
+  else if (clip.animations?.length) appendLegacySets(clip, resource, write, clip.animations);
+  else if (clip.startTime > 0) {
+    write("set", {}, clip.startTime);
+    write("then set", { opacity: resource.opacity ?? 1 }, 0);
+  } else if (clip.duration <= 0) write("set", {}, 0);
+  return units;
+}
+
+const transformKeys = new Set(["x", "y", "rotateX", "rotateY", "rotateZ", "scale"]);
+
+function resolveHostGroups(units: BasUnit[]): BasUnit[][] {
+  const groups: BasUnit[][] = [];
+  for (const unit of units) {
+    if (!groups.length || unit.command === "set") groups.push([]);
+    groups[groups.length - 1]!.push(unit);
   }
+  if (groups.length < 2) return groups;
 
-  let basCode = compileDanmuDefinition(resource, varName, clip.duration, clip.startTime);
-
-  if (keyframes.length > 0) {
-    basCode += compileKeyframesToBas(clip, resource, varName);
-    return basCode;
+  // bas.js 将同一条 then 链中已写入的属性保持到链尾；跨链争用时，后声明的整组生效。
+  let active: { units: BasUnit[]; firstWrite: Map<string, number>; end: number }[] = [];
+  for (const group of groups) {
+    const firstWrite = new Map<string, number>();
+    let time = 0;
+    for (const { properties, duration } of group) {
+      for (const [field, value] of Object.entries(properties)) {
+        const key = transformKeys.has(field) ? "transform" : field;
+        if (value !== undefined && value !== null && !firstWrite.has(key)) firstWrite.set(key, time);
+      }
+      const end = time + duration;
+      if (duration > 0 && firstWrite.size) {
+        active = active.filter(prior => {
+          for (const key of firstWrite.keys()) {
+            const start = prior.firstWrite.get(key);
+            if (start !== undefined && start < end && prior.end > time) return false;
+          }
+          return true;
+        });
+      }
+      time = end;
+    }
+    active.push({ units: group, firstWrite, end: time });
   }
+  return active.map(group => group.units);
+}
 
-  if (legacyAnimations.length > 0) {
-    basCode += compileLegacyAnimationsToBas(clip, resource, varName, legacyAnimations);
-    return basCode;
+// 将宿主已有的透明度与其他属性分开输出，让播放器只收到一条 alpha 链。
+function composeOpacity(clip: TimelineResourceClip, resource: AnyDanmu, units: BasUnit[]) {
+  const base = resource.opacity ?? 1;
+  const output: BasUnit[] = [];
+  let alpha: EffectPoint[] = [{ at: 0, value: base }];
+  for (const group of resolveHostGroups(units)) {
+    let time = 0;
+    let previous: number | undefined;
+    const curve: EffectPoint[] = [];
+    const other = group.map(unit => {
+      const { opacity, ...properties } = unit.properties;
+      if (opacity !== undefined) {
+        curve.push(
+          { at: time, value: previous ?? opacityAt(alpha, time) },
+          { at: time + unit.duration, value: opacity }
+        );
+        previous = opacity;
+      }
+      time += unit.duration;
+      return { ...unit, properties };
+    });
+    if (curve.length) {
+      const start = curve[0]!.at;
+      const before = opacityAt(alpha, start, true);
+      alpha = [...alpha.filter(point => point.at < start), { at: start, value: before }, ...curve];
+    }
+    if (other.some(unit => Object.keys(unit.properties).length)) {
+      if (clip.startTime > 0) {
+        output.push({ command: "set", properties: {}, duration: clip.startTime });
+        other[0]!.command = "then set";
+      }
+      output.push(...other);
+    }
   }
-
+  const end = opacityAt(alpha, clip.duration);
+  alpha = [...alpha.filter(point => point.at <= clip.duration), { at: clip.duration, value: end }];
+  const limited = applyOpacityLimits(alpha, clip.effects ?? [], clip.duration);
+  const initial = opacityAt(limited, 0);
+  let command: BasUnit["command"] = "set";
+  const writeAlpha = (properties: SetProperties, duration: number) => {
+    output.push({ command, properties, duration });
+    command = "then set";
+  };
   if (clip.startTime > 0) {
-    const targetAlpha = resource.opacity ?? 1;
-    basCode += formatSetStatement("set", varName, {}, clip.startTime);
-    basCode += formatSetStatement("then set", varName, { opacity: targetAlpha }, 0);
-  } else if (clip.duration <= 0) {
-    // BAS only creates a duration hold for truthy def.duration values. Keep an
-    // explicit zero-length unit so a zero-duration clip does not fall back to 4s.
-    basCode += formatSetStatement("set", varName, {}, clip.duration);
+    writeAlpha({}, clip.startTime);
+    if (initial !== 0) writeAlpha({ opacity: initial }, 0);
   }
+  let previous = { at: 0, value: initial };
+  let writtenTime = 0;
+  for (const point of limited) {
+    if (point.at === 0) continue;
+    if (point.value !== previous.value) {
+      if (writtenTime < previous.at) writeAlpha({}, previous.at - writtenTime);
+      writeAlpha({ opacity: Number(point.value.toFixed(6)) }, point.at - previous.at);
+      writtenTime = point.at;
+    }
+    previous = point;
+  }
+  // def 的时长维持末值；零时长对象需要显式 set 才不会被播放器扩成 4 秒。
+  if (clip.duration === 0 && !output.length) writeAlpha({}, 0);
+  return { initial, units: output };
+}
 
-  return basCode;
+const compileResolvedClip = (clip: TimelineResourceClip, resource: AnyDanmu, varName: string): string => {
+  for (const effect of clip.effects ?? []) {
+    if (effect.patch.style) resource = { ...resource, ...effect.patch.style };
+  }
+  const usesOpacity = clip.effects?.some(effect => effect.patch.opacityLimit);
+  let units = hostSets(usesOpacity ? { ...clip, startTime: 0 } : clip, resource);
+  if (usesOpacity) {
+    const composed = composeOpacity(clip, resource, units);
+    units = composed.units;
+    resource = { ...resource, opacity: composed.initial };
+  }
+  const definition = compileDanmuDefinition(resource, varName, clip.duration, clip.startTime);
+  return (
+    definition + units.map(unit => formatSetStatement(unit.command, varName, unit.properties, unit.duration)).join("")
+  );
 };
 
 export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string => {
@@ -426,8 +510,20 @@ export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string
   if (clip.parentClipId || resource.parentId || clip.overrides?.parentId) {
     throw new Error("A parented clip must be compiled in its timeline");
   }
-  return compileResolvedClip(clip, { ...resource, ...clip.overrides, id: resource.id, type: resource.type } as AnyDanmu, basNameForClip(clip.id));
+  return compileResolvedClip(
+    clip,
+    { ...resource, ...clip.overrides, id: resource.id, type: resource.type } as AnyDanmu,
+    basNameForClip(clip.id)
+  );
 };
+
+function describeClip(tracks: TimelineTrack[], id: string) {
+  let label = id;
+  visitTimelineClips(tracks, clip => {
+    if (clip.id === id && clip.name) label = [id, clip.name].join(" / ");
+  });
+  return label;
+}
 
 export const compileTimelineToBas = (
   tracks: TimelineTrack[],
@@ -482,8 +578,9 @@ export const compileTimelineToBas = (
     line += lineCount;
     return code;
     } catch (error) {
-      if (!options.onError) throw new Error(`Clip ${clip.id}: ${error instanceof Error ? error.message : String(error)}`);
-      options.onError(`Clip ${clip.id}: ${error instanceof Error ? error.message : String(error)}`);
+      const message = `Clip ${describeClip(tracks, clip.id)}: ${error instanceof Error ? error.message : String(error)}`;
+      if (!options.onError) throw new Error(message);
+      options.onError(message);
       return "";
     }
   }).join("\n");
@@ -492,7 +589,8 @@ export const compileTimelineToBas = (
 export const formatBasParseError = (
   error: unknown,
   code: string,
-  ranges: Array<{ clipId: string; startLine: number; endLine: number }>
+  ranges: Array<{ clipId: string; startLine: number; endLine: number }>,
+  tracks: TimelineTrack[] = []
 ) => {
   const message = error instanceof Error ? error.message : String(error);
   const line = Number(message.match(/line\s*[:：]\s*(\d+)/i)?.[1]);
@@ -500,5 +598,5 @@ export const formatBasParseError = (
   if (!range) return message;
   const sourceLine = code.split("\n")[line - 1] ?? "";
   const property = sourceLine.match(/\b([A-Za-z_]\w*)\s*=/)?.[1];
-  return `Clip ${range.clipId}${property ? `, property ${property}` : ""}: ${message}`;
+  return `Clip ${describeClip(tracks, range.clipId)}${property ? `, property ${property}` : ""}: ${message}`;
 };

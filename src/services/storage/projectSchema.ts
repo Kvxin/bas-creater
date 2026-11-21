@@ -1,8 +1,9 @@
 import type { BasProjectData } from "@/types/storage";
+import { MAX_CLIP_EFFECTS, validateInstance } from "@/effects/validation";
 import type { TimelineClip, TimelineTrack } from "@/types/timeline";
 import { updateGroupDurations } from "@/utils/timelineGroups";
 
-export const PROJECT_VERSION = 3;
+export const PROJECT_VERSION = 5;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -24,10 +25,11 @@ const isTime = (value: unknown): value is number =>
 export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProject"): BasProjectData => {
   if (!isRecord(input) || !Array.isArray(input.tracks)) throw new Error("Invalid project structure");
   const version = input.version ?? 1;
-  if (version !== 1 && version !== 2 && version !== PROJECT_VERSION) throw new Error("Unsupported project version");
-  if (version !== PROJECT_VERSION && !Array.isArray(input.danmus)) throw new Error("Invalid project structure");
+  const legacy = version === 1 || version === 2;
+  if (!legacy && version !== 3 && version !== 4 && version !== PROJECT_VERSION) throw new Error("Unsupported project version");
+  if (legacy && !Array.isArray(input.danmus)) throw new Error("Invalid project structure");
   const data: BasProjectData = JSON.parse(JSON.stringify(input));
-  if (version !== PROJECT_VERSION) {
+  if (legacy) {
     data.audioMeta ??= [];
     if (!Array.isArray(data.audioMeta)) throw new Error("Invalid audio metadata");
     data.assets = [
@@ -76,6 +78,7 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
   }
   data.danmus = data.assets.flatMap((asset) => asset.type === "audio-file" ? [] : [asset.danmu]);
   data.audioMeta = data.assets.flatMap((asset) => asset.type === "audio-file" ? [asset.audio] : []);
+  const danmuTypes = new Map(data.danmus.map(item => [item.id, item.type]));
   const resourceIds = new Set<string>();
   const audioIds = new Set<string>();
   const nodeIds = new Set<string>();
@@ -155,20 +158,36 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
             clip.animations !== undefined || clip.params !== undefined || clip.overrides !== undefined ||
             clip.parentClipId !== undefined || clip.sourceInMs !== undefined) throw new Error("Invalid group clip");
           validateTracks(clip.tracks, true);
+          if (clip.effects !== undefined) throw new Error("Groups cannot own attached effects");
+          if ("effect" in clip) {
+            // v4 的生成组没有宿主 ID，保留实际子轨和素材即可重现旧画面。
+            if (version !== 4) throw new Error("Invalid legacy effect group");
+            delete clip.effect;
+          }
         } else if (clip.kind === "resource") {
           if (!resourceIds.has(clip.resourceId) || clip.tracks !== undefined) throw new Error("Missing clip resource");
+          if ("effect" in clip) throw new Error("Invalid legacy effect metadata");
           const isAudio = audioIds.has(clip.resourceId);
+          if (clip.effects !== undefined) {
+            const type = danmuTypes.get(clip.resourceId);
+            if (!type || version !== PROJECT_VERSION || !Array.isArray(clip.effects) || clip.effects.length > MAX_CLIP_EFFECTS)
+              throw new Error("Invalid clip effects");
+            for (const effect of clip.effects) {
+              validateInstance(effect, type);
+              registerId(effect.id, nodeIds);
+            }
+          }
           if ((insideGroup && isAudio) || (track.type === "audio" && !isAudio) ||
             (track.type === "danmu" && isAudio)) throw new Error("Incompatible clip type");
           if (clip.sourceInMs !== undefined && (!isAudio || !isTime(clip.sourceInMs))) throw new Error("Invalid source offset");
-          if (version !== PROJECT_VERSION && isAudio && clip.sourceInMs === undefined) clip.sourceInMs = 0;
+          if (legacy && isAudio && clip.sourceInMs === undefined) clip.sourceInMs = 0;
           if (clip.overrides !== undefined && (isAudio || !isRecord(clip.overrides) ||
             (clip.overrides.id !== undefined && clip.overrides.id !== clip.resourceId) ||
             (clip.overrides.type !== undefined && clip.overrides.type !== data.danmus.find((item) => item.id === clip.resourceId)?.type))) {
             throw new Error("Invalid clip overrides");
           }
           if (clip.parentClipId !== undefined && (isAudio || typeof clip.parentClipId !== "string" || !clip.parentClipId)) throw new Error("Invalid parent clip");
-          if (version !== PROJECT_VERSION && !isAudio) {
+          if (legacy && !isAudio) {
             const source = data.danmus.find((item) => item.id === clip.resourceId)!;
             clip.overrides = { ...source };
           }
@@ -186,12 +205,12 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
   };
   validateTracks(data.tracks, false);
   for (const clip of clipsById.values()) {
-    if (version !== PROJECT_VERSION && clip.overrides?.parentId) {
+    if (legacy && clip.overrides?.parentId) {
       const parents = clipsByResource.get(clip.overrides.parentId) ?? [];
       if (parents.length !== 1 || parents[0]!.id === clip.id) throw new Error("Ambiguous or missing legacy parent clip");
       clip.parentClipId = parents[0]!.id;
     }
-    if (version !== PROJECT_VERSION && clip.overrides) delete clip.overrides.parentId;
+    if (legacy && clip.overrides) delete clip.overrides.parentId;
   }
   for (const clip of clipsById.values()) {
     const seen = new Set([clip.id]);
@@ -203,7 +222,7 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
       parent = target.parentClipId;
     }
   }
-  if (version !== PROJECT_VERSION) {
+  if (legacy) {
     for (const danmu of data.danmus) delete danmu.parentId;
   }
   data.version = PROJECT_VERSION;

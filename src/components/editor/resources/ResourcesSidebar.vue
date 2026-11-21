@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { Folder, MessageSquareText, SquareMousePointer, Waypoints, AudioLines } from "lucide-vue-next";
+import { Folder, MessageSquareText, SquareMousePointer, Waypoints, AudioLines, Layers2 } from "lucide-vue-next";
 
 defineProps<{
   modelValue: string;
@@ -19,7 +19,8 @@ const tabs = computed(() => [
   { id: "text", icon: MessageSquareText, label: t("danmu.type.text") },
   { id: "button", icon: SquareMousePointer, label: t("danmu.type.button") },
   { id: "path", icon: Waypoints, label: t("danmu.type.path") },
-  { id: "audio", icon: AudioLines, label: t("resources.tabAudio") }
+  { id: "audio", icon: AudioLines, label: t("resources.tabAudio") },
+  { id: "effects", icon: Layers2, label: t("effects.title") }
 ]);
 </script>
 

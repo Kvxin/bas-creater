@@ -10,6 +10,7 @@ import properties from "./properties";
 import resources from "./resources";
 import timeline from "./timeline";
 import groups from "./groups";
+import effects from "./effects";
 import updates from "./updates";
 
 /**
@@ -27,6 +28,7 @@ import updates from "./updates";
 export const messages = {
   "zh-CN": {
     updates: updates["zh-CN"],
+    effects: effects["zh-CN"],
     groups: groups["zh-CN"],
     common: common["zh-CN"],
     app: app["zh-CN"],
@@ -42,6 +44,7 @@ export const messages = {
   },
   en: {
     updates: updates.en,
+    effects: effects.en,
     groups: groups.en,
     common: common.en,
     app: app.en,
@@ -57,6 +60,7 @@ export const messages = {
   },
   ja: {
     updates: updates.ja,
+    effects: effects.ja,
     groups: groups.ja,
     common: common.ja,
     app: app.ja,

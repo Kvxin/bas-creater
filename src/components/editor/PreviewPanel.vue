@@ -630,7 +630,7 @@ const compileAndLoad = async (seekToCurrent = true): Promise<boolean> => {
     try {
       parsed = code.trim() ? await parseBasDSL(code) : { defs: [], sets: [] };
     } catch (error) {
-      throw new Error(formatBasParseError(error, code, ranges));
+      throw new Error(formatBasParseError(error, code, ranges, timelineStore.tracks));
     } finally {
       if (measurement) measurement.parseMs = performance.now() - parseStart;
     }

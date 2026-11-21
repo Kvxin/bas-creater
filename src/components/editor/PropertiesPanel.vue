@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Settings, Plus, Trash2, FileText, Move, Palette, Sparkles, Music2, Volume2 } from "lucide-vue-next";
+import { Settings, Plus, Trash2, FileText, Move, Palette, Sparkles, Layers2, Music2, Volume2 } from "lucide-vue-next";
 import { useDanmuStore } from "@/stores/danmu";
 import { useTimelineStore } from "@/stores/timeline";
 import { useAudioStore } from "@/stores/audio";
+import EffectProperties from "./effects/EffectProperties.vue";
+import { loadEffects } from "@/effects/registry";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -144,7 +146,7 @@ const updateGroupStart = (value: string | number) => {
   }
 };
 
-type PropertyTabId = "identity" | "transform" | "style" | "animation";
+type PropertyTabId = "identity" | "transform" | "style" | "animation" | "effects";
 
 const activeTab = ref<PropertyTabId>("identity");
 
@@ -171,9 +173,23 @@ const propertyTabs = computed(
         label: t("properties.tabs.animation.label"),
         title: t("properties.tabs.animation.title"),
         icon: Sparkles
-      }
+      },
+      ...(selectedClip.value?.kind === "resource"
+        ? ([{ id: "effects", label: t("effects.title"), title: t("effects.applied"), icon: Layers2 }] as const)
+        : [])
     ] as const
 );
+
+watch(
+  () => selectedClip.value?.effects?.map(effect => effect.id) ?? [],
+  (ids, previous) => {
+    if (ids.some(id => !previous.includes(id))) activeTab.value = "effects";
+    if (activeTab.value === "effects" && selectedClip.value?.kind !== "resource") activeTab.value = "identity";
+  }
+);
+watch(activeTab, tab => {
+  if (tab === "effects") void loadEffects();
+});
 
 const clipKeyframes = computed(() => {
   const clip = selectedClip.value;
@@ -618,6 +634,27 @@ const getButtonAV = (item: any): number | undefined => {
         <p v-if="selectedClip?.kind === 'resource' && selectedClip.animations?.length" role="status" class="mb-3 text-xs text-muted-foreground">
           旧动画不支持新关键帧编辑，原动画将保留。
         </p>
+        <section
+          v-if="activeTab === 'effects' && selectedClip?.kind === 'resource'"
+          id="properties-tab-effects"
+          role="tabpanel"
+        >
+          <h3 class="text-xs font-semibold text-foreground">{{ t("effects.applied") }}</h3>
+          <p v-if="!selectedClip.effects?.length" class="mt-2 text-xs text-muted-foreground">
+            {{ t("effects.noEffects") }}
+          </p>
+          <ol v-else class="divide-y divide-divider">
+            <EffectProperties
+              v-for="(effect, index) in selectedClip.effects"
+              :key="effect.id"
+              :clip-id="selectedClip.id"
+              :effect="effect"
+              :first="index === 0"
+              :last="index === selectedClip.effects.length - 1"
+              :locked="!timelineStore.getEffectTarget(selectedClip.id)"
+            />
+          </ol>
+        </section>
         <!-- 第一阶段：内容与身份 (根据类型自适应) -->
         <p v-if="effectiveSelection.error" role="alert" class="mb-3 text-xs text-destructive">
           无法获取混合单位的参照尺寸，当前值不可编辑。

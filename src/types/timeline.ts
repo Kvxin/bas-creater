@@ -1,4 +1,5 @@
-import type { AnyDanmu } from './danmu';
+import type { AnyDanmu } from "./danmu";
+import type { EffectInstance } from "@/effects/types";
 
 export type KeyframeInterpolation = 'linear' | 'step';
 
@@ -56,12 +57,14 @@ export interface TimelineResourceClip extends TimelineClipBase {
   parentClipId?: string;
   sourceInMs?: number;
 
+  effects?: EffectInstance[];
   animations?: AnimationSegment[]; // 动画片段列表
   keyframes?: TimelineKeyframe[]; // AE/视频编辑器式关键帧，优先用于新动画系统
 }
 
 export interface TimelineGroupClip extends TimelineClipBase {
   kind: 'group';
+  effects?: never;
   tracks: TimelineTrack[];
   resourceId?: never;
   params?: never;

@@ -16,6 +16,7 @@
     "build-only": "vite build",
     "preview": "vite preview",
     "type-check": "vue-tsc --build",
+    "test:effects": "node --import tsx --test tests/effect-plugins.test.ts",
     "test:updater": "node --import tsx --test tests/updater-manifest.test.mjs tests/app-update.test.ts",
     "test:window-controls": "node --import tsx --test tests/window-preferences.test.ts",
     "test:storage": "node --import tsx --test tests/browser-project-file.test.ts tests/folder-project-storage.test.ts tests/desktop-recent-projects.test.ts tests/project-asset-migration.test.ts tests/clip-instances.test.ts tests/audio-clip.test.ts tests/asset-bins.test.ts"

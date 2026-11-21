@@ -1,0 +1,70 @@
+const zhCN = {
+  title: "特效",
+  attach: "将「{name}」应用到选中的弹幕",
+  chooseClip: "请选择可编辑且类型兼容的弹幕片段。",
+  hint: "选中一条弹幕后点「+」，或将特效拖到时间轴上的弹幕。",
+  target: "当前弹幕 · {name}",
+  supports: "适用于{types}",
+  limit: "每条弹幕最多可添加 {n} 个特效。",
+  cannotEdit: "当前特效无法编辑。",
+  loading: "正在读取插件…",
+  empty: "暂无可用特效",
+  count: "{n} 个特效",
+  applied: "片段特效",
+  noEffects: "从左侧特效库给这条弹幕添加特效。",
+  up: "上移",
+  down: "下移",
+  apply: "应用参数",
+  remove: "移除特效",
+  removeNamed: "移除「{name}」",
+  unavailable: "调参需要插件 v{version}。当前保存的效果可继续播放、导出和移除。",
+  selectTrack: "选择轨道「{name}」"
+};
+
+const en: typeof zhCN = {
+  title: "Effects",
+  attach: "Apply {name} to the selected clip",
+  chooseClip: "Select an editable, compatible danmaku clip.",
+  hint: "Select a danmaku clip and press +, or drag an effect onto a clip.",
+  target: "Selected clip · {name}",
+  supports: "Available for {types}",
+  limit: "A clip can have up to {n} effects.",
+  cannotEdit: "This effect cannot be edited.",
+  loading: "Loading plugins…",
+  empty: "No effects available",
+  count: "Effects · {n}",
+  applied: "Clip effects",
+  noEffects: "Add an effect to this clip from the effects library.",
+  up: "Move up",
+  down: "Move down",
+  apply: "Apply changes",
+  remove: "Remove effect",
+  removeNamed: "Remove {name}",
+  unavailable: "Editing requires plugin v{version}. The saved effect can still play, export, or be removed.",
+  selectTrack: "Select track {name}"
+};
+
+const ja: typeof zhCN = {
+  title: "エフェクト",
+  attach: "選択した弾幕に「{name}」を適用",
+  chooseClip: "編集可能な対応する弾幕クリップを選択してください。",
+  hint: "弾幕を選んで「+」を押すか、タイムラインの弾幕にドラッグしてください。",
+  target: "選択中の弾幕 · {name}",
+  supports: "対応する種類：{types}",
+  limit: "弾幕ごとに最大 {n} 件まで追加できます。",
+  cannotEdit: "このエフェクトは編集できません。",
+  loading: "プラグインを読み込み中…",
+  empty: "利用できるエフェクトがありません",
+  count: "エフェクト {n} 件",
+  applied: "クリップのエフェクト",
+  noEffects: "左側のライブラリからこの弾幕にエフェクトを追加できます。",
+  up: "上へ移動",
+  down: "下へ移動",
+  apply: "変更を適用",
+  remove: "エフェクトを外す",
+  removeNamed: "「{name}」を外す",
+  unavailable: "編集にはプラグイン v{version} が必要です。保存した効果は再生、書き出し、削除できます。",
+  selectTrack: "トラック「{name}」を選択"
+};
+
+export default { "zh-CN": zhCN, en, ja };

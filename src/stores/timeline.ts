@@ -14,6 +14,9 @@ import type {
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 import type { BasImportObject } from "@/utils/basImport";
+import { defaultEffectParams, matchesEffect, type EffectParams, type EffectPlugin } from "@/effects/types";
+import { buildInstance, sliceEffects } from "@/effects/instances";
+import { MAX_CLIP_EFFECTS } from "@/effects/validation";
 import { useAudioStore } from "@/stores/audio";
 import { i18n } from "@/i18n";
 import { getItemName } from "@/utils/resourceUtils";
@@ -70,11 +73,13 @@ export const useTimelineStore = defineStore("timeline", () => {
   const isPlaying = ref(false);
   const zoomScale = ref(50);
   const selectedClipIds = ref<string[]>([]);
+  const selectedTrackId = ref<string | null>(null);
   const primarySelectedClipId = ref<string | null>(null);
   const selectedClipId = computed({
     get: () => primarySelectedClipId.value,
     set: (id: string | null) => {
       primarySelectedClipId.value = id;
+      selectedTrackId.value = id ? findClipLocation(id)?.track.id ?? null : null;
       if (!id) selectedClipIds.value = [];
       else if (!selectedClipIds.value.includes(id)) selectedClipIds.value = [id];
     }
@@ -137,7 +142,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     if (activeGroupPath.value.length && sourceTrackType === "audio") return null;
 
     // 检查轨道类型兼容性
-    if (track.clips.length > 0 && track.type && sourceTrackType && track.type !== sourceTrackType) {
+    if (track.clips.length && track.type && sourceTrackType && track.type !== sourceTrackType) {
       console.warn(
         `[TimelineStore] 无法将 ${sourceTrackType} 片段粘贴到 ${track.type} 轨道`
       );
@@ -149,7 +154,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     newClip.startTime = Math.max(0, startTime);
 
     // 确保轨道类型匹配
-    if (!track.type && sourceTrackType) {
+    if (sourceTrackType && track.type !== sourceTrackType) {
       applyTrackType(track, sourceTrackType);
     }
 
@@ -324,10 +329,76 @@ export const useTimelineStore = defineStore("timeline", () => {
       clearEditingState();
       navigationRevision.value += 1;
     }
-    const validIds = new Set(tracks.value.flatMap((track) => track.clips.map((clip) => clip.id)));
-    setSelectedClips(selectedClipIds.value.filter((id) => validIds.has(id)), selectedClipId.value);
+    if (selectedClipIds.value.length) {
+      setSelectedClips(selectedClipIds.value, selectedClipId.value);
+    } else if (selectedTrackId.value && !tracks.value.some(track => track.id === selectedTrackId.value)) {
+      selectedTrackId.value = null;
+    }
     currentTime.value = Math.max(0, Math.min(currentTime.value, duration.value));
   };
+
+  const effectScopeLocked = computed(() => {
+    let scope = rootTracks.value;
+    for (const group of activeGroups.value) {
+      if (scope.find(track => track.id === group.trackId)?.locked) return true;
+      scope = group.tracks;
+    }
+    return false;
+  });
+
+  function getEffectTarget(clipId: string | null) {
+    const location = clipId ? findClipLocation(clipId) : null;
+    if (
+      !location ||
+      location.clip.kind !== "resource" ||
+      location.track.locked ||
+      location.track.type === "audio" ||
+      effectScopeLocked.value
+    )
+      return null;
+    const clip = location.clip;
+    const resource = useDanmuStore().danmus.find(item => item.id === clip.resourceId);
+    return resource ? { clip, resource } : null;
+  }
+
+  function attachEffect(clipId: string | null, plugin: EffectPlugin) {
+    const target = getEffectTarget(clipId);
+    if (!target || !plugin.targets.includes(target.resource.type)) throw new Error(i18n.global.t("effects.chooseClip"));
+    const effects = target.clip.effects ?? [];
+    if (effects.length >= MAX_CLIP_EFFECTS) throw new Error(i18n.global.t("effects.limit", { n: MAX_CLIP_EFFECTS }));
+    const effect = buildInstance(plugin, target.resource.type, defaultEffectParams(plugin));
+    target.clip.effects = [...effects, effect];
+    setSelectedClip(target.clip.id);
+    return effect.id;
+  }
+
+  function updateEffect(clipId: string, effectId: string, plugin: EffectPlugin, params: EffectParams) {
+    const target = getEffectTarget(clipId);
+    const effect = target?.clip.effects?.find(item => item.id === effectId);
+    if (!target || !effect || !matchesEffect(plugin, effect) || !plugin.targets.includes(target.resource.type))
+      throw new Error(i18n.global.t("effects.cannotEdit"));
+    const updated = buildInstance(plugin, target.resource.type, params, effect);
+    target.clip.effects = target.clip.effects!.map(item => (item.id === effectId ? updated : item));
+  }
+
+  function removeEffect(clipId: string, effectId: string) {
+    const target = getEffectTarget(clipId);
+    if (!target?.clip.effects?.some(item => item.id === effectId)) return;
+    const remaining = target.clip.effects.filter(item => item.id !== effectId);
+    if (remaining.length) target.clip.effects = remaining;
+    else delete target.clip.effects;
+  }
+
+  function moveEffect(clipId: string, effectId: string, offset: -1 | 1) {
+    const target = getEffectTarget(clipId);
+    if (!target?.clip.effects) return;
+    const effects = [...target.clip.effects];
+    const index = effects.findIndex(item => item.id === effectId);
+    const next = index + offset;
+    if (index < 0 || next < 0 || next >= effects.length) return;
+    [effects[index], effects[next]] = [effects[next]!, effects[index]!];
+    target.clip.effects = effects;
+  }
 
   // 添加新轨道
   const addTrack = (name?: string, type?: TimelineTrackType) => {
@@ -351,13 +422,8 @@ export const useTimelineStore = defineStore("timeline", () => {
     if (tracks.value.find((track) => track.id === trackId)?.locked) return;
     const index = tracks.value.findIndex((t) => t.id === trackId);
     if (index !== -1) {
-      const removedTrack = tracks.value[index];
-      if (removedTrack?.clips.some((clip) => clip.id === selectedClipId.value)) {
-        selectedClipId.value = null;
-        selectedAnimationId.value = null;
-        selectedKeyframeId.value = null;
-      }
       tracks.value.splice(index, 1);
+      if (selectedTrackId.value === trackId) selectedTrackId.value = null;
       recalculateDuration();
     }
   };
@@ -423,11 +489,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     for (const track of tracks.value) {
       const index = track.clips.findIndex((c) => c.id === clipId);
       if (index !== -1) {
-        if (selectedClipId.value === clipId) {
-          selectedClipId.value = null;
-          selectedAnimationId.value = null;
-          selectedKeyframeId.value = null;
-        }
         track.clips.splice(index, 1);
         clearTrackTypeIfEmpty(track);
         recalculateDuration();
@@ -443,8 +504,11 @@ export const useTimelineStore = defineStore("timeline", () => {
         for (let index = track.clips.length - 1; index >= 0; index--) {
           const clip = track.clips[index];
           if (!clip) continue;
-          if (clip.kind === "group") removeFromTracks(clip.tracks);
-          else if (clip.resourceId === resourceId) track.clips.splice(index, 1);
+          if (clip.kind === "group") {
+            removeFromTracks(clip.tracks);
+          } else if (clip.resourceId === resourceId) {
+            track.clips.splice(index, 1);
+          }
         }
         clearTrackTypeIfEmpty(track);
       }
@@ -480,6 +544,28 @@ export const useTimelineStore = defineStore("timeline", () => {
         }
         return;
       }
+    }
+  };
+
+  const trimClip = (clipId: string, startTime: number, duration: number) => {
+    const location = findClipLocation(clipId);
+    if (
+      !location ||
+      location.track.locked ||
+      effectScopeLocked.value ||
+      !Number.isFinite(startTime) ||
+      startTime < 0 ||
+      !Number.isFinite(duration) ||
+      duration <= 0
+    )
+      return;
+    const { clip } = location;
+    if (clip.kind === "resource" && clip.effects?.length && clip.duration > 0) {
+      const from = (startTime - clip.startTime) / clip.duration;
+      const to = (startTime + duration - clip.startTime) / clip.duration;
+      updateClip(clipId, { startTime, duration, effects: sliceEffects(clip.effects, from, to) });
+    } else {
+      updateClip(clipId, { startTime, duration });
     }
   };
 
@@ -643,6 +729,8 @@ export const useTimelineStore = defineStore("timeline", () => {
 
     const group = target.clip;
     const absoluteStart = source.clip.startTime;
+    const childTrackId = createTimelineId("track");
+    const copiedClip = cloneClip(source.clip, childTrackId);
     if (absoluteStart < group.startTime) {
       const shift = group.startTime - absoluteStart;
       for (const childTrack of group.tracks) {
@@ -651,8 +739,6 @@ export const useTimelineStore = defineStore("timeline", () => {
       group.startTime = absoluteStart;
     }
 
-    const childTrackId = createTimelineId("track");
-    const copiedClip = cloneClip(source.clip, childTrackId);
     copiedClip.startTime = Math.max(0, absoluteStart - group.startTime);
     group.tracks.push({
       id: childTrackId,
@@ -764,6 +850,11 @@ export const useTimelineStore = defineStore("timeline", () => {
       keyframes: split?.rightKeyframes ?? source.keyframes,
       animations: split?.rightAnimations ?? source.animations
     };
+    if (source.effects?.length) {
+      const fraction = offsetMs / source.duration;
+      clip.effects = sliceEffects(clip.effects!, 0, fraction);
+      rightClip.effects = sliceEffects(source.effects, fraction, 1, true);
+    }
     clip.duration = offsetMs;
     if (split) {
       clip.keyframes = split.leftKeyframes;
@@ -835,13 +926,19 @@ export const useTimelineStore = defineStore("timeline", () => {
     const selectionCountChanged = validIds.length !== selectedClipIds.value.length;
     selectedClipIds.value = validIds;
     primarySelectedClipId.value = primary;
+    const clip = primary ? findClipLocation(primary)?.clip : null;
+    selectedTrackId.value = clip?.trackId ?? null;
     if (changed || selectionCountChanged || validIds.length > 1) {
       selectedAnimationId.value = null;
       selectedKeyframeId.value = null;
-      const clip = primary ? findClipLocation(primary)?.clip : null;
       useDanmuStore().select(validIds.length === 1 && clip?.kind === "resource" ? clip.resourceId : null);
     }
   };
+
+  function selectTrack(id: string) {
+    setSelectedClip(null);
+    selectedTrackId.value = tracks.value.some(track => track.id === id) ? id : null;
+  }
 
   const toggleClipSelection = (id: string) => {
     const ids = selectedClipIds.value.includes(id)
@@ -870,6 +967,7 @@ export const useTimelineStore = defineStore("timeline", () => {
           for (const child of track.clips) regenerate(child, track.id);
         }
       } else {
+        for (const effect of clip.effects ?? []) effect.id = createTimelineId("fx");
         for (const animation of clip.animations ?? []) animation.id = createTimelineId("anim");
         for (const keyframe of clip.keyframes ?? []) keyframe.id = createTimelineId("kf");
       }
@@ -1429,6 +1527,13 @@ export const useTimelineStore = defineStore("timeline", () => {
     navigationRevision,
     timelineScroll,
     selectedClipIds,
+    selectedTrackId,
+    selectTrack,
+    getEffectTarget,
+    attachEffect,
+    updateEffect,
+    moveEffect,
+    removeEffect,
     setSelectedClips,
     toggleClipSelection,
     removeSelectedClips,
@@ -1461,6 +1566,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     removeClip,
     removeClipsByResourceId,
     updateClip,
+    trimClip,
     moveClipToTrack,
     copyClipToTrack,
     canSplitClip,

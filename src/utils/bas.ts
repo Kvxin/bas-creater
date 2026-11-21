@@ -214,39 +214,24 @@ class BasService {
   }
 }
 
-// 仅解析 DSL：返回 { defs, sets }
-export function parseBasDSL(dslText: string): Promise<BasParseResult> {
+// 只解析 BAS，预览和导入共用仓库播放器的语法规则。
+export async function parseBasDSL(dslText: string): Promise<BasParseResult> {
   const BasDanmaku = (window as any).BasDanmaku;
-  if (!BasDanmaku)
-    return Promise.reject(
-      new Error("BasDanmaku not found. Ensure bas.js is included in index.html")
-    );
-
-  // 创建一个轻量实例，仅用于解析（不需要 init/render）
-  const basInst = new BasDanmaku({
+  if (!BasDanmaku) throw new Error("BasDanmaku not found. Ensure bas.js is included in index.html");
+  const parser = new BasDanmaku({
     container: document.createElement("div"),
     easing: "linear",
     visible: false,
     fontFamily: "",
-    timeSyncFunc: () => 0,
+    timeSyncFunc: () => 0
   });
-  // 强制使用同步解析，避免 Worker 构建依赖
-  (basInst as any).workerDisabled = true;
-
-  return new Promise<BasParseResult>((resolve, reject) => {
-    try {
-      basInst.parse({
-        danmaku: { text: dslText },
-        success: (dm: any) => {
-          resolve({ defs: dm.defs, sets: dm.sets });
-        },
-        error: (msg?: string) => {
-          reject(new Error(msg || "BAS parse error"));
-        },
-      });
-    } catch (err: any) {
-      reject(new Error(err?.message || "BAS parse error"));
-    }
+  parser.workerDisabled = true;
+  return new Promise((resolve, reject) => {
+    parser.parse({
+      danmaku: { text: dslText },
+      success: ({ defs, sets }: BasParseResult) => resolve({ defs, sets }),
+      error: (message?: string) => reject(new Error(message || "BAS parse error"))
+    });
   });
 }
 
