@@ -1,98 +1,107 @@
-# 仓库指南
+# DanmakuCut 仓库协作指南
 
-## 总则
+DanmakuCut 是 Vue 3、TypeScript、Vite、Pinia、Tauri 2 和 Rust 项目，同时提供 Web 和桌面端入口。
 
-- 本文件中的要求适用于本仓库的开发、测试和维护。
-- 用户在当前任务中的明确要求优先于本文件中的一般约定。
-- 如果规则之间发生冲突，优先采用更具体、与当前任务更相关的规则。
+本文件只记录项目级约束和不容易从代码中推断出的协作规则。业务模型、字段说明和实现细节以源码、类型、测试与 `docs/` 为准。
 
-## 项目结构与模块组织
 
-本仓库是使用 Tauri 2、Vite、pnpm、Vue 3 和 TypeScript 构建的桌面客户端，同时保留可部署到 GitHub Pages 的 Web 版本。
+## Repository Rules
 
-- 视图放在 `src/views`。
-- 可复用的 Vue 组件放在 `src/components`。
-- Pinia store 放在 `src/stores`。
-- 组合式函数放在 `src/composables`。
-- 共享辅助函数和类型放在 `src/utils` 与 `src/types`。
-- 浏览器持久化逻辑放在 `src/services/storage`。
-- 本地化消息放在 `src/i18n/messages`。
-- 静态文件放在 `public/`。
-- Tauri Rust 端代码与配置放在 `src-tauri/`（commands 放在 `src-tauri/src/commands.rs`，权限声明放在 `src-tauri/capabilities/`）。
-- 前端调用桌面能力（文件保存、打开外部链接等）统一通过 `src/utils/desktop.ts`，并保证浏览器环境下有可用的回退逻辑。
-- 文档放在 `docs/`。
-- 端到端测试场景放在 `e2e/`。
-- 生成的输出文件放在 `dist/` 与 `src-tauri/target/`，不要将其纳入源码修改。
+- 禁止修改bas.js文件，只允许阅读和分析bas.js。
+- 修改前检查 `git status` 和目标文件，保留用户已有修改。不要使用 Git 命令批量丢弃、覆盖或恢复无关内容。
+- 不要修改或提交 `dist/`、`src-tauri/target/`、`node_modules/` 等生成目录，也不要提交用户媒体、临时工程、密钥或签名密码。
+- 项目处于开发阶段，可以按需求破坏性调整代码、工程格式和界面 API。已有工程数据必须明确处理迁移、拒绝或兼容行为，不要静默损坏或丢弃。
+- 前端和 Rust 都是正式代码入口。修改共享数据或公共 API 时，先查找调用方、测试和文档，再决定影响范围。
+- 修改依赖时保留并更新 `pnpm-lock.yaml`。仓库没有 Changesets 流程，不要添加 `.changeset/`。
 
-## Vue 与 TypeScript 规则
+## Preserve Existing Behavior
 
-- 编写或修改 Vue 代码时，必须遵循 `rule/` 目录下的规则文件。当前规则文件为 `rule/vue3.md`；新增或更新规则文件后，也必须遵循其中的要求。
-- 项目使用 Vue 3 Composition API，组件优先使用 `<script setup lang="ts">`。
-- 使用 TypeScript 编写应用代码，并根据数据结构选择 `type` 或 `interface`。
-- 使用 `ref`、`reactive` 和 `computed` 管理响应式状态；可复用逻辑提取为组合式函数。
-- 使用 Pinia 管理跨组件或跨页面共享状态。
-- 优先复用项目已有组件、Reka UI、Tailwind CSS 和共享工具函数。
-- 目录使用描述性的 kebab-case。
-- Vue 组件文件使用 PascalCase，例如 `TimelinePanel.vue`。
-- 组合式函数使用 `use` 前缀和 camelCase，例如 `useProjectAutoSave.ts`。
-- 函数和变量使用 camelCase，并使用能够表达用途的名称，例如 `isLoading`、`hasError`。
-- 优先使用 `@/` 别名导入 `src` 中的模块。
-- 注释使用中文，技术术语保留英文；注释应说明必要的原因，不要重复代码本身的含义。
+业务行为优先于架构美观。除非当前任务明确要求，否则：
 
-## 编码格式
+- 不要改变现有编辑器交互、快捷键、项目打开与保存、导入导出、撤销重做、资源处理或更新流程的可观察行为。
+- 不要擅自改变现有组件、composable、store、service、Tauri command、路由、持久化格式或本地化消息的公共契约。
+- 不要因为重构目录、替换实现或引入新抽象而改变参数、返回值、错误处理、权限边界或 Web/Tauri 分支行为。
+- 如果发现已有缺陷，先记录问题、影响范围和复现方式。除非任务包含修复要求，不要在无关重构中顺手改变业务逻辑。
+- 开发阶段允许破坏性调整，但必须由任务明确驱动，并同步处理受影响的调用方、已有工程数据、测试和文档。
 
-- 遵循 `.editorconfig`：使用两个空格缩进、LF 换行和 UTF-8 编码。
-- JavaScript、TypeScript 和 Vue 文件使用仓库的 Prettier 配置格式化：`printWidth: 120`、使用分号、双引号、不使用尾随逗号。
-- 保持现有代码的组织方式和命名风格；修改前先读取当前文件内容。
-- 不要为了绕过类型错误而使用不必要的 `any`、类型断言或重复实现。
+## KISS && YAGNI
 
-## 构建、测试与开发命令
+保持实现简单，优先使用项目已有能力。
+只实现当前任务需要的能力。
 
-使用 Node 20.19+（或 22.12+）和 pnpm。
+- 优先使用 Vue、Pinia、浏览器 API、Tauri API、Rust 标准能力和现有项目工具，不为了统一形式重新封装一套框架。
+- 不为了迁移到更“规整”的架构而复制现有逻辑、搬运目录或改变正常入口。
+- 只有在复用、边界隔离或确实降低复杂度时才抽取抽象。简单逻辑保持在使用处。
+- 不为了假设性的格式、平台或第三方运行时增加兼容层、适配层和配置项。
+- 不创建没有实际调用方的通用组件、工具库、抽象接口或迁移机制。
+- 不扩大现有权限、存储范围、工程格式或公共 API 的能力边界。确有需求时，先确认现有调用方和验证方式。
+
+## Project Boundaries
+
+- Vue 代码遵循 `rule/vue3.md`。
+- Web 和 Tauri 都必须可用。新增或修改桌面能力时保留 Web 回退，并同步检查 Tauri command 注册、前端调用和 `src-tauri/capabilities/` 权限。
+- 修改 `vite.config.ts`、路由或资源路径时同时验证 Tauri 的 `/` 和 GitHub Pages 的 `/bas-creater/`。
+- 持久化代码应经过现有 storage 和 schema 边界。修改工程格式时同步更新版本处理、迁移、序列化和测试，不在组件中复制存储实现。
+- `public/` 中的第三方运行时属于现有兼容边界。修改加载方式或调用协议前，先检查入口和使用方。
+
+## Development
+
+Node 和 pnpm 版本遵循 `package.json` 的 `engines` 与 `packageManager`。
 
 ```sh
-pnpm install         # 安装锁定的依赖版本
-pnpm dev             # 启动 Tauri 桌面客户端开发模式（自动拉起 Vite）
-pnpm dev:renderer    # 仅启动带热更新的 Vite 开发服务器
-pnpm type-check      # 运行 vue-tsc 类型检查
-pnpm build:renderer  # 执行类型检查并创建前端生产构建
-pnpm build-only      # 创建 Vite 构建，不执行类型检查
-pnpm build           # 打包 Tauri 桌面客户端
-pnpm preview         # 在本地提供前端构建结果预览
+pnpm install
+pnpm dev
+pnpm dev:renderer
+pnpm type-check
+pnpm build:renderer
+pnpm build-only
+pnpm preview
+pnpm build
 ```
 
-修改 `src-tauri/` 后，在 `src-tauri/` 目录下运行 `cargo fmt --check` 与 `cargo clippy -- -D warnings`（需先存在 `dist/` 目录）。
+CI 安装依赖使用 `pnpm install --frozen-lockfile`。`pnpm dev:renderer` 用于 Web 入口，`pnpm dev` 用于 Tauri 入口，`pnpm build:renderer` 是前端类型检查和构建的主要入口。
 
-项目当前没有配置 Playwright 依赖，也没有独立的单元测试框架。新增测试工具后，应补充对应的 pnpm 命令。新增端到端测试时，将测试文件放在 `e2e/` 下，并命名为 `*.spec.ts`；相关测试工具加入后，使用获准的测试运行器执行。
+## Style Guide
 
-## 测试指南
+- 优先复用现有组件、store、composable、service、工具和类型。保持逻辑在使用处，只有在复用、边界隔离或确实降低复杂度时才抽取 helper。
+- 在拥有数据边界的位置校验未知输入，进入内部逻辑后使用已经确认的类型。避免新增 `any`、无必要的类型断言、重复校验和并行抽象。
+- 遵循仓库现有的 Vue、TypeScript、命名和 Prettier 风格。代码使用两个空格、双引号、分号和 120 列宽。
+- 用户可见文案放在 `src/i18n/messages`，新增消息时维护现有语言结构。
+- 注释说明非显而易见的原因、兼容限制或数据约束，不重复代码行为。
+- 不要为了理论上的低概率并发或安全问题静默增加复杂度。需要引入明显复杂度时，先说明具体失败路径和影响。
 
-- 测试应覆盖用户可见的编辑器行为，例如加载工作区、主题切换、时间轴交互和资源处理。
-- 提交前运行 `pnpm type-check` 和 `pnpm build:renderer`；涉及 Rust 端时同时运行 `cargo clippy`。如果项目已经配置单元测试命令，也应一并运行。
-- 单独运行的浏览器检查应记录在拉取请求中。
-- 当前没有强制的覆盖率阈值。
-- 单元测试可以使用必要的 mock 隔离浏览器 API、存储 API 或外部模块，但不得用 mock 掩盖真实的实现错误。
-- 测试应验证实际行为，不要添加仅用于通过测试的 workaround。
+## Testing
 
-## 提交与拉取请求指南
+按改动范围运行聚焦测试。
 
-- 使用带作用域的 Conventional Commits 前缀，例如 `feat(storage): ...`、`fix(audio): ...` 和 `ci(pages): ...`。
-- 提交信息应简短，并聚焦于单一变更。
-- 拉取请求应说明用户影响、列出验证命令、关联相关 issue，并为界面变更附上截图或录屏。
-- 涉及部署、浏览器存储或本地化的变更应明确说明。
+```sh
+pnpm test:effects
+pnpm test:storage
+pnpm test:updater
+pnpm test:window-controls
+```
 
-## 配置与数据说明
+- 前端改动至少运行 `pnpm type-check`。涉及构建、路由、资源路径、国际化或桌面边界时运行 `pnpm build:renderer`。
+- 修改 Rust 端时，先确保存在前端 `dist/`，再运行：
 
-- 项目保存在用户选择的文件夹中；桌面端引用音频绝对路径，Web 端将音频复制到项目文件夹。近期项目元信息保存在 localStorage，不持久化浏览器文件句柄。
-- 不要提交用户媒体、生成的构建文件、本地密钥或其他敏感信息。
-- 修改依赖时保留 `pnpm-lock.yaml`。
-- 编辑 `vite.config.ts` 或部署工作流时，确认 GitHub Pages 的构建路径（`/bas-creater/`）与 Tauri 构建路径（`/`）均正确。
-- 发布新版本时同步修改 `package.json` 与 `src-tauri/Cargo.toml` 的 `version`，再推送 `v*` tag 触发 Release workflow。
-- 不要使用 Git 命令丢弃用户已有的修改；需要恢复内容时，先确认目标状态，再使用文件编辑工具进行恢复。
+```sh
+cargo fmt --check --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+cargo test --manifest-path src-tauri/Cargo.toml --lib
+```
 
-## 开发流程
+- 测试应验证真实实现和用户可见行为，避免复制实现逻辑或使用过度 mock 制造通过结果。
+- 当前 `e2e/` 不是默认测试入口。只有补充依赖和脚本后，新的端到端场景才纳入常规验证。
 
-- 开始修改前，先读取相关文件和规则文件。
-- 发现用户已经修改了目标文件时，以当前文件内容为准，不要恢复被用户删除的内容。
-- 完成实现后运行相关测试、类型检查和构建；发现问题时继续修复并重新验证。
-- 遇到错误时，在能够保留上下文的范围内尽早报告，并提供可执行的修复结果。
+## Commits and Releases
+
+- 提交信息使用 `type(scope): summary` 格式。类型使用 `feat`、`fix`、`docs`、`chore`、`refactor` 或 `test`，scope 使用实际受影响的区域。
+- 修改版本时同步检查 `package.json` 和 `src-tauri/Cargo.toml`。发布流程以现有 GitHub Actions 和 tag 约定为准。
+
+## Workflow
+
+1. 读取目标文件、直接调用方、相关规则和现有测试。
+2. 使用现有入口完成修改，保持 Web、Tauri 和持久化边界一致。
+3. 为公共行为或数据格式的改动更新必要的测试和文档。
+4. 运行与改动匹配的测试、类型检查和构建。
+5. 检查 `git diff`、`git diff --check` 和 `git status`，确认结果只包含任务相关内容。

@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import ColorPicker from "@/components/ui/color-picker/ColorPicker.vue";
 import type { AnyDanmu } from "@/types/danmu";
 import type { TimelineKeyframeProperties } from "@/types/timeline";
 import { VOLUME_DB_MIN, VOLUME_DB_MAX, VOLUME_STEP } from "@/utils/audio/constants";
@@ -960,11 +961,10 @@ const getButtonAV = (item: any): number | undefined => {
                 <div class="space-y-1">
                   <span class="text-xs text-muted-foreground">{{ t("properties.style.textColor") }}</span>
                   <div class="flex gap-2">
-                    <Input
-                      type="color"
+                    <ColorPicker
                       :model-value="toHtmlColor((resolvedSelected as any)?.color)"
-                      @input="(e: Event) => updateColor('color', (e.target as HTMLInputElement).value, false)"
-                      class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                      aria-label="Text color"
+                      @update:model-value="value => updateColor('color', value, false)"
                     />
                     <Input
                       :model-value="(resolvedSelected as any)?.color"
@@ -1016,11 +1016,10 @@ const getButtonAV = (item: any): number | undefined => {
                 <div class="space-y-1">
                   <span class="text-xs text-muted-foreground">{{ t("properties.style.strokeColor") }}</span>
                   <div class="flex gap-2">
-                    <Input
-                      type="color"
+                    <ColorPicker
                       :model-value="toHtmlColor((resolvedSelected as any)?.strokeColor)"
-                      @input="(e: Event) => updateColor('strokeColor', (e.target as HTMLInputElement).value, false)"
-                      class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                      aria-label="Stroke color"
+                      @update:model-value="value => updateColor('strokeColor', value, false)"
                     />
                     <Input
                       :model-value="(resolvedSelected as any)?.strokeColor"
@@ -1068,11 +1067,10 @@ const getButtonAV = (item: any): number | undefined => {
                 <div class="space-y-1">
                   <span class="text-xs text-muted-foreground">{{ t("properties.style.textColor") }}</span>
                   <div class="flex items-center gap-2">
-                    <Input
-                      type="color"
+                    <ColorPicker
                       :model-value="toHtmlColor((resolvedSelected as any)?.textColor)"
-                      @input="(e: Event) => updateColor('textColor', (e.target as HTMLInputElement).value, true)"
-                      class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                      aria-label="Button text color"
+                      @update:model-value="value => updateColor('textColor', value, true)"
                     />
                     <span class="text-xs font-mono uppercase">{{
                       toHtmlColor((resolvedSelected as any)?.textColor)
@@ -1082,11 +1080,10 @@ const getButtonAV = (item: any): number | undefined => {
                 <div class="space-y-1">
                   <span class="text-xs text-muted-foreground">{{ t("properties.style.fillColor") }}</span>
                   <div class="flex items-center gap-2">
-                    <Input
-                      type="color"
+                    <ColorPicker
                       :model-value="toHtmlColor((resolvedSelected as any)?.fillColor)"
-                      @input="(e: Event) => updateColor('fillColor', (e.target as HTMLInputElement).value, true)"
-                      class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                      aria-label="Fill color"
+                      @update:model-value="value => updateColor('fillColor', value, true)"
                     />
                     <span class="text-xs font-mono uppercase">{{
                       toHtmlColor((resolvedSelected as any)?.fillColor)
@@ -1168,11 +1165,10 @@ const getButtonAV = (item: any): number | undefined => {
                 <div class="space-y-1">
                   <span class="text-xs text-muted-foreground">{{ t("properties.style.fillColor") }}</span>
                   <div class="flex items-center gap-2">
-                    <Input
-                      type="color"
+                    <ColorPicker
                       :model-value="toHtmlColor((resolvedSelected as any)?.fillColor)"
-                      @input="(e: Event) => updateColor('fillColor', (e.target as HTMLInputElement).value, true)"
-                      class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                      aria-label="Fill color"
+                      @update:model-value="value => updateColor('fillColor', value, true)"
                     />
                     <span class="text-xs font-mono uppercase">{{
                       toHtmlColor((resolvedSelected as any)?.fillColor)
@@ -1194,11 +1190,10 @@ const getButtonAV = (item: any): number | undefined => {
                 <div class="space-y-1">
                   <span class="text-xs text-muted-foreground">{{ t("properties.style.strokeColor") }}</span>
                   <div class="flex items-center gap-2">
-                    <Input
-                      type="color"
+                    <ColorPicker
                       :model-value="toHtmlColor((resolvedSelected as any)?.borderColor)"
-                      @input="(e: Event) => updateColor('borderColor', (e.target as HTMLInputElement).value, true)"
-                      class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                      aria-label="Border color"
+                      @update:model-value="value => updateColor('borderColor', value, true)"
                     />
                     <span class="text-xs font-mono uppercase">{{
                       toHtmlColor((resolvedSelected as any)?.borderColor)
@@ -1472,11 +1467,10 @@ const getButtonAV = (item: any): number | undefined => {
               <div v-if="selected.type === 'text'" class="space-y-1">
                 <Label class="text-xs text-muted-foreground">{{ t("properties.animation.textColor") }}</Label>
                 <div class="flex items-center gap-2">
-                  <Input
-                    type="color"
+                  <ColorPicker
                     :model-value="toHtmlColor(activeKeyframeProperties.color)"
-                    @input="(e: Event) => updateKeyframeColor('color', (e.target as HTMLInputElement).value)"
-                    class="h-8 w-9 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                    aria-label="Keyframe text color"
+                    @update:model-value="value => updateKeyframeColor('color', value)"
                   />
                   <Input
                     :model-value="activeKeyframeProperties.color"
