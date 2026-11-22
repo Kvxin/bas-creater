@@ -3,7 +3,7 @@ import { MAX_CLIP_EFFECTS, validateInstance } from "@/effects/validation";
 import type { TimelineClip, TimelineTrack } from "@/types/timeline";
 import { updateGroupDurations } from "@/utils/timelineGroups";
 
-export const PROJECT_VERSION = 5;
+export const PROJECT_VERSION = 6;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -26,7 +26,7 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
   if (!isRecord(input) || !Array.isArray(input.tracks)) throw new Error("Invalid project structure");
   const version = input.version ?? 1;
   const legacy = version === 1 || version === 2;
-  if (!legacy && version !== 3 && version !== 4 && version !== PROJECT_VERSION) throw new Error("Unsupported project version");
+  if (!legacy && version !== 3 && version !== 4 && version !== 5 && version !== PROJECT_VERSION) throw new Error("Unsupported project version");
   if (legacy && !Array.isArray(input.danmus)) throw new Error("Invalid project structure");
   const data: BasProjectData = JSON.parse(JSON.stringify(input));
   if (legacy) {
@@ -170,10 +170,15 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
           const isAudio = audioIds.has(clip.resourceId);
           if (clip.effects !== undefined) {
             const type = danmuTypes.get(clip.resourceId);
-            if (!type || version !== PROJECT_VERSION || !Array.isArray(clip.effects) || clip.effects.length > MAX_CLIP_EFFECTS)
-              throw new Error("Invalid clip effects");
+            if (!type || (version !== 5 && version !== PROJECT_VERSION) || !Array.isArray(clip.effects) ||
+              clip.effects.length > MAX_CLIP_EFFECTS) throw new Error("Invalid clip effects");
             for (const effect of clip.effects) {
-              validateInstance(effect, type);
+              // v5 的特效随片段整体拉伸，没有独立区间；迁移为覆盖整个片段，播放结果不变。
+              if (version === 5 && isRecord(effect)) {
+                if (effect.span !== undefined) throw new Error("Invalid v5 effect span");
+                effect.span = [0, clip.duration];
+              }
+              validateInstance(effect, type, clip.duration);
               registerId(effect.id, nodeIds);
             }
           }

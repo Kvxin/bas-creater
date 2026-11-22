@@ -1,4 +1,5 @@
 import { applyOpacityLimits, opacityAt } from "@/effects/opacity";
+import { effectStyleSegments } from "@/effects/style";
 import type { EffectPoint } from "@/effects/types";
 import type {
   AnimationSegment,
@@ -488,12 +489,49 @@ function composeOpacity(clip: TimelineResourceClip, resource: AnyDanmu, units: B
   return { initial, units: output };
 }
 
-const compileResolvedClip = (clip: TimelineResourceClip, resource: AnyDanmu, varName: string): string => {
-  for (const effect of clip.effects ?? []) {
-    if (effect.patch.style) resource = { ...resource, ...effect.patch.style };
+// 只覆盖部分片段的样式特效用独立的 set 链在区间边界零时长切换，区间外恢复宿主原值。
+function effectStyleChain(clip: TimelineResourceClip, resource: AnyDanmu) {
+  const [first, ...changes] = effectStyleSegments(clip.effects ?? [], clip.duration);
+  const base = resolveDanmuDefaults(resource) as unknown as Record<string, unknown>;
+  const units: BasUnit[] = [];
+  const keys = new Set<string>();
+  let previous: Record<string, unknown> = first?.style ?? {};
+  let time = 0;
+  for (const { at, style } of changes) {
+    const current: Record<string, unknown> = style;
+    const properties: Record<string, unknown> = {};
+    for (const key of new Set([...Object.keys(previous), ...Object.keys(current)])) {
+      const value = current[key] ?? base[key];
+      if ((previous[key] ?? base[key]) !== value) properties[key] = value;
+    }
+    previous = current;
+    if (!Object.keys(properties).length) continue;
+    const absolute = clip.startTime + at;
+    units.push({ command: units.length ? "then set" : "set", properties: {}, duration: absolute - time });
+    units.push({ command: "then set", properties: properties as SetProperties, duration: 0 });
+    Object.keys(properties).forEach(key => keys.add(key));
+    time = absolute;
   }
+  return { initial: first?.style ?? {}, units, keys };
+}
+
+// bas.js 跨链争用同一属性时会整组覆盖，宿主动画写入的属性不能再由特效按区间切换。
+const findTimingConflict = (units: BasUnit[], keys: Set<string>) =>
+  units.flatMap(unit => Object.keys(unit.properties)).find(key => keys.has(key)) ?? null;
+
+/** 返回特效区间与宿主动画争用的属性名；没有冲突时返回 null。resource 需已合并片段 overrides。 */
+export const findEffectTimingConflict = (clip: TimelineResourceClip, resource: AnyDanmu) => {
+  const chain = effectStyleChain(clip, resource);
+  return chain.keys.size ? findTimingConflict(hostSets(clip, { ...resource, ...chain.initial }), chain.keys) : null;
+};
+
+const compileResolvedClip = (clip: TimelineResourceClip, resource: AnyDanmu, varName: string): string => {
+  const styleChain = effectStyleChain(clip, resource);
+  resource = { ...resource, ...styleChain.initial };
   const usesOpacity = clip.effects?.some(effect => effect.patch.opacityLimit);
   let units = hostSets(usesOpacity ? { ...clip, startTime: 0 } : clip, resource);
+  const conflict = findTimingConflict(units, styleChain.keys);
+  if (conflict) throw new Error(`Effect timing conflicts with animated ${conflict} on clip ${clip.id}`);
   if (usesOpacity) {
     const composed = composeOpacity(clip, resource, units);
     units = composed.units;
@@ -501,7 +539,10 @@ const compileResolvedClip = (clip: TimelineResourceClip, resource: AnyDanmu, var
   }
   const definition = compileDanmuDefinition(resource, varName, clip.duration, clip.startTime);
   return (
-    definition + units.map(unit => formatSetStatement(unit.command, varName, unit.properties, unit.duration)).join("")
+    definition +
+    [...units, ...styleChain.units]
+      .map(unit => formatSetStatement(unit.command, varName, unit.properties, unit.duration))
+      .join("")
   );
 };
 

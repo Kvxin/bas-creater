@@ -15,10 +15,21 @@ const zhCN = {
   up: "上移",
   down: "下移",
   apply: "应用参数",
+  applySpan: "应用时间范围",
   remove: "移除特效",
   removeNamed: "移除「{name}」",
   unavailable: "调参需要插件 v{version}。当前保存的效果可继续播放、导出和移除。",
-  selectTrack: "选择轨道「{name}」"
+  selectTrack: "选择轨道「{name}」",
+  menu: "查看片段特效",
+  trackMenu: "轨道特效（{n}）",
+  editing: "特效：{name} - 编辑中",
+  spanLabel: "特效：{name}",
+  stopEditing: "退出特效编辑",
+  editSpan: "在时间轴上调整「{name}」的区间",
+  start: "开始 (ms)",
+  duration: "时长 (ms)",
+  invalidSpan: "特效区间必须位于片段内，且时长大于 0。",
+  timingConflict: "片段的关键帧也在修改 {key}，该特效只能覆盖整个片段。"
 };
 
 const en: typeof zhCN = {
@@ -38,10 +49,21 @@ const en: typeof zhCN = {
   up: "Move up",
   down: "Move down",
   apply: "Apply changes",
+  applySpan: "Apply timing",
   remove: "Remove effect",
   removeNamed: "Remove {name}",
   unavailable: "Editing requires plugin v{version}. The saved effect can still play, export, or be removed.",
-  selectTrack: "Select track {name}"
+  selectTrack: "Select track {name}",
+  menu: "Show clip effects",
+  trackMenu: "Track effects ({n})",
+  editing: "Effect: {name} - Editing",
+  spanLabel: "Effect: {name}",
+  stopEditing: "Stop editing effect",
+  editSpan: "Adjust the span of {name} on the timeline",
+  start: "Start (ms)",
+  duration: "Duration (ms)",
+  invalidSpan: "The effect span must stay inside the clip and last longer than 0 ms.",
+  timingConflict: "Keyframes on this clip also change {key}, so this effect must cover the whole clip."
 };
 
 const ja: typeof zhCN = {
@@ -61,10 +83,21 @@ const ja: typeof zhCN = {
   up: "上へ移動",
   down: "下へ移動",
   apply: "変更を適用",
+  applySpan: "時間範囲を適用",
   remove: "エフェクトを外す",
   removeNamed: "「{name}」を外す",
   unavailable: "編集にはプラグイン v{version} が必要です。保存した効果は再生、書き出し、削除できます。",
-  selectTrack: "トラック「{name}」を選択"
+  selectTrack: "トラック「{name}」を選択",
+  menu: "クリップのエフェクトを表示",
+  trackMenu: "トラックのエフェクト（{n}）",
+  editing: "エフェクト：{name} - 編集中",
+  spanLabel: "エフェクト：{name}",
+  stopEditing: "エフェクトの編集を終了",
+  editSpan: "タイムラインで「{name}」の区間を調整",
+  start: "開始 (ms)",
+  duration: "長さ (ms)",
+  invalidSpan: "エフェクトの区間はクリップ内に収め、長さを 0 ms より大きくしてください。",
+  timingConflict: "このクリップのキーフレームも {key} を変更するため、このエフェクトはクリップ全体に適用する必要があります。"
 };
 
 export default { "zh-CN": zhCN, en, ja };

@@ -44,21 +44,30 @@ function limitCurve(host: EffectPoint[], limit: EffectPoint[]) {
 export function applyOpacityLimits(host: EffectPoint[], effects: EffectInstance[], duration: number) {
   for (const {
     patch,
-    range: [from, to]
+    range: [from, to],
+    span: [start, end]
   } of effects) {
     if (!patch.opacityLimit) continue;
     const curve = patch.opacityLimit;
+    if (duration === 0) {
+      host = [{ at: 0, value: Math.min(opacityAt(host, 0), opacityAt(curve, from)) }];
+      continue;
+    }
+    if (end <= start) continue;
+    // 特效区间外不限制透明度；区间两端各用一对同时刻的点表示跳变。
     const limit = [
-      { at: 0, value: opacityAt(curve, from) },
+      ...(start > 0 ? [{ at: 0, value: 1 }, { at: start, value: 1 }] : []),
+      { at: start, value: opacityAt(curve, from) },
       ...curve
         .filter(point => point.at > from && point.at < to)
         .map(point => ({
-          at: ((point.at - from) / (to - from)) * duration,
+          at: start + ((point.at - from) / (to - from)) * (end - start),
           value: point.value
         })),
-      { at: duration, value: opacityAt(curve, to) }
+      { at: end, value: opacityAt(curve, to) },
+      ...(end < duration ? [{ at: end, value: 1 }, { at: duration, value: 1 }] : [])
     ];
-    host = duration === 0 ? [{ at: 0, value: Math.min(opacityAt(host, 0), limit[0]!.value) }] : limitCurve(host, limit);
+    host = limitCurve(host, limit);
   }
   return host;
 }

@@ -6,7 +6,7 @@ import { createPinia, setActivePinia } from "pinia";
 import fade from "../src/effects/plugins/fade-in";
 import outline from "../src/effects/plugins/text-outline";
 import { discoverEffects } from "../src/effects/registry";
-import { matchesEffect } from "../src/effects/types";
+import { matchesEffect, type EffectInstance } from "../src/effects/types";
 import { normalizeProjectData, PROJECT_VERSION, serializeProjectData } from "../src/services/storage/projectSchema";
 import { useDanmuStore } from "../src/stores/danmu";
 import { useTimelineStore } from "../src/stores/timeline";
@@ -108,6 +108,12 @@ function sample(parsed: Parsed, name: string, time: number) {
     value = to;
   }
   return value;
+}
+function valueAt(parsed: Parsed, name: string, key: string, time: number) {
+  let value = parsed.defs.find(def => def.name === name)?.attrs[key];
+  const segments = parsed.def2set[name]!.filter(s => s.valueEnd[key] !== undefined).sort((a, b) => a.delay - b.delay);
+  for (const s of segments) if (time >= s.delay + s.duration) value = s.valueEnd[key];
+  return typeof value === "object" ? value.value : value;
 }
 const close = (actual: number, expected: number) =>
   assert.ok(Math.abs(actual - expected) < 0.001, [actual, expected].join(" ≠ "));
@@ -340,7 +346,7 @@ test("copies, splits, trims and moves retain the correct portion of the host eff
   assert.equal(disk().version, PROJECT_VERSION);
 });
 
-test("v5 round-trip renders without the original plugin and rejects invalid snapshots before reopening", async () => {
+test("round-trip renders without the original plugin and rejects invalid snapshots before reopening", async () => {
   const { timeline, disk, compile } = setup();
   const id = timeline.attachEffect("a", fade);
   const expected = compile();
@@ -362,6 +368,9 @@ test("v5 round-trip renders without the original plugin and rejects invalid snap
     assert.throws(() => normalizeProjectData(corrupted));
   };
   invalid(effect => (effect.range = [0.6, 0.1]));
+  invalid(effect => (effect.span = [0, 2500]));
+  invalid(effect => (effect.span = [1500, 500]));
+  invalid(effect => Reflect.deleteProperty(effect, "span"));
   invalid(
     effect =>
       (effect.patch.opacityLimit = [
@@ -393,11 +402,147 @@ test("v4 independent effect groups migrate as ordinary editable groups with iden
   input.version = 4;
   Object.assign(input.tracks[0]!.clips[0]!, { effect: { pluginId: "core.echo-text", layerClipIds: ["layer"] } });
   const reopened = normalizeProjectData(input);
-  assert.equal(reopened.version, 5);
+  assert.equal(reopened.version, PROJECT_VERSION);
   assert.equal(reopened.tracks[0]!.clips[0]!.kind, "group");
   assert.equal("effect" in reopened.tracks[0]!.clips[0]!, false);
   assert.equal(compileTimelineToBas(reopened.tracks, reopened.danmus), compile());
   assert.throws(() => normalizeProjectData({ ...input, version: 5 }));
+});
+
+test("effects only act within their span of the host clip", async () => {
+  const { timeline, get, compile } = setup([track([instance("a", { startTime: 1000 })])]);
+  const fadeId = timeline.attachEffect("a", fade);
+  timeline.updateEffect("a", fadeId, fade, { percent: 100 });
+  const outlineId = timeline.attachEffect("a", outline);
+  timeline.updateEffectSpan("a", fadeId, [500, 1500]);
+  timeline.updateEffectSpan("a", outlineId, [1000, 1500]);
+  assert.deepEqual(
+    get("a").effects!.map(effect => effect.span),
+    [
+      [500, 1500],
+      [1000, 1500]
+    ]
+  );
+  const graph = await render(compile());
+  for (const [time, expected] of [
+    [0.9, 0],
+    [1.25, 1],
+    [1.49, 1],
+    [1.75, 0.25],
+    [2, 0.5],
+    [2.25, 0.75],
+    [2.75, 1]
+  ])
+    close(sample(graph, "obj_a", time!), expected!);
+  for (const [time, width, color] of [
+    [1.5, 0, 0xffffff],
+    [2.25, 2, 0x334155],
+    [2.75, 0, 0xffffff]
+  ]) {
+    assert.equal(valueAt(graph, "obj_a", "strokeWidth", time!), width);
+    assert.equal(valueAt(graph, "obj_a", "strokeColor", time!), color);
+  }
+  timeline.updateEffectSpan("a", outlineId, [0, 2000]);
+  assert.match(compile(), /strokeWidth = 2/);
+  assert.doesNotMatch(compile(), /set obj_a \{ strokeWidth/);
+});
+
+test("clip edits keep effect durations and drop effects outside the remaining clip", () => {
+  const { timeline, get } = setup([track([instance("a", { duration: 4000 })])]);
+  const early = timeline.attachEffect("a", fade);
+  const late = timeline.attachEffect("a", fade);
+  timeline.updateEffectSpan("a", early, [0, 1000]);
+  timeline.updateEffectSpan("a", late, [2000, 4000]);
+  const timing = (id: string) => get(id).effects?.map(effect => [effect.span, effect.range]);
+  timeline.trimClip("a", 0, 6000);
+  assert.deepEqual(timing("a"), [
+    [
+      [0, 1000],
+      [0, 1]
+    ],
+    [
+      [2000, 4000],
+      [0, 1]
+    ]
+  ]);
+  timeline.trimClip("a", 500, 5500);
+  timeline.updateClip("a", { duration: 2000 });
+  assert.deepEqual(timing("a"), [
+    [
+      [0, 500],
+      [0.5, 1]
+    ],
+    [
+      [1500, 2000],
+      [0, 0.25]
+    ]
+  ]);
+  const right = timeline.splitClip("a", 1500);
+  assert.ok(right?.kind === "resource");
+  assert.deepEqual(get("a").effects!.map(effect => effect.id), [early]);
+  assert.deepEqual(timing(right.id), [
+    [
+      [500, 1000],
+      [0, 0.25]
+    ]
+  ]);
+  assert.notEqual(right.effects![0]!.id, late);
+  timeline.trimClip(right.id, 1500, 400);
+  assert.equal(get(right.id).effects, undefined);
+});
+
+test("editing effect state follows the selected clip and rejects stale effect ids", () => {
+  const { timeline } = setup([track([instance("a")]), track([instance("b")])]);
+  const effectId = timeline.attachEffect("a", fade);
+
+  timeline.setEditingEffect("a", effectId);
+  assert.equal(timeline.editingEffect?.effect.id, effectId);
+
+  timeline.selectedClipId = "b";
+  assert.equal(timeline.editingEffect, null);
+
+  timeline.setEditingEffect("a", effectId);
+  timeline.setEditingEffect("a", "missing-effect");
+  assert.equal(timeline.editingEffect?.effect.id, effectId);
+
+  timeline.setEditingEffect("a", null);
+  assert.equal(timeline.editingEffect, null);
+});
+
+test("effect spans are validated and cannot fight host keyframes over a style", () => {
+  const { timeline, get, compile } = setup([
+    track([instance("a", { keyframes: [{ id: "k", timeMs: 1000, properties: { color: 0xff0000 } }] })])
+  ]);
+  const tint = { ...outline, id: "test.tint", params: {}, build: () => ({ style: { color: 0x00ff00 } }) };
+  const id = timeline.attachEffect("a", tint);
+  assert.doesNotThrow(compile);
+  for (const span of [
+    [-1, 500],
+    [0, 2001],
+    [800, 400],
+    [500, 500]
+  ] as [number, number][])
+    assert.throws(() => timeline.updateEffectSpan("a", id, span));
+  assert.throws(() => timeline.updateEffectSpan("a", id, [0, 1000]), /color/);
+  assert.deepEqual(get("a").effects![0]!.span, [0, 2000]);
+  const outlineId = timeline.attachEffect("a", outline);
+  timeline.updateEffectSpan("a", outlineId, [0, 1000]);
+  assert.doesNotThrow(compile);
+});
+
+test("v5 projects migrate effects to spans covering the whole clip", () => {
+  const { timeline, disk, compile } = setup();
+  timeline.attachEffect("a", fade);
+  const expected = compile();
+  const data = disk();
+  data.version = 5;
+  delete (data.tracks[0]!.clips[0]!.effects![0]! as Partial<EffectInstance>).span;
+  const reopened = normalizeProjectData(structuredClone(data));
+  assert.equal(reopened.version, PROJECT_VERSION);
+  assert.deepEqual(reopened.tracks[0]!.clips[0]!.effects![0]!.span, [0, 2000]);
+  assert.equal(compileTimelineToBas(reopened.tracks, reopened.danmus), expected);
+  (data.tracks[0]!.clips[0]!.effects![0]! as EffectInstance).span = [0, 2000];
+  assert.throws(() => normalizeProjectData(data));
 });
 
 test("catalog discovery isolates broken and duplicate plugins", async () => {

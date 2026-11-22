@@ -8,7 +8,7 @@ import { writeProjectAudio } from "../src/services/storage/projectAssets";
 import { bundleProject } from "../src/services/storage/projectBundle";
 import { openBrowserProject, restoreBrowserProjectFile } from "../src/services/storage/browserProjectFile";
 import { listBrowserBackups, readBrowserBackup } from "../src/services/storage/browserBackups";
-import { normalizeProjectData } from "../src/services/storage/projectSchema";
+import { normalizeProjectData, PROJECT_VERSION } from "../src/services/storage/projectSchema";
 
 function directoryHandle(path: string): FileSystemDirectoryHandle {
   return {
@@ -77,7 +77,7 @@ test("project edits persist to the selected folder and reopen without IndexedDB"
     ];
     await saveProjectDraft({ ...project, assets, tracks: [track] });
     const diskProject = JSON.parse(await readFile(join(path, "Folder project.basproj"), "utf8"));
-    assert.equal(diskProject.version, 5);
+    assert.equal(diskProject.version, PROJECT_VERSION);
     assert.equal(diskProject.assets.find((asset: { id: string }) => asset.id === "danmu-1").danmu.content, "Saved text");
     assert.equal(diskProject.assets.find((asset: { id: string }) => asset.id === "audio-1").audio.relativePath, "audio-1.audio");
     assert.equal("danmus" in diskProject, false);

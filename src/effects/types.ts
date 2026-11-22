@@ -39,6 +39,8 @@ export interface EffectInstance {
   params: EffectParams;
   patch: EffectPatch;
   range: [number, number];
+  // 相对片段起点的毫秒区间，始终位于 [0, 片段时长] 内；range 描述该区间采样插件曲线的哪一段。
+  span: [number, number];
 }
 
 export const matchesEffect = (plugin: EffectPlugin, instance: EffectInstance) =>

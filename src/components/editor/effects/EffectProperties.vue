@@ -15,15 +15,38 @@ const plugin = computed(() => effectCatalog.value?.plugins.find(item => matchesE
 const title = computed(() => (plugin.value ? effectText(plugin.value.title, locale.value) : props.effect.pluginId));
 const params = ref<EffectParams>({});
 const errorMessage = ref("");
+const spanStart = ref(props.effect.span[0]);
+const spanDuration = ref(props.effect.span[1] - props.effect.span[0]);
 watch(
   () => props.effect,
   effect => {
     params.value = { ...effect.params };
+    spanStart.value = effect.span[0];
+    spanDuration.value = effect.span[1] - effect.span[0];
     errorMessage.value = "";
   },
   { immediate: true }
 );
 const changed = computed(() => Object.keys(params.value).some(key => params.value[key] !== props.effect.params[key]));
+function applySpan() {
+  const start = Number(spanStart.value);
+  const duration = Number(spanDuration.value);
+  if (!Number.isFinite(start) || !Number.isFinite(duration)) {
+    errorMessage.value = t("effects.invalidSpan");
+    spanStart.value = props.effect.span[0];
+    spanDuration.value = props.effect.span[1] - props.effect.span[0];
+    return;
+  }
+  try {
+    timeline.updateEffectSpan(props.clipId, props.effect.id, [start, start + duration]);
+    errorMessage.value = "";
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : String(error);
+    spanStart.value = props.effect.span[0];
+    spanDuration.value = props.effect.span[1] - props.effect.span[0];
+  }
+}
+
 function apply() {
   if (!plugin.value) return;
   try {
@@ -36,7 +59,11 @@ function apply() {
 </script>
 
 <template>
-  <li class="space-y-2 py-2" :data-effect-instance="effect.id">
+  <li
+    class="space-y-2 py-2"
+    :data-effect-instance="effect.id"
+    @click="timeline.setEditingEffect(clipId, effect.id)"
+  >
     <div class="flex items-center gap-1">
       <span class="min-w-0 flex-1 truncate font-medium" :title="title">{{ title }}</span>
       <button
@@ -70,6 +97,33 @@ function apply() {
         <Trash2 />
       </button>
     </div>
+    <form class="space-y-2" @submit.prevent="applySpan">
+      <div class="grid grid-cols-[minmax(0,1fr)_minmax(64px,0.9fr)] items-center gap-2">
+        <Label :for="effect.id + '-start'" class="text-xs text-muted-foreground">{{ t("effects.start") }}</Label>
+        <Input
+          :id="effect.id + '-start'"
+          v-model.number="spanStart"
+          type="number"
+          min="0"
+          step="1"
+          class="h-7 tabular-nums"
+          :disabled="locked"
+        />
+      </div>
+      <div class="grid grid-cols-[minmax(0,1fr)_minmax(64px,0.9fr)] items-center gap-2">
+        <Label :for="effect.id + '-duration'" class="text-xs text-muted-foreground">{{ t("effects.duration") }}</Label>
+        <Input
+          :id="effect.id + '-duration'"
+          v-model.number="spanDuration"
+          type="number"
+          min="1"
+          step="1"
+          class="h-7 tabular-nums"
+          :disabled="locked"
+        />
+      </div>
+      <button type="submit" class="ui-button" :disabled="locked">{{ t("effects.applySpan") }}</button>
+    </form>
     <form v-if="plugin && Object.keys(plugin.params).length" @submit.prevent="apply">
       <fieldset :disabled="locked" class="space-y-2">
         <div

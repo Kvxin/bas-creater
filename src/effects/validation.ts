@@ -112,7 +112,7 @@ export function validatePatch(patch: unknown, type: DanmuType): asserts patch is
   if (!points && !Object.keys(patch.style ?? {}).length) throw new Error("Empty host effect patch");
 }
 
-export function validateInstance(effect: unknown, type: DanmuType): asserts effect is EffectInstance {
+export function validateInstance(effect: unknown, type: DanmuType, clipDuration: number): asserts effect is EffectInstance {
   if (
     !isRecord(effect) ||
     typeof effect.id !== "string" ||
@@ -129,7 +129,14 @@ export function validateInstance(effect: unknown, type: DanmuType): asserts effe
     effect.range.length !== 2 ||
     !isUnit(effect.range[0]) ||
     !isUnit(effect.range[1]) ||
-    effect.range[0] > effect.range[1]
+    effect.range[0] > effect.range[1] ||
+    !Array.isArray(effect.span) ||
+    effect.span.length !== 2 ||
+    !isFiniteNumber(effect.span[0]) ||
+    !isFiniteNumber(effect.span[1]) ||
+    effect.span[0] < 0 ||
+    effect.span[0] > effect.span[1] ||
+    effect.span[1] > clipDuration
   )
     throw new Error("Invalid attached effect");
   validatePatch(effect.patch, type);

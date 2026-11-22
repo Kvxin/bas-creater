@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeProjectData } from "../src/services/storage/projectSchema";
+import { normalizeProjectData, PROJECT_VERSION } from "../src/services/storage/projectSchema";
 import { compileTimelineToBas } from "../src/utils/compiler";
 
 const legacy = () => ({
@@ -21,7 +21,7 @@ const legacy = () => ({
 
 test("legacy assets and repeated timeline references migrate without losing appearance or offline audio", () => {
   const project = normalizeProjectData(legacy());
-  assert.equal(project.version, 5);
+  assert.equal(project.version, PROJECT_VERSION);
   const text = project.assets.find(asset => asset.id === "text-1");
   assert.equal(text?.type, "text");
   if (text?.type === "text") assert.equal(text.danmu.content, "Hello");
@@ -68,7 +68,7 @@ test("v3 files with only assets preserve bins, clip overrides, nested timing and
       }
     ]
   });
-  assert.equal(project.version, 5);
+  assert.equal(project.version, PROJECT_VERSION);
   assert.deepEqual(project.bins, bins);
   assert.deepEqual(project.danmus, [text]);
   assert.equal(project.assets[0]?.binId, "bin");
