@@ -111,10 +111,8 @@ const runParse = async () => {
   try {
     const parsed = await parseBasDSL(text);
     if (revisionAtStart !== revision) return;
-    preview.value = convertParsedBas(parsed, {
-      startTimeMs: startTimeMs.value ?? 0,
-      referenceSize: timelineStore.canvasReferenceSize ?? undefined
-    });
+    // 像素坐标按默认工程画布换算，与加载旧工程时的迁移一致；预览分辨率不会持久化，不能作为参照。
+    preview.value = convertParsedBas(parsed, { startTimeMs: startTimeMs.value ?? 0 });
     previewSource.value = text;
     previewStartTime.value = startTimeText.value;
   } catch (error) {
