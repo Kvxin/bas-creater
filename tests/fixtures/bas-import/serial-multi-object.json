@@ -131,7 +131,7 @@
         "rotateX": 0,
         "rotateY": 0,
         "rotateZ": 0,
-        "x": 0,
+        "x": "0%",
         "y": "80%",
         "zIndex": 0,
         "scale": 1

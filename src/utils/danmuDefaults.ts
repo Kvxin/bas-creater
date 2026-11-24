@@ -2,8 +2,8 @@ import { i18n } from "@/i18n";
 import type { AnyDanmu, DanmuType } from "@/types/danmu";
 
 export const BAS_COMMON_DEFAULTS = {
-  x: 0,
-  y: 0,
+  x: "0%",
+  y: "0%",
   zIndex: 0,
   scale: 1,
   durationMs: undefined,

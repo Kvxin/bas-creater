@@ -111,7 +111,10 @@ const runParse = async () => {
   try {
     const parsed = await parseBasDSL(text);
     if (revisionAtStart !== revision) return;
-    preview.value = convertParsedBas(parsed, { startTimeMs: startTimeMs.value ?? 0 });
+    preview.value = convertParsedBas(parsed, {
+      startTimeMs: startTimeMs.value ?? 0,
+      referenceSize: timelineStore.canvasReferenceSize ?? undefined
+    });
     previewSource.value = text;
     previewStartTime.value = startTimeText.value;
   } catch (error) {

@@ -2,6 +2,7 @@ import type { BasProjectData } from "@/types/storage";
 import type { TimelineClip, TimelineTrack } from "@/types/timeline";
 import { updateGroupDurations } from "@/utils/timelineGroups";
 import { convertLegacyAnimations } from "@/utils/legacyAnimations";
+import { normalizeCoordinates } from "@/utils/coordinates";
 import type { LegacyAnimationSegment } from "@/utils/legacyAnimations";
 
 export const PROJECT_VERSION = 4;
@@ -82,6 +83,10 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
   }
   data.danmus = data.assets.flatMap((asset) => asset.type === "audio-file" ? [] : [asset.danmu]);
   data.audioMeta = data.assets.flatMap((asset) => asset.type === "audio-file" ? [asset.audio] : []);
+  data.canvas ??= { width: 800, height: 450 };
+  if (!isRecord(data.canvas) || !isTime(data.canvas.width) || !isTime(data.canvas.height) ||
+    !data.canvas.width || !data.canvas.height) throw new Error("Invalid canvas size");
+  const canvas = data.canvas;
   const resourceIds = new Set<string>();
   const audioIds = new Set<string>();
   const nodeIds = new Set<string>();
@@ -96,6 +101,8 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
       throw new Error("Invalid danmaku resource");
     }
     registerId(resource.id, resourceIds);
+    // v4 起 x/y 只保存百分比，旧工程的像素值按工程画布换算。
+    normalizeCoordinates(resource, canvas);
   }
   data.audioMeta ??= [];
   if (!Array.isArray(data.audioMeta)) throw new Error("Invalid audio metadata");
@@ -185,6 +192,11 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
           instances.push(clip);
           clipsByResource.set(clip.resourceId, instances);
           validateAnimationData(clip);
+          if (!isAudio) {
+            normalizeCoordinates(clip.overrides, canvas);
+            for (const keyframe of clip.keyframes ?? []) normalizeCoordinates(keyframe.properties, canvas);
+            for (const animation of (clip as LegacyAnimatedClip).animations ?? []) normalizeCoordinates(animation.properties, canvas);
+          }
         } else {
           throw new Error("Invalid clip kind");
         }
@@ -232,9 +244,6 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
   data.name = typeof data.name === "string" ? data.name : fallbackName;
   data.createdAt = isTime(data.createdAt) ? data.createdAt : Date.now();
   data.updatedAt = isTime(data.updatedAt) ? data.updatedAt : Date.now();
-  data.canvas ??= { width: 800, height: 450 };
-  if (!isRecord(data.canvas) || !isTime(data.canvas.width) || !isTime(data.canvas.height) ||
-    !data.canvas.width || !data.canvas.height) throw new Error("Invalid canvas size");
   data.timeline = { ...data.timeline, duration: updateGroupDurations(data.tracks) };
   return data;
 };

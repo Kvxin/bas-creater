@@ -31,7 +31,7 @@ test("legacy assets and repeated timeline references migrate without losing appe
   assert.equal(clips[0]?.resourceId, "text-1");
   assert.equal(clips[1]?.resourceId, "text-1");
   assert.equal(clips[0]?.kind === "resource" && clips[0].overrides?.content, "Hello");
-  assert.equal(clips[1]?.kind === "resource" && clips[1].overrides?.x, 42);
+  assert.equal(clips[1]?.kind === "resource" && clips[1].overrides?.x, "5.25%");
 });
 
 test("future projects cannot be silently opened and rewritten by an older version", () => {
@@ -54,8 +54,8 @@ test("legacy animations migrate to keyframes and mixed animation data is rejecte
   const project = normalizeProjectData(source);
   assert.equal("animations" in migrated(project), false);
   assert.deepEqual(migrated(project).keyframes?.map(({ timeMs, properties }) => [timeMs, properties]), [
-    [0, { x: 42 }],
-    [500, { x: 100 }]
+    [0, { x: "5.25%" }],
+    [500, { x: "12.5%" }]
   ]);
   Object.assign(clip, { keyframes: [{ id: "frame-1", timeMs: 500, properties: { x: 50 } }] });
   const original = JSON.stringify(source);

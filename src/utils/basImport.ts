@@ -1,3 +1,5 @@
+import { DEFAULT_COORDINATE_REFERENCE, isCoordinateField, toPercentCoordinate } from "@/utils/coordinates";
+import type { CoordinateReferenceSize } from "@/utils/coordinates";
 import type { AnyDanmu, ButtonDanmu, DanmuType } from "@/types/danmu";
 import type { BasParseResult } from "@/utils/bas";
 import type { TimelineKeyframe, TimelineKeyframeProperties } from "@/types/timeline";
@@ -69,8 +71,8 @@ const FIELDS_BY_TYPE: Record<DanmuType, readonly string[]> = {
 
 /** 资源里缺少某属性时，用于插值起点的兜底值（与 BAS 默认值一致）。 */
 const FALLBACK_INITIAL_VALUES: Record<string, number | string> = {
-  x: 0,
-  y: 0,
+  x: "0%",
+  y: "0%",
   zIndex: 0,
   scale: 1,
   opacity: 1,
@@ -92,6 +94,8 @@ export type BasImportResource = DistributiveOmit<AnyDanmu, "id">;
 export type BasImportOptions = {
   /** 时间轴上的起点（ms）。关键帧相对片段起点，因此不参与时间平移。 */
   startTimeMs: number;
+  /** 把 BAS 中的数值坐标换算成百分比时使用的根画布尺寸。 */
+  referenceSize?: CoordinateReferenceSize;
 };
 
 export type BasImportWarningCode =
@@ -652,8 +656,15 @@ export const buildKeyframesFromSegments = (params: BuildKeyframesParams) => {
  */
 export const convertParsedBas = (
   parsed: BasParseResult,
-  _options: BasImportOptions = { startTimeMs: 0 }
+  options: BasImportOptions = { startTimeMs: 0 }
 ): BasImportResult => {
+  const reference = options.referenceSize ?? DEFAULT_COORDINATE_REFERENCE;
+  // 编辑器的 x/y 只保存百分比，数值坐标在合并关键帧前先换算，避免混合单位插值。
+  const readAttribute: SegmentAttributeReader = (basKey, raw) => {
+    const attribute = readBasAttribute(basKey, raw);
+    if (!attribute || attribute.value === null || !isCoordinateField(attribute.key)) return attribute;
+    return { key: attribute.key, value: toPercentCoordinate(attribute.value, attribute.key, reference) ?? null };
+  };
   const warnings: BasImportWarning[] = [];
   const objects: BasImportObject[] = [];
   const segments: BasSegment[] = [];
@@ -674,11 +685,9 @@ export const convertParsedBas = (
     const resource: Record<string, unknown> = { type };
 
     for (const [basKey, rawValue] of Object.entries(attrs)) {
-      if (RESERVED_ATTRIBUTES.has(basKey)) continue;
-      const key = toObjectKey(basKey);
-      if (!fields.includes(key)) continue;
-      const value = convertAttributeValue(key, rawValue);
-      if (value !== null) resource[key] = value;
+      const attribute = readAttribute(basKey, rawValue);
+      if (!attribute || !fields.includes(attribute.key)) continue;
+      if (attribute.value !== null) resource[attribute.key] = attribute.value;
     }
 
     if (type === "button") {
@@ -693,7 +702,8 @@ export const convertParsedBas = (
       resource,
       segments: segments.filter(segment => segment.targetName === name),
       allowedKeys,
-      warnings
+      warnings,
+      readAttribute
     });
 
     const parentName = readBasStringValue(attrs.parent);

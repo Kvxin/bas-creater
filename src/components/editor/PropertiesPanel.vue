@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isCoordinateField } from "@/utils/coordinates";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Settings, Plus, Trash2, FileText, Move, Palette, Sparkles, Music2, Volume2 } from "lucide-vue-next";
@@ -424,6 +425,7 @@ const getPercentageInputValue = (field: PercentageField): string | number | unde
 };
 
 const isPercentageValue = (field: PercentageField) => {
+  if (isCoordinateField(field)) return true;
   const override = percentageModeOverrides.value[getPercentageModeKey(field)];
   if (override !== undefined) return override;
 
@@ -483,6 +485,7 @@ const getKeyframePercentageSource = (field: KeyframePercentageField) => {
 };
 
 const isKeyframePercentageValue = (field: KeyframePercentageField) => {
+  if (isCoordinateField(field)) return true;
   const overrideKey = `${selectedClip.value?.id ?? "none"}:${activeKeyframeId.value}:${field}`;
   const override = keyframePercentageModeOverrides.value[overrideKey];
   if (override !== undefined) return override;
@@ -725,15 +728,6 @@ const getButtonAV = (item: any): number | undefined => {
                     @focus="numericFocus" @keydown="numericKeydown" @change="(e: Event) => numericChange(e, v => updatePercentageValue('x', v))"
                     class="h-7 min-w-0 flex-1 text-xs font-mono bg-accent"
                   />
-                  <label
-                    class="flex items-center gap-1 text-xs text-muted-foreground"
-                    :title="t('properties.transform.xPercentHint')"
-                    ><Switch
-                      :model-value="isPercentageValue('x')"
-                      :disabled="!timelineStore.canvasReferenceSize"
-                      @update:model-value="setPercentageMode('x', $event)"
-                    />%</label
-                  >
                 </div>
               </div>
               <div class="space-y-1">
@@ -744,15 +738,6 @@ const getButtonAV = (item: any): number | undefined => {
                     @focus="numericFocus" @keydown="numericKeydown" @change="(e: Event) => numericChange(e, v => updatePercentageValue('y', v))"
                     class="h-7 min-w-0 flex-1 text-xs font-mono bg-accent"
                   />
-                  <label
-                    class="flex items-center gap-1 text-xs text-muted-foreground"
-                    :title="t('properties.transform.yPercentHint')"
-                    ><Switch
-                      :model-value="isPercentageValue('y')"
-                      :disabled="!timelineStore.canvasReferenceSize"
-                      @update:model-value="setPercentageMode('y', $event)"
-                    />%</label
-                  >
                 </div>
               </div>
               <div class="space-y-1">
@@ -1331,15 +1316,6 @@ const getButtonAV = (item: any): number | undefined => {
                       @focus="numericFocus" @keydown="numericKeydown" @change="(e: Event) => numericChange(e, v => updateKeyframePercentageValue('x', v))"
                       class="h-8 min-w-0 flex-1 text-xs font-mono"
                     />
-                    <label
-                      class="flex items-center gap-1 text-xs text-muted-foreground"
-                      :title="t('properties.animation.xPercentHint')"
-                      ><Switch
-                        :model-value="isKeyframePercentageValue('x')"
-                        :disabled="!timelineStore.canvasReferenceSize"
-                        @update:model-value="setKeyframePercentageMode('x', $event)"
-                      />%</label
-                    >
                   </div>
                 </div>
                 <div class="space-y-1">
@@ -1350,15 +1326,6 @@ const getButtonAV = (item: any): number | undefined => {
                       @focus="numericFocus" @keydown="numericKeydown" @change="(e: Event) => numericChange(e, v => updateKeyframePercentageValue('y', v))"
                       class="h-8 min-w-0 flex-1 text-xs font-mono"
                     />
-                    <label
-                      class="flex items-center gap-1 text-xs text-muted-foreground"
-                      :title="t('properties.animation.yPercentHint')"
-                      ><Switch
-                        :model-value="isKeyframePercentageValue('y')"
-                        :disabled="!timelineStore.canvasReferenceSize"
-                        @update:model-value="setKeyframePercentageMode('y', $event)"
-                      />%</label
-                    >
                   </div>
                 </div>
               </div>
