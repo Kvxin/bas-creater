@@ -36,18 +36,24 @@ export const convertLegacyAnimations = (
   for (const animation of animations) {
     const startMs = (animation.type === "set" ? 0 : cursorMs) + Math.max(0, animation.delay ?? 0);
     const endMs = startMs + Math.max(0, animation.duration);
-    segments.push({ targetName: clipId, startMs, endMs, attrs: animation.properties });
+    segments.push({ targetName: clipId, startMs, endMs, attrs: { ...animation.properties } });
     cursorMs = endMs;
   }
 
   const allowedKeys = new Set<string>(ANIMATABLE_KEYS_BY_TYPE[resource.type]);
-  // 不可动画属性只能作为初值并入 overrides，带时长的渐变无法无损表达。
+  const initial: Record<string, unknown> = { ...resolveDanmuDefaults(resource) };
+  // 不可动画属性只能作为初值并入 overrides，带时长且真正改变取值的渐变无法无损表达。
+  const constantKeys = new Set(
+    segments.flatMap((segment) => Object.keys(segment.attrs)).filter(
+      (key) => !allowedKeys.has(key) && segments.every((segment) => !(key in segment.attrs) || segment.attrs[key] === initial[key])
+    )
+  );
   for (const segment of segments) {
+    for (const key of constantKeys) delete segment.attrs[key];
     const tweened = segment.endMs > segment.startMs && Object.keys(segment.attrs).find((key) => !allowedKeys.has(key));
     if (tweened) throw new Error(`Clip ${clipId} animates "${tweened}" in a legacy animation, which keyframes cannot represent`);
   }
 
-  const initial: Record<string, unknown> = { ...resolveDanmuDefaults(resource) };
   const working = { ...initial };
   const warnings: BasImportWarning[] = [];
   const { keyframes } = buildKeyframesFromSegments({

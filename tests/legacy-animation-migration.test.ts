@@ -133,3 +133,15 @@ test("tweening a non-animatable property is rejected instead of becoming a stati
     /zIndex/
   );
 });
+
+test("tweening a non-animatable property to its current value is dropped instead of rejected", () => {
+  assert.deepEqual(
+    migrateClip({ id: "t1", type: "text", zIndex: 3 }, 2000, [
+      { id: "a1", type: "set", duration: 1000, properties: { zIndex: 3, x: 100 } }
+    ]),
+    [
+      [0, { x: 0 }, "linear"],
+      [1000, { x: 100 }, "linear"]
+    ]
+  );
+});
