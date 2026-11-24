@@ -50,9 +50,9 @@ const getParser = (): BasDanmakuInstance => {
 export const parseBas = (text: string): BasParseResult => {
   let result: BasParseResult | null = null;
   let failure: string | null = null;
-  const originalError = console.error;
-  // bas.js 解析失败时会先打印再回调 error，测试里只保留断言信息。
-  console.error = () => {};
+  const originalWarn = console.warn;
+  // bas.js 解析失败时会先 console.warn 再回调 error，测试里只保留断言信息。
+  console.warn = () => {};
   try {
     getParser().parse({
       danmaku: { text },
@@ -64,7 +64,7 @@ export const parseBas = (text: string): BasParseResult => {
       }
     });
   } finally {
-    console.error = originalError;
+    console.warn = originalWarn;
   }
   if (failure !== null) throw new Error(failure);
   if (result === null) throw new Error("BAS parser did not return synchronously");
