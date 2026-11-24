@@ -26,7 +26,7 @@ These two nodes are the same danmaku rendered twice, not two different clips.
 - `src/utils/bas.ts`
   - `reset()` clears DOM + dmList but does not reset BasDanmaku internal time.
   - `addRaw()` currently always triggers BasDanmaku.refresh() via `add()`.
-- `src/utils/compiler.ts`
+- `src/core/compiler.ts`
   - `compileClipToBas()` sets `duration = start + duration` and `alpha = 0` for delayed start.
 - `public/bas.js`
   - `add()` always calls `refresh()` unless `noRefresh` is set.
