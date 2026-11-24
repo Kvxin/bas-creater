@@ -3,7 +3,6 @@ import { computed, ref } from "vue";
 import type {
   TimelineTrack,
   TimelineClip,
-  AnimationSegment,
   TimelineTrackType,
   TimelineKeyframe,
   TimelineKeyframeProperties,
@@ -79,7 +78,6 @@ export const useTimelineStore = defineStore("timeline", () => {
       else if (!selectedClipIds.value.includes(id)) selectedClipIds.value = [id];
     }
   });
-  const selectedAnimationId = ref<string | null>(null);
   const selectedKeyframeId = ref<string | null>(null);
   const autoKeyframe = ref(true);
   const navigationRevision = ref(0);
@@ -157,7 +155,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     track.clips.sort((a, b) => a.startTime - b.startTime);
     recalculateDuration();
     setSelectedClip(newClip.id);
-    selectedAnimationId.value = null;
     selectedKeyframeId.value = BASE_KEYFRAME_ID;
 
     console.log(`[TimelineStore] 已粘贴片段到轨道 ${track.name}:`, newClip);
@@ -354,7 +351,6 @@ export const useTimelineStore = defineStore("timeline", () => {
       const removedTrack = tracks.value[index];
       if (removedTrack?.clips.some((clip) => clip.id === selectedClipId.value)) {
         selectedClipId.value = null;
-        selectedAnimationId.value = null;
         selectedKeyframeId.value = null;
       }
       tracks.value.splice(index, 1);
@@ -400,7 +396,6 @@ export const useTimelineStore = defineStore("timeline", () => {
       startTime: time,
       duration: clipDuration,
       trackId: trackId,
-      animations: [],
       keyframes: [],
       params: resourceType === "audio" ? { volume: 0, muted: false } : undefined,
     };
@@ -412,7 +407,6 @@ export const useTimelineStore = defineStore("timeline", () => {
 
     console.log("[TimelineStore] Added clip:", newClip);
     setSelectedClip(newClip.id);
-    selectedAnimationId.value = null;
     selectedKeyframeId.value = BASE_KEYFRAME_ID;
     return newClip;
   };
@@ -425,7 +419,6 @@ export const useTimelineStore = defineStore("timeline", () => {
       if (index !== -1) {
         if (selectedClipId.value === clipId) {
           selectedClipId.value = null;
-          selectedAnimationId.value = null;
           selectedKeyframeId.value = null;
         }
         track.clips.splice(index, 1);
@@ -724,7 +717,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     recalculateDuration();
 
     setSelectedClip(newClip.id);
-    selectedAnimationId.value = null;
     selectedKeyframeId.value = BASE_KEYFRAME_ID;
 
     console.log(
@@ -761,19 +753,16 @@ export const useTimelineStore = defineStore("timeline", () => {
       duration: clip.duration - offsetMs,
       sourceInMs: resource ? source.sourceInMs : (source.sourceInMs ?? 0) + offsetMs,
       overrides: split ? { ...source.overrides, ...split.rightProperties } : source.overrides,
-      keyframes: split?.rightKeyframes ?? source.keyframes,
-      animations: split?.rightAnimations ?? source.animations
+      keyframes: split?.rightKeyframes ?? source.keyframes
     };
     clip.duration = offsetMs;
     if (split) {
       clip.keyframes = split.leftKeyframes;
-      clip.animations = split.leftAnimations;
     }
     track.clips.push(rightClip);
     track.clips.sort((a, b) => a.startTime - b.startTime);
     recalculateDuration();
     selectedClipId.value = rightClip.id;
-    selectedAnimationId.value = null;
     selectedKeyframeId.value = BASE_KEYFRAME_ID;
     return rightClip;
   };
@@ -791,7 +780,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     if (!rightClip || !clipId) return null;
     removeClip(rightClip.id);
     selectedClipId.value = clipId;
-    selectedAnimationId.value = null;
     selectedKeyframeId.value = BASE_KEYFRAME_ID;
     const leftClip = findClipLocation(clipId)?.clip ?? null;
     if (leftClip?.kind === "resource") useDanmuStore().select(leftClip.resourceId);
@@ -806,14 +794,12 @@ export const useTimelineStore = defineStore("timeline", () => {
   const setSelectedClip = (id: string | null) => {
       selectedClipIds.value = id ? [id] : [];
       if (selectedClipId.value !== id) {
-          selectedAnimationId.value = null;
           selectedKeyframeId.value = null;
       }
       selectedClipId.value = id;
       const clip = id ? findClipLocation(id)?.clip : null;
       useDanmuStore().select(clip?.kind === "resource" ? clip.resourceId : null);
       if (id === null) {
-          selectedAnimationId.value = null;
           selectedKeyframeId.value = null;
       }
   }
@@ -836,7 +822,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     selectedClipIds.value = validIds;
     primarySelectedClipId.value = primary;
     if (changed || selectionCountChanged || validIds.length > 1) {
-      selectedAnimationId.value = null;
       selectedKeyframeId.value = null;
       const clip = primary ? findClipLocation(primary)?.clip : null;
       useDanmuStore().select(validIds.length === 1 && clip?.kind === "resource" ? clip.resourceId : null);
@@ -870,7 +855,6 @@ export const useTimelineStore = defineStore("timeline", () => {
           for (const child of track.clips) regenerate(child, track.id);
         }
       } else {
-        for (const animation of clip.animations ?? []) animation.id = createTimelineId("anim");
         for (const keyframe of clip.keyframes ?? []) keyframe.id = createTimelineId("kf");
       }
     };
@@ -1191,18 +1175,8 @@ export const useTimelineStore = defineStore("timeline", () => {
     navigationRevision.value += 1;
   };
 
-  const setSelectedAnimation = (id: string | null) => {
-    selectedAnimationId.value = id;
-    if (id) {
-      selectedKeyframeId.value = null;
-    }
-  }
-
   const setSelectedKeyframe = (id: string | null) => {
     selectedKeyframeId.value = id;
-    if (id) {
-      selectedAnimationId.value = null;
-    }
   }
 
   const setAutoKeyframe = (enabled: boolean) => {
@@ -1230,64 +1204,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     }
   }
 
-  // 动画管理
-  const addClipAnimation = (clipId: string, animation: AnimationSegment) => {
-    for (const track of tracks.value) {
-      const clip = track.clips.find(c => c.id === clipId);
-      if (clip?.kind === "resource" && !track.locked) {
-        if (clip.keyframes?.length) return;
-        if (!clip.animations) clip.animations = [];
-        clip.animations.push(animation);
-        return;
-      }
-    }
-  }
-
-  const insertClipAnimation = (clipId: string, index: number, animation: AnimationSegment) => {
-    for (const track of tracks.value) {
-      const clip = track.clips.find(c => c.id === clipId);
-      if (clip?.kind === "resource" && !track.locked) {
-        if (clip.keyframes?.length) return;
-        if (!clip.animations) clip.animations = [];
-        // Ensure index is valid
-        if (index < 0) index = 0;
-        if (index > clip.animations.length) index = clip.animations.length;
-        
-        clip.animations.splice(index, 0, animation);
-        return;
-      }
-    }
-  }
-
-  const removeClipAnimation = (clipId: string, animationId: string) => {
-    for (const track of tracks.value) {
-      const clip = track.clips.find(c => c.id === clipId);
-      if (clip && clip.animations) {
-        const idx = clip.animations.findIndex(a => a.id === animationId);
-        if (idx !== -1) {
-          clip.animations.splice(idx, 1);
-          if (selectedAnimationId.value === animationId) {
-            selectedAnimationId.value = null;
-          }
-        }
-        return;
-      }
-    }
-  }
-
-  const updateClipAnimation = (clipId: string, animationId: string, updates: Partial<AnimationSegment>) => {
-    for (const track of tracks.value) {
-      const clip = track.clips.find(c => c.id === clipId);
-      if (clip && clip.animations) {
-        const animation = clip.animations.find(a => a.id === animationId);
-        if (animation) {
-          Object.assign(animation, updates);
-        }
-        return;
-      }
-    }
-  }
-
   const addClipKeyframe = (
     clipId: string,
     keyframe: Omit<TimelineKeyframe, "id"> & { id?: string },
@@ -1295,7 +1211,6 @@ export const useTimelineStore = defineStore("timeline", () => {
   ) => {
     const location = findClipLocation(clipId);
     if (!location || location.clip.kind !== "resource" || location.track.locked) return null;
-    if (location.clip.animations?.length) return null;
 
     const nextKeyframe: TimelineKeyframe = {
       ...keyframe,
@@ -1308,7 +1223,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     if (nextKeyframe.timeMs <= 0) {
       selectedClipId.value = clipId;
       selectedKeyframeId.value = BASE_KEYFRAME_ID;
-      selectedAnimationId.value = null;
       return null;
     }
 
@@ -1319,7 +1233,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     if (options.select !== false) {
       selectedClipId.value = clipId;
       selectedKeyframeId.value = nextKeyframe.id;
-      selectedAnimationId.value = null;
     }
 
     return nextKeyframe;
@@ -1333,13 +1246,11 @@ export const useTimelineStore = defineStore("timeline", () => {
   ) => {
     const location = findClipLocation(clipId);
     if (!location || location.clip.kind !== "resource" || location.track.locked) return null;
-    if (location.clip.animations?.length) return null;
 
     const clampedTime = clampKeyframeTime(timeMs, location.clip.duration);
     if (clampedTime <= 0) {
       selectedClipId.value = clipId;
       selectedKeyframeId.value = BASE_KEYFRAME_ID;
-      selectedAnimationId.value = null;
       return null;
     }
 
@@ -1362,7 +1273,6 @@ export const useTimelineStore = defineStore("timeline", () => {
       if (options.select !== false) {
         selectedClipId.value = clipId;
         selectedKeyframeId.value = existing.id;
-        selectedAnimationId.value = null;
       }
 
       return existing;
@@ -1452,7 +1362,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     duration,
     zoomScale,
     selectedClipId,
-    selectedAnimationId,
     selectedKeyframeId,
     autoKeyframe,
     addTrack,
@@ -1469,7 +1378,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     splitClipRight,
     setCurrentTime,
     setSelectedClip,
-    setSelectedAnimation,
     setSelectedKeyframe,
     setAutoKeyframe,
     toggleTrackExpand,
@@ -1485,10 +1393,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     isClipMuted,
     updateClipVolume,
     toggleClipMuted,
-    addClipAnimation,
-    insertClipAnimation,
-    removeClipAnimation,
-    updateClipAnimation,
     addClipKeyframe,
     upsertClipKeyframeAtTime,
     updateClipKeyframe,

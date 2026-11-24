@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isCoordinateField } from "@/utils/coordinates";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Settings, Plus, Trash2, FileText, Move, Palette, Sparkles, Music2, Volume2 } from "lucide-vue-next";
@@ -340,7 +341,6 @@ const tryAutoKeyframeProperty = (key: string, value: unknown) => {
 
   const properties = pickKeyframePropertiesForResource(resource, { [key]: value } as Partial<AnyDanmu>);
   if (Object.keys(properties).length === 0) return false;
-  if ((clip.animations?.length ?? 0) > 0) return true;
 
   const rawLocalTimeMs = timelineStore.currentTime - clip.startTime;
   if (rawLocalTimeMs <= 0 || rawLocalTimeMs > clip.duration) return false;
@@ -425,6 +425,7 @@ const getPercentageInputValue = (field: PercentageField): string | number | unde
 };
 
 const isPercentageValue = (field: PercentageField) => {
+  if (isCoordinateField(field)) return true;
   const override = percentageModeOverrides.value[getPercentageModeKey(field)];
   if (override !== undefined) return override;
 
@@ -484,6 +485,7 @@ const getKeyframePercentageSource = (field: KeyframePercentageField) => {
 };
 
 const isKeyframePercentageValue = (field: KeyframePercentageField) => {
+  if (isCoordinateField(field)) return true;
   const overrideKey = `${selectedClip.value?.id ?? "none"}:${activeKeyframeId.value}:${field}`;
   const override = keyframePercentageModeOverrides.value[overrideKey];
   if (override !== undefined) return override;
@@ -615,9 +617,6 @@ const getButtonAV = (item: any): number | undefined => {
     </div>
     <div v-else-if="selected" class="flex-1 min-h-0 flex overflow-hidden">
       <div class="min-w-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-hidden p-3">
-        <p v-if="selectedClip?.kind === 'resource' && selectedClip.animations?.length" role="status" class="mb-3 text-xs text-muted-foreground">
-          旧动画不支持新关键帧编辑，原动画将保留。
-        </p>
         <!-- 第一阶段：内容与身份 (根据类型自适应) -->
         <p v-if="effectiveSelection.error" role="alert" class="mb-3 text-xs text-destructive">
           无法获取混合单位的参照尺寸，当前值不可编辑。
@@ -729,15 +728,6 @@ const getButtonAV = (item: any): number | undefined => {
                     @focus="numericFocus" @keydown="numericKeydown" @change="(e: Event) => numericChange(e, v => updatePercentageValue('x', v))"
                     class="h-7 min-w-0 flex-1 text-xs font-mono bg-accent"
                   />
-                  <label
-                    class="flex items-center gap-1 text-xs text-muted-foreground"
-                    :title="t('properties.transform.xPercentHint')"
-                    ><Switch
-                      :model-value="isPercentageValue('x')"
-                      :disabled="!timelineStore.canvasReferenceSize"
-                      @update:model-value="setPercentageMode('x', $event)"
-                    />%</label
-                  >
                 </div>
               </div>
               <div class="space-y-1">
@@ -748,15 +738,6 @@ const getButtonAV = (item: any): number | undefined => {
                     @focus="numericFocus" @keydown="numericKeydown" @change="(e: Event) => numericChange(e, v => updatePercentageValue('y', v))"
                     class="h-7 min-w-0 flex-1 text-xs font-mono bg-accent"
                   />
-                  <label
-                    class="flex items-center gap-1 text-xs text-muted-foreground"
-                    :title="t('properties.transform.yPercentHint')"
-                    ><Switch
-                      :model-value="isPercentageValue('y')"
-                      :disabled="!timelineStore.canvasReferenceSize"
-                      @update:model-value="setPercentageMode('y', $event)"
-                    />%</label
-                  >
                 </div>
               </div>
               <div class="space-y-1">
@@ -1220,7 +1201,6 @@ const getButtonAV = (item: any): number | undefined => {
               </div>
               <button
                 @click="addKeyframe"
-                :disabled="!!selectedClip.animations?.length"
                 class="h-full min-w-9 rounded-sm border border-border bg-accent hover:bg-primary/10 hover:text-primary transition-colors inline-flex items-center justify-center"
                 :title="t('properties.animation.addKeyframe')"
                 :aria-label="t('properties.animation.addKeyframe')"
@@ -1336,15 +1316,6 @@ const getButtonAV = (item: any): number | undefined => {
                       @focus="numericFocus" @keydown="numericKeydown" @change="(e: Event) => numericChange(e, v => updateKeyframePercentageValue('x', v))"
                       class="h-8 min-w-0 flex-1 text-xs font-mono"
                     />
-                    <label
-                      class="flex items-center gap-1 text-xs text-muted-foreground"
-                      :title="t('properties.animation.xPercentHint')"
-                      ><Switch
-                        :model-value="isKeyframePercentageValue('x')"
-                        :disabled="!timelineStore.canvasReferenceSize"
-                        @update:model-value="setKeyframePercentageMode('x', $event)"
-                      />%</label
-                    >
                   </div>
                 </div>
                 <div class="space-y-1">
@@ -1355,15 +1326,6 @@ const getButtonAV = (item: any): number | undefined => {
                       @focus="numericFocus" @keydown="numericKeydown" @change="(e: Event) => numericChange(e, v => updateKeyframePercentageValue('y', v))"
                       class="h-8 min-w-0 flex-1 text-xs font-mono"
                     />
-                    <label
-                      class="flex items-center gap-1 text-xs text-muted-foreground"
-                      :title="t('properties.animation.yPercentHint')"
-                      ><Switch
-                        :model-value="isKeyframePercentageValue('y')"
-                        :disabled="!timelineStore.canvasReferenceSize"
-                        @update:model-value="setKeyframePercentageMode('y', $event)"
-                      />%</label
-                    >
                   </div>
                 </div>
               </div>

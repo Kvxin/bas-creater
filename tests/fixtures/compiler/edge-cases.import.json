@@ -18,8 +18,8 @@
         "rotateX": 0,
         "rotateY": 0,
         "rotateZ": 0,
-        "x": 0,
-        "y": 0,
+        "x": "0%",
+        "y": "0%",
         "zIndex": 0,
         "scale": 1
       },
@@ -44,8 +44,8 @@
         "rotateX": 0,
         "rotateY": 0,
         "rotateZ": 0,
-        "x": 0,
-        "y": 0,
+        "x": "0%",
+        "y": "0%",
         "zIndex": 0,
         "scale": 1
       },

@@ -95,7 +95,7 @@ test("bas import: a plain text object maps to a resource without keyframes", () 
   assert.equal(resource.type, "text");
   assert.equal(resource.content, "你<好");
   assert.equal(resource.x, "10%");
-  assert.equal(resource.y, 20);
+  assert.equal(resource.y, "4.4444%");
   assert.equal(resource.fontSize, "5%");
   assert.equal(resource.color, 0xff0000);
   assert.equal(resource.opacity, 1);

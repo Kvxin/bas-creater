@@ -77,7 +77,7 @@ test("project edits persist to the selected folder and reopen without IndexedDB"
     ];
     await saveProjectDraft({ ...project, assets, tracks: [track] });
     const diskProject = JSON.parse(await readFile(join(path, "Folder project.basproj"), "utf8"));
-    assert.equal(diskProject.version, 3);
+    assert.equal(diskProject.version, 4);
     assert.equal(diskProject.assets.find((asset: { id: string }) => asset.id === "danmu-1").danmu.content, "Saved text");
     assert.equal(diskProject.assets.find((asset: { id: string }) => asset.id === "audio-1").audio.relativePath, "audio-1.audio");
     assert.equal("danmus" in diskProject, false);

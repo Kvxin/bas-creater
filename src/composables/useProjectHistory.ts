@@ -23,7 +23,6 @@ type Snapshot = {
   selectedClipIds: string[];
   selectedClipId: string | null;
   selectedKeyframeId: string | null;
-  selectedAnimationId: string | null;
   activeGroupPath: string[];
 };
 
@@ -62,7 +61,6 @@ export function useProjectHistory(isHydrating: Ref<boolean>, projectId: string) 
     selectedClipIds: timeline.selectedClipIds,
     selectedClipId: timeline.selectedClipId,
     selectedKeyframeId: timeline.selectedKeyframeId,
-    selectedAnimationId: timeline.selectedAnimationId,
     activeGroupPath: timeline.activeGroupPath
   } satisfies Snapshot, (key, value: unknown) =>
     key === "coverUrl" && typeof value === "string" && value.startsWith("blob:") ? undefined : value);
@@ -140,7 +138,6 @@ export function useProjectHistory(isHydrating: Ref<boolean>, projectId: string) 
       audio.audioResources = resources;
       assets.setProject(state.assets, state.bins);
       timeline.selectedKeyframeId = state.selectedKeyframeId;
-      timeline.selectedAnimationId = state.selectedAnimationId;
       danmu.select(state.selectedDanmuId);
       baseline = snapshot();
       dirty = false;

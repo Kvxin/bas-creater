@@ -145,40 +145,11 @@ onClickOutside(resolutionMenuRef, () => {
   isResolutionMenuOpen.value = false;
 });
 
-type CoordinateField = "x" | "y";
-
-const isUnsetCoordinate = (value: unknown) => value === undefined || value === null || value === "";
-
-const isPercentageCoordinate = (value: unknown) => typeof value === "string" && value.trim().endsWith("%");
-
-const usesPercentageCoordinate = (
-  danmu: AnyDanmu,
-  clip: TimelineClip,
-  effectiveValue: unknown,
-  field: CoordinateField
-) => {
-  if (typeof effectiveValue === "string" && effectiveValue.trim().endsWith("%")) {
-    return true;
-  }
-
-  const rawValue = danmu[field];
-  const localTimeMs = timelineStore.currentTime - clip.startTime;
-  if (localTimeMs <= 0) {
-    return isUnsetCoordinate(rawValue) || isPercentageCoordinate(rawValue);
-  }
-
-  const hasAnimatedValue = clip.keyframes?.some(keyframe => !isUnsetCoordinate(keyframe.properties[field]));
-  if (hasAnimatedValue) return false;
-
-  return isUnsetCoordinate(rawValue) || isPercentageCoordinate(rawValue);
-};
-
 const previewTransformItems = computed(() => {
   const items: Array<{
     clipId: string;
     parentClipId?: string;
     danmu: AnyDanmu;
-    coordinatePercentageMode: { x: boolean; y: boolean };
   }> = [];
 
   const previewClips = timelineStore.tracks.flatMap(track =>
@@ -204,11 +175,7 @@ const previewTransformItems = computed(() => {
     items.push({
       clipId: clip.id,
       parentClipId: clip.parentClipId,
-      danmu: effectiveDanmu,
-      coordinatePercentageMode: {
-        x: usesPercentageCoordinate(danmu, clip, effectiveDanmu.x, "x"),
-        y: usesPercentageCoordinate(danmu, clip, effectiveDanmu.y, "y")
-      }
+      danmu: effectiveDanmu
     });
   }
 
@@ -316,7 +283,6 @@ const handleTransformSelection = (payload: {
   timelineStore.setSelectedClips(payload.clipIds, payload.primaryClipId);
 
   if (!payload.primaryClipId) {
-    timelineStore.setSelectedAnimation(null);
     timelineStore.setSelectedKeyframe(null);
   }
 

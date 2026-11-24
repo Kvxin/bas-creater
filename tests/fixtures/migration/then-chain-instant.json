@@ -1,0 +1,9 @@
+{
+  "danmu": { "id": "t1", "type": "text", "content": "a", "x": "10%", "color": 16711680 },
+  "duration": 3000,
+  "animations": [
+    { "id": "a1", "type": "then", "duration": 500, "properties": { "x": "50%", "color": 255 } },
+    { "id": "a2", "type": "then", "duration": 0, "delay": 200, "properties": { "content": "b" } },
+    { "id": "a3", "type": "then", "duration": 300, "properties": { "opacity": 0.5, "fontSize": 40 } }
+  ]
+}

@@ -33,15 +33,6 @@ for (const name of fixtureNames) {
   });
 }
 
-test("compiler: mixing keyframes and legacy animations is rejected", () => {
-  const fixture = readFixture("keyframes");
-  const clip = fixture.tracks[0]!.clips[0]!;
-  assert.equal(clip.kind, "resource");
-  if (clip.kind !== "resource") return;
-  clip.animations = [{ id: "a1", type: "set", duration: 100, properties: { x: 1 } }];
-  assert.throws(() => compileTimelineToBas(fixture.tracks, fixture.danmus), /mixes keyframes and legacy animations/);
-});
-
 test("compiler: per-clip errors are reported through onError without dropping other clips", () => {
   const fixture = readFixture("button-and-path");
   const errors: string[] = [];

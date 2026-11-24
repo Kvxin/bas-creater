@@ -44,8 +44,8 @@
         "rotateX": 0,
         "rotateY": 0,
         "rotateZ": 0,
-        "x": 0.5,
-        "y": 0,
+        "x": "0.0625%",
+        "y": "0%",
         "zIndex": 0,
         "scale": 1
       },
@@ -107,7 +107,7 @@
         "fillColor": 16777215,
         "fillAlpha": 0.5,
         "x": "0%",
-        "y": 0,
+        "y": "0%",
         "zIndex": 0,
         "scale": 1,
         "width": "20%"
@@ -142,8 +142,8 @@
         "textAlpha": 1,
         "fillColor": 16777215,
         "fillAlpha": 1,
-        "x": 0,
-        "y": 0,
+        "x": "0%",
+        "y": "0%",
         "zIndex": 0,
         "scale": 1
       },
