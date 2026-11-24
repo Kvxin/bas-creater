@@ -4,7 +4,7 @@ import type {
   TimelineKeyframe,
   TimelineKeyframeProperties,
 } from "@/types/timeline";
-import { resolveDanmuDefaults } from "@/utils/danmuDefaults";
+import { resolveDanmuDefaults } from "@/core/danmuDefaults";
 
 export const BASE_KEYFRAME_ID = "__base_keyframe__";
 

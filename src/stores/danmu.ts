@@ -2,7 +2,7 @@ import { computed, reactive, ref } from "vue"
 import { defineStore } from "pinia"
 import type { AnyDanmu, DanmuType } from "@/types/danmu"
 import { i18n } from "@/i18n"
-import { createDanmuByKey } from "@/utils/danmuFactory"
+import { createDanmuByKey } from "@/core/danmuFactory"
 import { getItemName } from "@/utils/resourceUtils"
 import { useAssetsStore } from "@/stores/assets"
 
@@ -12,6 +12,13 @@ export type ViewportState = {
   scale: number
   offsetX: number
   offsetY: number
+}
+
+/** 新建弹幕的默认文字随界面语言变化；core 层只知道 BAS 自身的默认值。 */
+const localizedIdentity = (type: DanmuType): Partial<AnyDanmu> => {
+  if (type === "text") return { content: i18n.global.t("danmu.defaultText") }
+  if (type === "button") return { text: i18n.global.t("danmu.defaultButtonText") }
+  return {}
 }
 
 export const useDanmuStore = defineStore("danmu", () => {
@@ -42,7 +49,7 @@ export const useDanmuStore = defineStore("danmu", () => {
    * @param options `select: false` 时不切换选中项，供批量导入使用
    */
   function add(type: DanmuType, payload: Partial<AnyDanmu> = {}, options: { select?: boolean } = {}) {
-    const dm = createDanmuByKey(type, payload)
+    const dm = createDanmuByKey(type, { ...localizedIdentity(type), ...payload })
     assets.upsertAsset({ id: dm.id, type: dm.type, binId: null, danmu: dm })
     if (options.select !== false) select(dm.id)
     return dm

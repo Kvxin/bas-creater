@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { BasProjectData } from "@/types/storage";
 import { projectFileName } from "./desktopProjectFile";
 import { createBrowserProject, ensureDirectoryPermission } from "./browserProjectFile";
-import { serializeProjectData } from "./projectSchema";
+import { serializeProjectData } from "@/core/projectSchema";
 
 export type BundleTarget = {
   directory: string | FileSystemDirectoryHandle;

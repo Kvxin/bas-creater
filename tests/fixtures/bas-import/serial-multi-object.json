@@ -1,0 +1,178 @@
+{
+  "objects": [
+    {
+      "name": "c",
+      "resource": {
+        "type": "text",
+        "content": "bilibili",
+        "opacity": 1,
+        "color": 16777215,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": "10%",
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": "0%",
+        "y": "0%",
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 5000,
+      "keyframes": [
+        {
+          "id": "kf_0",
+          "timeMs": 0,
+          "properties": {
+            "x": "0%",
+            "y": "0%"
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_1",
+          "timeMs": 3000,
+          "properties": {
+            "x": "70%",
+            "y": "50%"
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_2",
+          "timeMs": 5000,
+          "properties": {
+            "x": "0%",
+            "y": "80%"
+          },
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "t1",
+      "resource": {
+        "type": "text",
+        "content": "bilibili1",
+        "opacity": 1,
+        "color": 16777215,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": "5%",
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": "0%",
+        "y": "80%",
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 4000,
+      "keyframes": [
+        {
+          "id": "kf_0",
+          "timeMs": 0,
+          "properties": {
+            "x": "0%"
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_1",
+          "timeMs": 1000,
+          "properties": {
+            "x": "40%"
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_2",
+          "timeMs": 2000,
+          "properties": {
+            "x": "40%"
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_3",
+          "timeMs": 3000,
+          "properties": {
+            "x": "0%"
+          },
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "t2",
+      "resource": {
+        "type": "text",
+        "content": "bilibili2",
+        "opacity": 1,
+        "color": 16777215,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": "5%",
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": "0%",
+        "y": "80%",
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 4000,
+      "keyframes": [
+        {
+          "id": "kf_0",
+          "timeMs": 1000,
+          "properties": {
+            "y": "80%"
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_1",
+          "timeMs": 2000,
+          "properties": {
+            "y": "20%"
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_2",
+          "timeMs": 3000,
+          "properties": {
+            "y": "20%"
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_3",
+          "timeMs": 4000,
+          "properties": {
+            "y": "80%"
+          },
+          "interpolation": "linear"
+        }
+      ]
+    }
+  ],
+  "durationMs": 5000,
+  "warnings": []
+}

@@ -1,9 +1,8 @@
-import { i18n } from "@/i18n";
 import type { AnyDanmu, DanmuType } from "@/types/danmu";
 
 export const BAS_COMMON_DEFAULTS = {
-  x: 0,
-  y: 0,
+  x: "0%",
+  y: "0%",
   zIndex: 0,
   scale: 1,
   durationMs: undefined,
@@ -78,24 +77,19 @@ const BAS_DEFAULTS_BY_TYPE: Record<
   path: BAS_PATH_DEFAULTS,
 };
 
-/**
- * Textual BAS defaults, translated with the active locale.
- * The button default deliberately mirrors the text default (both used to be
- * "请输入内容"): BAS only emits a property when it differs from these values, so
- * changing it would alter the generated code for newly created buttons.
- */
-const localizedTextDefaults = (
-  type: DanmuType
-): Partial<Pick<BasDanmuDefaults, "content" | "text">> => {
-  if (type === "text") return { content: i18n.global.t("danmu.defaultText") };
-  if (type === "button") return { text: i18n.global.t("danmu.defaultText") };
+/** bas.js 运行时内置的文字默认值（文本与按钮相同）；编译器省略等于默认值的属性，所以这里不能随界面语言变化。 */
+export const BAS_DEFAULT_TEXT = "请输入内容";
+
+const textIdentityDefaults = (type: DanmuType): Partial<Pick<BasDanmuDefaults, "content" | "text">> => {
+  if (type === "text") return { content: BAS_DEFAULT_TEXT };
+  if (type === "button") return { text: BAS_DEFAULT_TEXT };
   return {};
 };
 
 export const getBasDanmuDefaults = (type: DanmuType): BasDanmuDefaults => ({
   ...BAS_COMMON_DEFAULTS,
   ...BAS_DEFAULTS_BY_TYPE[type],
-  ...localizedTextDefaults(type),
+  ...textIdentityDefaults(type),
 });
 
 export const resolveDanmuDefaults = <T extends AnyDanmu>(

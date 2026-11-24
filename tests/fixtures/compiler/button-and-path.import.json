@@ -1,0 +1,80 @@
+{
+  "objects": [
+    {
+      "name": "obj_cb",
+      "resource": {
+        "type": "button",
+        "text": "点我",
+        "fontSize": 25,
+        "textColor": 0,
+        "textAlpha": 1,
+        "fillColor": 16752800,
+        "fillAlpha": 0.6,
+        "x": "50%",
+        "y": "80%",
+        "zIndex": 0,
+        "scale": 1,
+        "target": {
+          "av": {
+            "av": 170001,
+            "page": 2,
+            "timeMs": 12500
+          }
+        }
+      },
+      "durationMs": 5000,
+      "keyframes": [
+        {
+          "id": "kf_0",
+          "timeMs": 0,
+          "properties": {
+            "x": "50%",
+            "text": "点我"
+          },
+          "interpolation": "step"
+        },
+        {
+          "id": "kf_1",
+          "timeMs": 1000,
+          "properties": {
+            "x": "60%",
+            "text": "再点"
+          },
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "obj_cp",
+      "resource": {
+        "type": "path",
+        "d": "M0 0 L100 0 L100 100 Z",
+        "viewBox": "0 0 100 100",
+        "borderColor": 255,
+        "borderAlpha": 1,
+        "borderWidth": 2,
+        "fillColor": 16777215,
+        "fillAlpha": 0.3,
+        "x": "0%",
+        "y": "0%",
+        "zIndex": 0,
+        "scale": 1,
+        "width": "20%",
+        "height": 80,
+        "opacity": 0
+      },
+      "durationMs": 3000,
+      "keyframes": []
+    }
+  ],
+  "durationMs": 5000,
+  "warnings": [
+    {
+      "code": "unsupportedAnimation",
+      "params": {
+        "object": "obj_cp",
+        "property": "alpha"
+      }
+    }
+  ]
+}

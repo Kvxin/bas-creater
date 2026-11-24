@@ -1,4 +1,3 @@
-import { i18n } from "@/i18n";
 import type {
   AnyDanmu,
   ButtonDanmu,
@@ -7,7 +6,8 @@ import type {
   PathDanmu,
   TextDanmu,
 } from "@/types/danmu";
-import { compileDanmuDefinition } from "@/utils/compiler";
+import { compileDanmuDefinition } from "@/core/compiler";
+import { BAS_DEFAULT_TEXT } from "@/core/danmuDefaults";
 
 function genId(len = 10) {
   const chars =
@@ -101,7 +101,7 @@ export function createTextDanmu(ov: Partial<TextDanmu> = {}): TextDanmu {
   return {
     ...base,
     type: "text",
-    content: ov.content ?? i18n.global.t("danmu.defaultText"),
+    content: ov.content ?? BAS_DEFAULT_TEXT,
     ...pickDefined(
       ov as Record<string, unknown>,
       TEXT_OPTIONAL_KEYS
@@ -114,7 +114,7 @@ export function createButtonDanmu(ov: Partial<ButtonDanmu> = {}): ButtonDanmu {
   return {
     ...base,
     type: "button",
-    text: ov.text ?? i18n.global.t("danmu.defaultButtonText"),
+    text: ov.text ?? BAS_DEFAULT_TEXT,
     ...pickDefined(
       ov as Record<string, unknown>,
       BUTTON_OPTIONAL_KEYS

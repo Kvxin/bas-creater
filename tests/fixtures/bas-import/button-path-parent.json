@@ -1,0 +1,164 @@
+{
+  "objects": [
+    {
+      "name": "root",
+      "resource": {
+        "type": "text",
+        "content": "root",
+        "opacity": 1,
+        "color": 16777215,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": 25,
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": "10%",
+        "y": "10%",
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 6000,
+      "keyframes": []
+    },
+    {
+      "name": "leaf",
+      "resource": {
+        "type": "text",
+        "content": "leaf",
+        "opacity": 1,
+        "color": 16777215,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": 25,
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": "0.0625%",
+        "y": "0%",
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 4000,
+      "keyframes": [],
+      "parentName": "root"
+    },
+    {
+      "name": "btn",
+      "resource": {
+        "type": "button",
+        "text": "go",
+        "fontSize": 25,
+        "textColor": 0,
+        "textAlpha": 1,
+        "fillColor": 16777215,
+        "fillAlpha": 1,
+        "x": "40%",
+        "y": "70%",
+        "zIndex": 0,
+        "scale": 1,
+        "target": {
+          "av": {
+            "av": 170001,
+            "page": 2,
+            "timeMs": 3500
+          }
+        }
+      },
+      "durationMs": 4000,
+      "keyframes": [
+        {
+          "id": "kf_0",
+          "timeMs": 0,
+          "properties": {
+            "text": "went"
+          },
+          "interpolation": "step"
+        },
+        {
+          "id": "kf_1",
+          "timeMs": 1000,
+          "properties": {
+            "text": "went"
+          },
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "shape",
+      "resource": {
+        "type": "path",
+        "d": "M0 0 L10 10",
+        "viewBox": "0 0 10 10",
+        "borderColor": 16711680,
+        "borderAlpha": 1,
+        "borderWidth": 0,
+        "fillColor": 16777215,
+        "fillAlpha": 0.5,
+        "x": "0%",
+        "y": "0%",
+        "zIndex": 0,
+        "scale": 1,
+        "width": "20%"
+      },
+      "durationMs": 4000,
+      "keyframes": [
+        {
+          "id": "kf_0",
+          "timeMs": 0,
+          "properties": {
+            "x": "0%"
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_1",
+          "timeMs": 2000,
+          "properties": {
+            "x": "50%"
+          },
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "orphan",
+      "resource": {
+        "type": "button",
+        "text": "bad parent",
+        "fontSize": 25,
+        "textColor": 0,
+        "textAlpha": 1,
+        "fillColor": 16777215,
+        "fillAlpha": 1,
+        "x": "0%",
+        "y": "0%",
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 4000,
+      "keyframes": []
+    }
+  ],
+  "durationMs": 6000,
+  "warnings": [
+    {
+      "code": "invalidParent",
+      "params": {
+        "object": "orphan",
+        "parent": "btn"
+      }
+    }
+  ]
+}

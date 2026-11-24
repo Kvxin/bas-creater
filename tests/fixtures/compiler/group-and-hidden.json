@@ -1,0 +1,21 @@
+{
+  "danmus": [
+    { "id": "t1", "type": "text", "content": "in group" },
+    { "id": "t2", "type": "text", "content": "hidden track" }
+  ],
+  "tracks": [
+    { "id": "track_1", "name": "Track 1", "visible": true, "locked": false, "clips": [
+      { "id": "g1", "kind": "group", "trackId": "track_1", "startTime": 1000, "duration": 2500, "tracks": [
+        { "id": "inner_1", "name": "Inner", "visible": true, "locked": false, "clips": [
+          { "id": "c1", "kind": "resource", "resourceId": "t1", "trackId": "inner_1", "startTime": 500, "duration": 2000 }
+        ] }
+      ] }
+    ] },
+    { "id": "track_2", "name": "Hidden", "visible": false, "locked": false, "clips": [
+      { "id": "c2", "kind": "resource", "resourceId": "t2", "trackId": "track_2", "startTime": 0, "duration": 1000 }
+    ] },
+    { "id": "track_audio", "name": "Audio", "type": "audio", "visible": true, "locked": false, "clips": [
+      { "id": "ca", "kind": "resource", "resourceId": "audio_1", "trackId": "track_audio", "startTime": 0, "duration": 9000 }
+    ] }
+  ]
+}

@@ -31,10 +31,10 @@ import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { useAudioStore } from "@/stores/audio";
 import { useContextMenuStore } from "@/stores/contextMenu";
-import { BASE_KEYFRAME_ID, clampKeyframeTime, normalizeKeyframes } from "@/utils/keyframes";
+import { BASE_KEYFRAME_ID, clampKeyframeTime, normalizeKeyframes } from "@/core/keyframes";
 import { runSplitAction } from "@/utils/splitAction";
 
-import type { AnimationSegment, TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
+import type { TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
 import AudioWaveform from "./audio/AudioWaveform.vue";
 import AudioVolumeLine from "./audio/AudioVolumeLine.vue";
 import { dBToLinear } from "@/utils/audio/audio-math";
@@ -102,80 +102,6 @@ const handleContextMenu = (e: MouseEvent, type: "track" | "clip" | "background",
     const clickTime = Math.max(0, (clickX / pixelsPerSecond.value) * 1000);
     contextMenu.show(e, "timeline-bg", { trackId, time: clickTime });
   }
-};
-
-// 计算动画片段的样式
-const getAnimationSegmentStyle = (clip: any, anim: AnimationSegment, index: number) => {
-  let startOffset = 0;
-
-  // Check if dragging or resizing this specific animation
-  const isDragging = isDraggingAnimation.value && draggedAnimationId.value === anim.id;
-  const isResizing = isResizingAnimation.value && resizingAnimationId.value === anim.id;
-
-  // Use temp state if active
-  const delay = isDragging && anim.type === "set" ? tempAnimationState.delay : anim.delay || 0;
-  const duration = isResizing ? tempAnimationState.duration : anim.duration;
-
-  if (anim.type === "set") {
-    startOffset = delay;
-  } else {
-    // For 'then', calculate start based on previous items
-    for (let i = 0; i < index; i++) {
-      const prev = clip.animations[i];
-      if (!prev) continue;
-
-      // If prev is being resized, use its temp duration
-      const prevDuration =
-        isResizingAnimation.value && resizingAnimationId.value === prev.id
-          ? tempAnimationState.duration
-          : prev.duration;
-      const prevDelay =
-        isDraggingAnimation.value && draggedAnimationId.value === prev.id && prev.type === "set"
-          ? tempAnimationState.delay
-          : prev.delay || 0;
-
-      // Check if prev is a 'then' block being dragged (inserting gap AFTER it? No, insert BEFORE it)
-      // If dragging prev (then block), it visually shifts right.
-      // Does it affect subsequent blocks? Yes, subsequent blocks shift right too.
-      const prevGap =
-        isDraggingAnimation.value && draggedAnimationId.value === prev.id && prev.type === "then"
-          ? tempAnimationState.delay
-          : 0;
-
-      startOffset += prevDuration + prevDelay + prevGap;
-    }
-
-    // If current block is 'then' and being dragged, add its own gap offset
-    if (isDragging && anim.type === "then") {
-      startOffset += tempAnimationState.delay;
-    }
-  }
-
-  const leftPercent = (startOffset / clip.duration) * 100;
-  const widthPercent = (duration / clip.duration) * 100;
-
-  // Colors
-  const bgColor = anim.type === "set" ? "var(--clip-text)" : "var(--clip-path)";
-  const borderColor = anim.type === "set" ? "var(--clip-text-border)" : "var(--clip-path-border)";
-
-  return {
-    left: `${leftPercent}%`,
-    width: `${widthPercent}%`,
-    height: "80%", // Fill most of the expanded row height
-    top: "10%",
-    backgroundColor: bgColor,
-    borderColor: borderColor,
-    borderWidth: "1px",
-    borderRadius: "3px",
-    zIndex: isDragging || isResizing ? 20 : 15
-  };
-};
-
-const handleAnimationClick = (clip: any, anim: AnimationSegment, e: MouseEvent) => {
-  e.stopPropagation();
-  timelineStore.setSelectedClip(clip.id);
-  timelineStore.setSelectedAnimation(anim.id);
-  danmuStore.select(clip.resourceId);
 };
 
 const TIMELINE_END_PADDING_MS = 10000;
@@ -546,7 +472,6 @@ const handleTimelineClick = (e: MouseEvent) => {
 
   // 点击空白区域取消选中
   timelineStore.setSelectedClip(null);
-  timelineStore.setSelectedAnimation(null);
   danmuStore.select(null);
 };
 
@@ -945,173 +870,6 @@ const stopDragKeyframe = () => {
   window.removeEventListener("mouseup", stopDragKeyframe);
 };
 
-// Animation Drag/Resize Logic
-const isDraggingAnimation = ref(false);
-const draggedAnimationId = ref<string | null>(null);
-const initialAnimationDelay = ref(0);
-const dragAnimStartX = ref(0);
-
-const isResizingAnimation = ref(false);
-const resizingAnimationId = ref<string | null>(null);
-const initialAnimationDuration = ref(0);
-const resizeAnimStartX = ref(0);
-
-const tempAnimationState = reactive({
-  delay: 0,
-  duration: 0
-});
-
-// Helper to find animation start time (offset) within clip
-const getAnimationStartOffset = (clip: any, anim: AnimationSegment, index: number) => {
-  let startOffset = 0;
-  if (anim.type === "set") {
-    startOffset = anim.delay || 0;
-  } else {
-    // 'then': cumulative
-    for (let i = 0; i < index; i++) {
-      const prev = clip.animations[i];
-      startOffset += prev.duration + (prev.delay || 0);
-    }
-  }
-  return startOffset;
-};
-
-const startDragAnimation = (e: MouseEvent, clip: any, anim: AnimationSegment) => {
-  if (e.button !== 0) return;
-  if ((e.target as HTMLElement).dataset.handle) return; // Ignore resize handle
-
-  e.stopPropagation();
-
-  timelineStore.setSelectedClip(clip.id);
-  timelineStore.setSelectedAnimation(anim.id);
-
-  isDraggingAnimation.value = true;
-  draggedAnimationId.value = anim.id;
-  dragAnimStartX.value = e.clientX;
-
-  // For 'set', we track absolute delay. For 'then', we track the *new gap* (delta).
-  if (anim.type === "set") {
-    initialAnimationDelay.value = anim.delay || 0;
-    tempAnimationState.delay = anim.delay || 0;
-  } else {
-    initialAnimationDelay.value = 0; // Represents gap
-    tempAnimationState.delay = 0;
-  }
-
-  document.body.style.cursor = "move";
-  window.addEventListener("mousemove", onDragAnimation);
-  window.addEventListener("mouseup", stopDragAnimation);
-};
-
-const onDragAnimation = (e: MouseEvent) => {
-  if (!isDraggingAnimation.value || !draggedAnimationId.value) return;
-
-  const deltaX = e.clientX - dragAnimStartX.value;
-  const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
-
-  // Determine type from selected animation
-  // Note: We need access to the animation object or type here.
-  // We can infer it or look it up.
-  // Simple way: check selectedAnimationId in store? Or just assume logic based on initialization.
-  // Let's look it up.
-  const clip = timelineStore.tracks
-    .find(t => t.clips.some(c => c.id === timelineStore.selectedClipId))
-    ?.clips.find(c => c.id === timelineStore.selectedClipId);
-  const anim = clip?.animations?.find(a => a.id === draggedAnimationId.value);
-
-  if (!anim) return;
-
-  if (anim.type === "set") {
-    let newDelay = initialAnimationDelay.value + deltaMs;
-    newDelay = Math.max(0, newDelay);
-    tempAnimationState.delay = newDelay;
-  } else {
-    // 'then': dragging right creates a gap
-    let gap = deltaMs; // initialAnimationDelay is 0
-    gap = Math.max(0, gap);
-    tempAnimationState.delay = gap;
-  }
-};
-
-const stopDragAnimation = () => {
-  if (isDraggingAnimation.value && draggedAnimationId.value && timelineStore.selectedClipId) {
-    const clip = timelineStore.tracks
-      .find(t => t.clips.some(c => c.id === timelineStore.selectedClipId))
-      ?.clips.find(c => c.id === timelineStore.selectedClipId);
-    const anim = clip?.animations?.find(a => a.id === draggedAnimationId.value);
-
-    if (clip && anim) {
-      if (anim.type === "set") {
-        timelineStore.updateClipAnimation(timelineStore.selectedClipId, draggedAnimationId.value, {
-          delay: tempAnimationState.delay
-        });
-      } else if (tempAnimationState.delay > 50) {
-        // Threshold to create gap
-        // Create 'gap' animation
-        const index = clip.animations!.findIndex(a => a.id === anim.id);
-        if (index !== -1) {
-          const gapAnim: AnimationSegment = {
-            id: `anim_${Date.now()}`,
-            type: "then",
-            duration: tempAnimationState.delay,
-            properties: {} // Empty properties = maintain state
-          };
-          timelineStore.insertClipAnimation(timelineStore.selectedClipId, index, gapAnim);
-        }
-      }
-    }
-  }
-  isDraggingAnimation.value = false;
-  draggedAnimationId.value = null;
-  document.body.style.cursor = "";
-  window.removeEventListener("mousemove", onDragAnimation);
-  window.removeEventListener("mouseup", stopDragAnimation);
-};
-
-const startResizeAnimation = (e: MouseEvent, clip: any, anim: AnimationSegment) => {
-  e.stopPropagation();
-  e.preventDefault();
-
-  timelineStore.setSelectedClip(clip.id);
-  timelineStore.setSelectedAnimation(anim.id);
-
-  isResizingAnimation.value = true;
-  resizingAnimationId.value = anim.id;
-  initialAnimationDuration.value = anim.duration;
-  resizeAnimStartX.value = e.clientX;
-
-  tempAnimationState.duration = anim.duration;
-
-  document.body.style.cursor = "e-resize";
-  window.addEventListener("mousemove", onResizeAnimation);
-  window.addEventListener("mouseup", stopResizeAnimation);
-};
-
-const onResizeAnimation = (e: MouseEvent) => {
-  if (!isResizingAnimation.value || !resizingAnimationId.value) return;
-
-  const deltaX = e.clientX - resizeAnimStartX.value;
-  const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
-
-  let newDuration = initialAnimationDuration.value + deltaMs;
-  newDuration = Math.max(100, newDuration); // Min 100ms
-
-  tempAnimationState.duration = newDuration;
-};
-
-const stopResizeAnimation = () => {
-  if (isResizingAnimation.value && resizingAnimationId.value && timelineStore.selectedClipId) {
-    timelineStore.updateClipAnimation(timelineStore.selectedClipId, resizingAnimationId.value, {
-      duration: tempAnimationState.duration
-    });
-  }
-  isResizingAnimation.value = false;
-  resizingAnimationId.value = null;
-  document.body.style.cursor = "";
-  window.removeEventListener("mousemove", onResizeAnimation);
-  window.removeEventListener("mouseup", stopResizeAnimation);
-};
-
 // Playhead 拖拽逻辑
 const isDraggingPlayhead = ref(false);
 
@@ -1184,9 +942,6 @@ const handleKeyDown = (e: KeyboardEvent) => {
       timelineStore.selectedClipId
     ) {
       timelineStore.removeClipKeyframe(timelineStore.selectedClipId, timelineStore.selectedKeyframeId);
-    } else if (timelineStore.selectedAnimationId && timelineStore.selectedClipId) {
-      timelineStore.removeClipAnimation(timelineStore.selectedClipId, timelineStore.selectedAnimationId);
-      timelineStore.selectedAnimationId = null;
     } else if (timelineStore.selectedClipId) {
       timelineStore.removeSelectedClips();
     }
@@ -1209,13 +964,9 @@ watch(
     isDraggingClip.value = false;
     isResizingClip.value = false;
     isDraggingKeyframe.value = false;
-    isDraggingAnimation.value = false;
-    isResizingAnimation.value = false;
     stopDragClip();
     stopResizeClip();
     stopDragKeyframe();
-    stopDragAnimation();
-    stopResizeAnimation();
     stopDragPlayhead();
     await nextTick();
     if (timelineContentRef.value) {

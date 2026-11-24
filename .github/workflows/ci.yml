@@ -35,6 +35,12 @@ jobs:
       - name: Type check and build renderer
         run: pnpm build:renderer
 
+      - name: Architecture boundary tests
+        run: pnpm test:architecture
+
+      - name: Compiler and BAS import tests
+        run: pnpm test:compiler
+
       - name: Storage tests
         run: pnpm test:storage
 

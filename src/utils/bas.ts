@@ -17,7 +17,9 @@ export type BasDanmakuObj = {
   duration?: number;
 };
 
-export type BasParseResult = { defs: any[]; sets: any[] };
+import type { BasParseResult } from "@/core/basImport";
+
+export type { BasParseResult };
 
 class VirtualClock {
   private baseMs = 0;

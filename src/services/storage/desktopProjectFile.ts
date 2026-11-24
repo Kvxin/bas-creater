@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { BasProjectData } from "@/types/storage";
-import { normalizeProjectData, serializeProjectData } from "./projectSchema";
+import { normalizeProjectData, serializeProjectData } from "@/core/projectSchema";
 export type DesktopProjectSession = { directory: string; contents: string; project: BasProjectData };
 
 /** Must be called directly from the user's click. */

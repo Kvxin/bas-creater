@@ -5,7 +5,7 @@ import { useAudioStore } from "@/stores/audio";
 import { useAssetsStore } from "@/stores/assets";
 import { useProjectHistory } from "@/composables/useProjectHistory";
 import type { AutoSaveStatus, BasProjectData, ProjectAsset, SerializedAudioMetadata } from "@/types/storage";
-import { normalizeProjectData, PROJECT_VERSION } from "@/services/storage/projectSchema";
+import { normalizeProjectData, PROJECT_VERSION } from "@/core/projectSchema";
 import {
   saveProjectDraft,
   loadProjectDraft,

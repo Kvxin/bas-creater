@@ -1,0 +1,41 @@
+{
+  "objects": [
+    {
+      "name": "obj_c1",
+      "resource": {
+        "type": "text",
+        "content": "late",
+        "opacity": 0,
+        "color": 16777215,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": 25,
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": "0%",
+        "y": "0%",
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 3500,
+      "keyframes": [
+        {
+          "id": "kf_0",
+          "timeMs": 1500,
+          "properties": {
+            "opacity": 0.8
+          },
+          "interpolation": "step"
+        }
+      ]
+    }
+  ],
+  "durationMs": 3500,
+  "warnings": []
+}

@@ -1,5 +1,4 @@
 import type {
-  AnimationSegment,
   TimelineClip,
   TimelineKeyframeProperties,
   TimelineTrack,
@@ -8,9 +7,9 @@ import type { AnyDanmu } from "@/types/danmu";
 import {
   normalizeKeyframes,
   pickKeyframePropertiesForResource,
-} from "@/utils/keyframes";
-import { isDanmuFieldBasDefault, resolveDanmuDefaults } from "@/utils/danmuDefaults";
-import { flattenTimelineClips } from "@/utils/timelineGroups";
+} from "@/core/keyframes";
+import { isDanmuFieldBasDefault, resolveDanmuDefaults } from "@/core/danmuDefaults";
+import { flattenTimelineClips } from "@/core/timelineGroups";
 
 const PERCENTAGE_VALUE_KEYS = new Set(["x", "y", "fontSize", "width", "height"]);
 
@@ -323,65 +322,6 @@ const compileKeyframesToBas = (
   return basCode;
 };
 
-const compileLegacyAnimationsToBas = (
-  clip: TimelineClip,
-  resource: AnyDanmu,
-  varName: string,
-  animations: AnimationSegment[]
-) => {
-  const targetAlpha = resource.opacity ?? 1;
-  let basCode = "";
-  let hasSerialRoot = false;
-
-  if (clip.startTime > 0) {
-    basCode += formatSetStatement("set", varName, {}, clip.startTime);
-    basCode += formatSetStatement("then set", varName, { opacity: targetAlpha }, 0);
-    hasSerialRoot = true;
-  }
-
-  animations.forEach((animation) => {
-    const allowed = new Set([...DEFINITION_FIELDS_BY_TYPE[resource.type], "content", "text", "d"]);
-    const unsupported = Object.keys(animation.properties).filter(key => !allowed.has(key) || key === "parentId");
-    if (unsupported.length) throw new Error(`Unsupported animation properties: ${unsupported.join(", ")}`);
-    const properties = animation.properties;
-    const absoluteDelay = Math.max(0, clip.startTime) + Math.max(0, animation.delay ?? 0);
-
-    if (animation.type === "set" && absoluteDelay > 0) {
-      basCode += formatSetStatement("set", varName, {}, absoluteDelay);
-      basCode += formatSetStatement(
-        "then set",
-        varName,
-        properties,
-        animation.duration
-      );
-      hasSerialRoot = true;
-      return;
-    }
-
-    if (animation.type === "set") {
-      basCode += formatSetStatement("set", varName, properties, animation.duration);
-      hasSerialRoot = true;
-      return;
-    }
-
-    const delay = Math.max(0, animation.delay ?? 0);
-    if (delay > 0) {
-      basCode += formatSetStatement(hasSerialRoot ? "then set" : "set", varName, {}, delay);
-      hasSerialRoot = true;
-    }
-
-    basCode += formatSetStatement(
-      hasSerialRoot ? "then set" : "set",
-      varName,
-      properties,
-      animation.duration
-    );
-    hasSerialRoot = true;
-  });
-
-  return basCode;
-};
-
 export const basNameForClip = (id: string) => {
   if (/^[A-Za-z0-9_]+$/.test(id) && !id.startsWith("encoded_")) return `obj_${id}`;
   // 保留编码前缀，避免特殊字符 ID 与普通 ID 生成同名对象。
@@ -391,20 +331,11 @@ export const basNameForClip = (id: string) => {
 const compileResolvedClip = (clip: TimelineClip, resource: AnyDanmu, varName: string): string => {
   if (clip.kind === "group") throw new Error("Cannot compile a group as a single clip");
   const keyframes = normalizeKeyframes(clip.keyframes, clip.duration);
-  const legacyAnimations = clip.animations ?? [];
-  if (keyframes.length > 0 && legacyAnimations.length > 0) {
-    throw new Error(`Clip ${clip.id} mixes keyframes and legacy animations`);
-  }
 
   let basCode = compileDanmuDefinition(resource, varName, clip.duration, clip.startTime);
 
   if (keyframes.length > 0) {
     basCode += compileKeyframesToBas(clip, resource, varName);
-    return basCode;
-  }
-
-  if (legacyAnimations.length > 0) {
-    basCode += compileLegacyAnimationsToBas(clip, resource, varName, legacyAnimations);
     return basCode;
   }
 

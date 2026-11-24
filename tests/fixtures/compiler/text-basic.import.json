@@ -1,0 +1,32 @@
+{
+  "objects": [
+    {
+      "name": "obj_c1",
+      "resource": {
+        "type": "text",
+        "content": "你好 BAS",
+        "opacity": 1,
+        "color": 16711680,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": "5%",
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 2,
+        "strokeColor": 0,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": "10%",
+        "y": "26.6667%",
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 3000,
+      "keyframes": []
+    }
+  ],
+  "durationMs": 3000,
+  "warnings": []
+}
