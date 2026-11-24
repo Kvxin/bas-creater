@@ -21,13 +21,15 @@ export type LegacyAnimationSegment = {
  * @param clipId 片段 ID，用于错误信息
  * @param resource 已合并片段 overrides 的资源
  * @param animations 旧动画段
+ * @param clipDurationMs 片段时长；旧对象在片段结束时消失，超出部分会被截断
  * @returns 关键帧，以及需要并入片段 overrides 的初值（不可动画属性只在 0 时刻设置一次时）
  * @throws 当动画修改了关键帧无法表达的属性时抛出错误
  */
 export const convertLegacyAnimations = (
   clipId: string,
   resource: AnyDanmu,
-  animations: LegacyAnimationSegment[]
+  animations: LegacyAnimationSegment[],
+  clipDurationMs: number
 ): { keyframes: TimelineKeyframe[]; overrides: Partial<AnyDanmu> } => {
   const segments: BasSegment[] = [];
   let cursorMs = 0;
@@ -38,6 +40,13 @@ export const convertLegacyAnimations = (
     cursorMs = endMs;
   }
 
+  const allowedKeys = new Set<string>(ANIMATABLE_KEYS_BY_TYPE[resource.type]);
+  // 不可动画属性只能作为初值并入 overrides，带时长的渐变无法无损表达。
+  for (const segment of segments) {
+    const tweened = segment.endMs > segment.startMs && Object.keys(segment.attrs).find((key) => !allowedKeys.has(key));
+    if (tweened) throw new Error(`Clip ${clipId} animates "${tweened}" in a legacy animation, which keyframes cannot represent`);
+  }
+
   const initial: Record<string, unknown> = { ...resolveDanmuDefaults(resource) };
   const working = { ...initial };
   const warnings: BasImportWarning[] = [];
@@ -45,10 +54,11 @@ export const convertLegacyAnimations = (
     name: clipId,
     resource: working,
     segments,
-    allowedKeys: new Set<string>(ANIMATABLE_KEYS_BY_TYPE[resource.type]),
+    allowedKeys,
     warnings,
     readAttribute: (key, value) => ({ key, value: value ?? null }),
-    unifyPercentUnits: false
+    unifyPercentUnits: false,
+    untilMs: clipDurationMs
   });
   const unsupported = warnings.find((warning) => warning.code === "unsupportedAnimation");
   if (unsupported) {

@@ -96,3 +96,40 @@ test("v4 projects can no longer contain legacy animations", () => {
   const project = normalizeProjectData(source);
   assert.equal("animations" in project.tracks[0]!.clips[0]!, false);
 });
+
+const migrateClip = (danmu: { id: string; type: string; [key: string]: unknown }, duration: number, animations: unknown[]) => {
+  const clip = normalizeProjectData(toV3Project({ danmu, duration, animations })).tracks[0]!.clips[0]!;
+  assert.ok(clip.kind === "resource");
+  return clip.keyframes?.map((keyframe) => [keyframe.timeMs, keyframe.properties, keyframe.interpolation]);
+};
+
+test("a content change during a move does not freeze the move", () => {
+  assert.deepEqual(
+    migrateClip({ id: "t1", type: "text", content: "a" }, 2000, [
+      { id: "a1", type: "set", duration: 1000, properties: { x: 100 } },
+      { id: "a2", type: "set", duration: 0, delay: 500, properties: { content: "b" } }
+    ]),
+    [
+      [0, { x: 0, content: "a" }, "linear"],
+      [500, { x: 50, content: "b" }, "linear"],
+      [1000, { x: 100, content: "b" }, "linear"]
+    ]
+  );
+});
+
+test("tweens running past the clip end are cut at the clip end instead of being compressed", () => {
+  assert.deepEqual(
+    migrateClip({ id: "t1", type: "text" }, 500, [{ id: "a1", type: "set", duration: 1000, properties: { x: 100 } }]),
+    [
+      [0, { x: 0 }, "linear"],
+      [500, { x: 50 }, "linear"]
+    ]
+  );
+});
+
+test("tweening a non-animatable property is rejected instead of becoming a static value", () => {
+  assert.throws(
+    () => migrateClip({ id: "t1", type: "text" }, 2000, [{ id: "a1", type: "set", duration: 1000, properties: { zIndex: 5 } }]),
+    /zIndex/
+  );
+});

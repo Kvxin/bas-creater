@@ -500,11 +500,11 @@ const isStepBoundary = (timeMs: number, segments: ResolvedSegment[]): boolean =>
   );
   if (!instantChange) return false;
 
-  // 同一时刻还有连续动画收尾时保持 linear，否则该动画会在终点突然跳变。
-  const continuousEnd = segments.some(
-    segment => segment.endMs === timeMs && segment.endMs > segment.startMs && !segment.instant
+  // 同一时刻还有连续动画进行中或收尾时保持 linear，否则该动画会被 step 冻结到这一帧再跳变。
+  const continuousActive = segments.some(
+    segment => !segment.instant && segment.startMs < timeMs && segment.endMs >= timeMs
   );
-  return !continuousEnd;
+  return !continuousActive;
 };
 
 /** 把段内属性转成编辑器字段；返回 null 表示该属性不参与关键帧合并，value 为 null 表示值无法识别。 */
@@ -525,6 +525,8 @@ export type BuildKeyframesParams = {
   readAttribute?: SegmentAttributeReader;
   /** 同一属性混用数值和百分比时，是否把整条时间线（含资源初值）统一成百分比。 */
   unifyPercentUnits?: boolean;
+  /** 超出该时刻的关键帧会被截掉，并在该时刻补一帧采样值。 */
+  untilMs?: number;
 };
 
 /**
@@ -614,7 +616,13 @@ export const buildKeyframesFromSegments = (params: BuildKeyframesParams) => {
     });
   }
 
-  const keyframes: TimelineKeyframe[] = collectKeyframeTimes(flat).map(timeMs => {
+  const allTimes = collectKeyframeTimes(flat);
+  const { untilMs } = params;
+  const sampleTimes =
+    untilMs !== undefined && allTimes.some(time => time > untilMs)
+      ? [...allTimes.filter(time => time < untilMs), untilMs]
+      : allTimes;
+  const keyframes: TimelineKeyframe[] = sampleTimes.map(timeMs => {
     const properties: TimelineKeyframeProperties = {};
     for (const [key, list] of grouped) {
       const value = resolvePropertyValue(list, key, timeMs, initialValue(key));

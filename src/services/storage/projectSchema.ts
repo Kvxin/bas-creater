@@ -208,7 +208,7 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
     if (legacy.animations.length > 0) {
       const source = data.danmus.find((item) => item.id === clip.resourceId)!;
       const resource = { ...source, ...clip.overrides, id: source.id, type: source.type } as typeof source;
-      const converted = convertLegacyAnimations(clip.id, resource, legacy.animations);
+      const converted = convertLegacyAnimations(clip.id, resource, legacy.animations, clip.duration);
       clip.keyframes = converted.keyframes;
       if (Object.keys(converted.overrides).length > 0) clip.overrides = { ...clip.overrides, ...converted.overrides };
     }
