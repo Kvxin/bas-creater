@@ -4,8 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import type { AnyDanmu } from "../src/types/danmu";
 import type { TimelineTrack } from "../src/types/timeline";
-import { convertParsedBas } from "../src/utils/basImport";
-import { compileTimelineToBas } from "../src/utils/compiler";
+import { convertParsedBas } from "../src/core/basImport";
+import { compileTimelineToBas } from "../src/core/compiler";
 import { parseBas } from "./helpers/basParser";
 import { assertGolden, stabilizeImport, toGoldenJson } from "./helpers/golden";
 

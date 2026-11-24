@@ -13,8 +13,8 @@ import { Label } from '@/components/ui/label'
 import { useClipDetailsStore } from '@/stores/clipDetails'
 import { useTimelineStore } from '@/stores/timeline'
 import { useDanmuStore } from '@/stores/danmu'
-import { compileClipToBas } from '@/utils/compiler'
-import { resolveDanmuDefaults } from '@/utils/danmuDefaults'
+import { compileClipToBas } from '@/core/compiler'
+import { resolveDanmuDefaults } from '@/core/danmuDefaults'
 
 const { t } = useI18n()
 

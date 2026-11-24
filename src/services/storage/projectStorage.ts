@@ -4,7 +4,7 @@ import { listBrowserBackups, readBrowserBackup } from "./browserBackups";
 import type { AudioResource } from "@/types/resource";
 import type { BasProjectData, ProjectAsset } from "@/types/storage";
 import { createDesktopProject, openDesktopProject, saveDesktopProject, readDesktopAudio, deleteDesktopProjectFile, projectFileName, type DesktopProjectSession } from "./desktopProjectFile";
-import { normalizeProjectData, serializeProjectData, PROJECT_VERSION } from "./projectSchema";
+import { normalizeProjectData, serializeProjectData, PROJECT_VERSION } from "@/core/projectSchema";
 import { isDesktopApp, saveTextFile } from "@/utils/desktop";
 import { browserProjectHasChanged, browserProjectSupportDirectory, createBrowserProject, deleteBrowserProjectFile, findBrowserProjectFile, ensureDirectoryPermission, openBrowserProject, pickProjectDirectory, restoreBrowserProjectFile, saveBrowserProject, type BrowserProjectFile } from "./browserProjectFile";
 import { deleteBrowserProjectHandle, loadBrowserProjectHandles, saveBrowserProjectHandle } from "./browserProjectHandles";

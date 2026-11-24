@@ -19,7 +19,7 @@ import basService, { parseBasDSL } from "@/utils/bas";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { useAudioStore } from "@/stores/audio";
-import { basNameForClip, compileTimelineToBas, formatBasParseError } from "@/utils/compiler";
+import { basNameForClip, compileTimelineToBas, formatBasParseError } from "@/core/compiler";
 import { getAudioEngine } from "@/utils/audio/audio-engine";
 import { measurePreviewPaint, startPreviewMeasurement } from "@/utils/previewPerformance";
 import TransformControls from "./controls/TransformControls.vue";
@@ -30,7 +30,7 @@ import {
   clampKeyframeTime,
   getEffectiveDanmuAtTime,
   pickKeyframePropertiesForResource
-} from "@/utils/keyframes";
+} from "@/core/keyframes";
 
 const { t } = useI18n();
 

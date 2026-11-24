@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeProjectData } from "../src/services/storage/projectSchema";
+import { normalizeProjectData } from "../src/core/projectSchema";
 
 const legacy = () => ({
   version: 2,

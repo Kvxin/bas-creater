@@ -7,9 +7,9 @@ import type { AnyDanmu } from "@/types/danmu";
 import {
   normalizeKeyframes,
   pickKeyframePropertiesForResource,
-} from "@/utils/keyframes";
-import { isDanmuFieldBasDefault, resolveDanmuDefaults } from "@/utils/danmuDefaults";
-import { flattenTimelineClips } from "@/utils/timelineGroups";
+} from "@/core/keyframes";
+import { isDanmuFieldBasDefault, resolveDanmuDefaults } from "@/core/danmuDefaults";
+import { flattenTimelineClips } from "@/core/timelineGroups";
 
 const PERCENTAGE_VALUE_KEYS = new Set(["x", "y", "fontSize", "width", "height"]);
 

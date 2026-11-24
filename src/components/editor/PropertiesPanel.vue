@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { isCoordinateField } from "@/utils/coordinates";
+import { isCoordinateField } from "@/core/coordinates";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Settings, Plus, Trash2, FileText, Move, Palette, Sparkles, Music2, Volume2 } from "lucide-vue-next";
@@ -15,8 +15,8 @@ import type { AnyDanmu } from "@/types/danmu";
 import type { TimelineKeyframeProperties } from "@/types/timeline";
 import { VOLUME_DB_MIN, VOLUME_DB_MAX, VOLUME_STEP } from "@/utils/audio/constants";
 import { formatNumberForDisplay } from "@/utils/audio/audio-math";
-import { resolveDanmuDefaults } from "@/utils/danmuDefaults";
-import { flattenTimelineClips } from "@/utils/timelineGroups";
+import { resolveDanmuDefaults } from "@/core/danmuDefaults";
+import { flattenTimelineClips } from "@/core/timelineGroups";
 import {
   BASE_KEYFRAME_ID,
   clampKeyframeTime,
@@ -26,7 +26,7 @@ import {
   normalizeKeyframes,
   pickKeyframePropertiesForResource,
   resolveKeyframeProperties
-} from "@/utils/keyframes";
+} from "@/core/keyframes";
 
 const { t } = useI18n();
 

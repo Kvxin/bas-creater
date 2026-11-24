@@ -1,7 +1,7 @@
 import test from "node:test";
 import fs from "node:fs";
 import path from "node:path";
-import { convertParsedBas } from "../src/utils/basImport";
+import { convertParsedBas } from "../src/core/basImport";
 import { parseBas } from "./helpers/basParser";
 import { assertGolden, stabilizeImport, toGoldenJson } from "./helpers/golden";
 

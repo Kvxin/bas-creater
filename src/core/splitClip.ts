@@ -6,8 +6,8 @@ import {
   getEffectiveKeyframePropertiesAtTime,
   normalizeKeyframes,
   resolveKeyframeProperties
-} from "@/utils/keyframes";
-import type { KeyframeReferenceSize } from "@/utils/keyframes";
+} from "@/core/keyframes";
+import type { KeyframeReferenceSize } from "@/core/keyframes";
 
 /** Slice keyframe data without changing the resource shared by other clips. */
 export function splitClipAnimation(clip: TimelineResourceClip, resource: AnyDanmu, offsetMs: number, reference?: KeyframeReferenceSize) {

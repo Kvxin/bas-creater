@@ -8,8 +8,8 @@ import {
   decodeBasText,
   formatStartTimeInput,
   parseStartTimeInput
-} from "../src/utils/basImport";
-import { compileClipToBas } from "../src/utils/compiler";
+} from "../src/core/basImport";
+import { compileClipToBas } from "../src/core/compiler";
 
 /**
  * 这些 fixture 直接取自 public/bas.js 解析真实源码后的输出形状：

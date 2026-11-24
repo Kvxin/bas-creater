@@ -22,7 +22,7 @@ import {
   parseStartTimeInput,
   type BasImportResult,
   type BasImportWarning
-} from "@/utils/basImport";
+} from "@/core/basImport";
 import { formatTime } from "@/utils/timeline";
 
 const { t } = useI18n();

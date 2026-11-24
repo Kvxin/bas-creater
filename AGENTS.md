@@ -14,7 +14,8 @@
 - 可复用的 Vue 组件放在 `src/components`。
 - Pinia store 放在 `src/stores`。
 - 组合式函数放在 `src/composables`。
-- 共享辅助函数和类型放在 `src/utils` 与 `src/types`。
+- 领域核心（工程 schema 与迁移、编译器、BAS 导入、关键帧、默认值、坐标、时间轴纯函数）放在 `src/core`。`src/core` 只能依赖 `src/core` 与 `src/types`，不得引用 Vue、Pinia、i18n、store、组件、浏览器全局对象或 Tauri；需要本地化的文字由调用方传入。该约束由 `pnpm test:architecture` 校验。
+- 其余共享辅助函数放在 `src/utils`，纯类型放在 `src/types`（`src/types` 只能依赖自身）。
 - 浏览器持久化逻辑放在 `src/services/storage`。
 - 本地化消息放在 `src/i18n/messages`。
 - 静态文件放在 `public/`。
@@ -85,7 +86,7 @@ pnpm preview         # 在本地提供前端构建结果预览
 ## 配置与数据说明
 
 - 项目保存在用户选择的文件夹中；桌面端引用音频绝对路径，Web 端将音频复制到项目文件夹。近期项目元信息保存在 localStorage，不持久化浏览器文件句柄。
-- 弹幕位置 `x` / `y` 只保存百分比字符串（如 `"12.5%"`），不允许写入像素值；旧工程与 BAS 导入中的数值坐标统一经 `src/utils/coordinates.ts` 按画布尺寸换算。
+- 弹幕位置 `x` / `y` 只保存百分比字符串（如 `"12.5%"`），不允许写入像素值；旧工程与 BAS 导入中的数值坐标统一经 `src/core/coordinates.ts` 按画布尺寸换算。
 - 不要提交用户媒体、生成的构建文件、本地密钥或其他敏感信息。
 - 修改依赖时保留 `pnpm-lock.yaml`。
 - 编辑 `vite.config.ts` 或部署工作流时，确认 GitHub Pages 的构建路径（`/bas-creater/`）与 Tauri 构建路径（`/`）均正确。

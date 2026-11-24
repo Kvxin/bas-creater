@@ -1,9 +1,8 @@
-import { DEFAULT_COORDINATE_REFERENCE, isCoordinateField, toPercentCoordinate } from "@/utils/coordinates";
-import type { CoordinateReferenceSize } from "@/utils/coordinates";
+import { DEFAULT_COORDINATE_REFERENCE, isCoordinateField, toPercentCoordinate } from "@/core/coordinates";
+import type { CoordinateReferenceSize } from "@/core/coordinates";
 import type { AnyDanmu, ButtonDanmu, DanmuType } from "@/types/danmu";
-import type { BasParseResult } from "@/utils/bas";
 import type { TimelineKeyframe, TimelineKeyframeProperties } from "@/types/timeline";
-import { ANIMATABLE_KEYS_BY_TYPE, createKeyframeId } from "@/utils/keyframes";
+import { ANIMATABLE_KEYS_BY_TYPE, createKeyframeId } from "@/core/keyframes";
 
 /**
  * BAS 导入：把 `parseBasDSL` 的输出转换成时间轴可用的弹幕资源、片段时长与关键帧。
@@ -88,6 +87,9 @@ const FALLBACK_INITIAL_VALUES: Record<string, number | string> = {
 
 /** 弹幕资源载荷（去掉 id，交给 danmu store 生成）。 */
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
+
+/** bas.js 解析器输出的原始结构。 */
+export type BasParseResult = { defs: any[]; sets: any[] };
 
 export type BasImportResource = DistributiveOmit<AnyDanmu, "id">;
 
