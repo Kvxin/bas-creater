@@ -12,14 +12,14 @@ import type {
 } from "@/types/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
-import type { BasImportObject } from "@/utils/basImport";
+import type { BasImportObject } from "@/core/basImport";
 import { useAudioStore } from "@/stores/audio";
 import { i18n } from "@/i18n";
 import { getItemName } from "@/utils/resourceUtils";
 import { useDanmuStore } from "@/stores/danmu";
-import { compileTimelineToBas } from "@/utils/compiler";
-import { splitClipAnimation } from "@/utils/splitClip";
-import { createTimelineId, getTimelineDuration, updateGroupDurations, visitTimelineClips } from "@/utils/timelineGroups";
+import { compileTimelineToBas } from "@/core/compiler";
+import { splitClipAnimation } from "@/core/splitClip";
+import { createTimelineId, getTimelineDuration, updateGroupDurations, visitTimelineClips } from "@/core/timelineGroups";
 import {
   BASE_KEYFRAME_ID,
   KEYFRAME_TOLERANCE_MS,
@@ -27,7 +27,7 @@ import {
   createKeyframeId,
   normalizeKeyframes,
   pickKeyframeProperties,
-} from "@/utils/keyframes";
+} from "@/core/keyframes";
 
 export const useTimelineStore = defineStore("timeline", () => {
   // 默认轨道名是真实数据：创建时按当前语言生成快照，切换语言不会重写已有轨道名。

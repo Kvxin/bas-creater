@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { normalizeProjectData } from "../src/services/storage/projectSchema";
-import { compileTimelineToBas } from "../src/utils/compiler";
+import { normalizeProjectData } from "../src/core/projectSchema";
+import { compileTimelineToBas } from "../src/core/compiler";
 import { parseBas } from "./helpers/basParser";
-import { isCoordinateField, toPercentCoordinate } from "../src/utils/coordinates";
+import { isCoordinateField, toPercentCoordinate } from "../src/core/coordinates";
 
 const fixtureDir = path.join(import.meta.dirname, "fixtures/migration");
 const fixtures = fs

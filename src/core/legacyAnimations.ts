@@ -1,9 +1,9 @@
 import type { AnyDanmu } from "@/types/danmu";
 import type { TimelineKeyframe } from "@/types/timeline";
-import { buildKeyframesFromSegments } from "@/utils/basImport";
-import type { BasImportWarning, BasSegment } from "@/utils/basImport";
-import { resolveDanmuDefaults } from "@/utils/danmuDefaults";
-import { ANIMATABLE_KEYS_BY_TYPE } from "@/utils/keyframes";
+import { buildKeyframesFromSegments } from "@/core/basImport";
+import type { BasImportWarning, BasSegment } from "@/core/basImport";
+import { resolveDanmuDefaults } from "@/core/danmuDefaults";
+import { ANIMATABLE_KEYS_BY_TYPE } from "@/core/keyframes";
 
 /** v3 及更早工程中的 set/then 动画段，只在读取旧工程时出现，加载后会迁移为关键帧。 */
 export type LegacyAnimationSegment = {

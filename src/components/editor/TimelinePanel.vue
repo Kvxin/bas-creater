@@ -31,7 +31,7 @@ import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { useAudioStore } from "@/stores/audio";
 import { useContextMenuStore } from "@/stores/contextMenu";
-import { BASE_KEYFRAME_ID, clampKeyframeTime, normalizeKeyframes } from "@/utils/keyframes";
+import { BASE_KEYFRAME_ID, clampKeyframeTime, normalizeKeyframes } from "@/core/keyframes";
 import { runSplitAction } from "@/utils/splitAction";
 
 import type { TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";

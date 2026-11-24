@@ -1,9 +1,9 @@
 import type { BasProjectData } from "@/types/storage";
 import type { TimelineClip, TimelineTrack } from "@/types/timeline";
-import { updateGroupDurations } from "@/utils/timelineGroups";
-import { convertLegacyAnimations } from "@/utils/legacyAnimations";
-import { normalizeCoordinates } from "@/utils/coordinates";
-import type { LegacyAnimationSegment } from "@/utils/legacyAnimations";
+import { updateGroupDurations } from "@/core/timelineGroups";
+import { convertLegacyAnimations } from "@/core/legacyAnimations";
+import { normalizeCoordinates } from "@/core/coordinates";
+import type { LegacyAnimationSegment } from "@/core/legacyAnimations";
 
 export const PROJECT_VERSION = 4;
 

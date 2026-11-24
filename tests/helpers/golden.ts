@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import type { BasImportResult } from "../../src/utils/basImport";
+import type { BasImportResult } from "../../src/core/basImport";
 
 const shouldUpdate = process.env.UPDATE_GOLDEN === "1";
 

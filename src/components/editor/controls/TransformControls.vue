@@ -4,7 +4,7 @@ import type { CSSProperties } from 'vue'
 import type { AnyDanmu } from '@/types/danmu'
 import { useI18n } from 'vue-i18n'
 import { RotateCw } from "lucide-vue-next";
-import { basNameForClip } from '@/utils/compiler'
+import { basNameForClip } from '@/core/compiler'
 import { useTimelineStore } from '@/stores/timeline'
 
 const { t } = useI18n()
