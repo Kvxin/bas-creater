@@ -1,0 +1,59 @@
+{
+  "objects": [
+    {
+      "name": "obj_cparent",
+      "resource": {
+        "type": "text",
+        "content": "父",
+        "opacity": 1,
+        "color": 16777215,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": 25,
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": 300,
+        "y": 200,
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 4000,
+      "keyframes": []
+    },
+    {
+      "name": "obj_cchild",
+      "resource": {
+        "type": "text",
+        "content": "子",
+        "opacity": 1,
+        "color": 16777215,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": 25,
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": 0.1,
+        "y": 0.2,
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 4000,
+      "keyframes": [],
+      "parentName": "obj_cparent"
+    }
+  ],
+  "durationMs": 4000,
+  "warnings": []
+}

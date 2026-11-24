@@ -1,0 +1,20 @@
+{
+  "danmus": [
+    { "id": "b1", "type": "button", "text": "点我", "x": "50%", "y": "80%", "fillColor": 16752800, "fillAlpha": 0.6,
+      "target": { "av": { "av": 170001, "page": 2, "timeMs": 12500 } } },
+    { "id": "p1", "type": "path", "d": "M0 0 L100 0 L100 100 Z", "viewBox": "0 0 100 100", "width": "20%", "height": 80,
+      "borderWidth": 2, "borderColor": 255, "fillColor": 16777215, "fillAlpha": 0.3 }
+  ],
+  "tracks": [
+    { "id": "track_1", "name": "Track 1", "visible": true, "locked": false, "clips": [
+      { "id": "cb", "kind": "resource", "resourceId": "b1", "trackId": "track_1", "startTime": 0, "duration": 5000,
+        "keyframes": [
+          { "id": "k0", "timeMs": 0, "properties": { "x": "50%" } },
+          { "id": "k1", "timeMs": 1000, "properties": { "x": "60%", "text": "再点" } }
+        ] }
+    ] },
+    { "id": "track_2", "name": "Track 2", "visible": true, "locked": false, "clips": [
+      { "id": "cp", "kind": "resource", "resourceId": "p1", "trackId": "track_2", "startTime": 2000, "duration": 1000 }
+    ] }
+  ]
+}

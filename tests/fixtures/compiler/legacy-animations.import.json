@@ -1,0 +1,93 @@
+{
+  "objects": [
+    {
+      "name": "obj_c1",
+      "resource": {
+        "type": "text",
+        "content": "legacy",
+        "opacity": 1,
+        "color": 16777215,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": 25,
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": 0,
+        "y": 0,
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 4000,
+      "keyframes": [
+        {
+          "id": "kf_0",
+          "timeMs": 0,
+          "properties": {
+            "x": 0,
+            "opacity": 1,
+            "scale": 1
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_1",
+          "timeMs": 1000,
+          "properties": {
+            "x": 100,
+            "opacity": 1,
+            "scale": 1
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_2",
+          "timeMs": 1250,
+          "properties": {
+            "x": 100,
+            "opacity": 1,
+            "scale": 1
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_3",
+          "timeMs": 1750,
+          "properties": {
+            "x": 100,
+            "opacity": 0,
+            "scale": 1
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_4",
+          "timeMs": 2000,
+          "properties": {
+            "x": 100,
+            "opacity": 0,
+            "scale": 1
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_5",
+          "timeMs": 2800,
+          "properties": {
+            "x": 100,
+            "opacity": 0,
+            "scale": 2
+          },
+          "interpolation": "linear"
+        }
+      ]
+    }
+  ],
+  "durationMs": 4000,
+  "warnings": []
+}

@@ -1,0 +1,58 @@
+{
+  "objects": [
+    {
+      "name": "obj_zero",
+      "resource": {
+        "type": "text",
+        "content": "say \"hi\"\\\nnext\tline",
+        "opacity": 1,
+        "color": 11189196,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": 25,
+        "fontFamily": "SimHei",
+        "bold": 0,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": 0,
+        "y": 0,
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 4000,
+      "keyframes": []
+    },
+    {
+      "name": "obj_encoded_63_6c_69_70_2d_77_69_74_68_2d_64_61_73_68",
+      "resource": {
+        "type": "text",
+        "content": "special id",
+        "opacity": 1,
+        "color": 16777215,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": 25,
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": 0,
+        "y": 0,
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 1000,
+      "keyframes": []
+    }
+  ],
+  "durationMs": 4000,
+  "warnings": []
+}

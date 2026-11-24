@@ -1,0 +1,17 @@
+{
+  "danmus": [
+    { "id": "t1", "type": "text", "content": "a", "x": 0, "y": 0 }
+  ],
+  "tracks": [
+    { "id": "track_1", "name": "Track 1", "visible": true, "locked": false, "clips": [
+      { "id": "c1", "kind": "resource", "resourceId": "t1", "trackId": "track_1", "startTime": 500, "duration": 4000,
+        "overrides": { "color": 65280 },
+        "keyframes": [
+          { "id": "k0", "timeMs": 0, "properties": { "x": 0, "opacity": 1, "scale": 1 } },
+          { "id": "k1", "timeMs": 1000, "properties": { "x": 200, "opacity": 0.5, "scale": 2 } },
+          { "id": "k2", "timeMs": 2000, "properties": { "content": "b", "fontSize": 40 }, "interpolation": "step" },
+          { "id": "k3", "timeMs": 3500, "properties": { "x": 100, "content": "c", "rotateZ": 90 } }
+        ] }
+    ] }
+  ]
+}
