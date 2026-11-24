@@ -1,0 +1,205 @@
+{
+  "objects": [
+    {
+      "name": "c",
+      "resource": {
+        "type": "text",
+        "content": "bilibili",
+        "opacity": 1,
+        "color": 16777215,
+        "anchorX": 0.5,
+        "anchorY": 0.5,
+        "fontSize": "10%",
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": "50%",
+        "y": "50%",
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 5000,
+      "keyframes": [
+        {
+          "id": "kf_0",
+          "timeMs": 2000,
+          "properties": {
+            "content": "干杯"
+          },
+          "interpolation": "step"
+        },
+        {
+          "id": "kf_1",
+          "timeMs": 5000,
+          "properties": {
+            "content": "干杯"
+          },
+          "interpolation": "linear"
+        }
+      ]
+    },
+    {
+      "name": "p",
+      "resource": {
+        "type": "text",
+        "content": "parallel",
+        "opacity": 0.5,
+        "color": 16777215,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": 25,
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": "0%",
+        "y": 0,
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 4000,
+      "keyframes": [
+        {
+          "id": "kf_0",
+          "timeMs": 0,
+          "properties": {
+            "x": "0%",
+            "opacity": 0.5,
+            "rotateZ": 0
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_1",
+          "timeMs": 100,
+          "properties": {
+            "x": "0.511%",
+            "opacity": 0.525,
+            "rotateZ": 9
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_2",
+          "timeMs": 200,
+          "properties": {
+            "x": "1.868%",
+            "opacity": 0.55,
+            "rotateZ": 18
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_3",
+          "timeMs": 300,
+          "properties": {
+            "x": "3.887%",
+            "opacity": 0.575,
+            "rotateZ": 27
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_4",
+          "timeMs": 400,
+          "properties": {
+            "x": "6.443%",
+            "opacity": 0.6,
+            "rotateZ": 36
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_5",
+          "timeMs": 500,
+          "properties": {
+            "x": "9.461%",
+            "opacity": 0.625,
+            "rotateZ": 45
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_6",
+          "timeMs": 600,
+          "properties": {
+            "x": "12.875%",
+            "opacity": 0.65,
+            "rotateZ": 54
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_7",
+          "timeMs": 700,
+          "properties": {
+            "x": "16.645%",
+            "opacity": 0.675,
+            "rotateZ": 63
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_8",
+          "timeMs": 800,
+          "properties": {
+            "x": "20.746%",
+            "opacity": 0.7,
+            "rotateZ": 72
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_9",
+          "timeMs": 900,
+          "properties": {
+            "x": "25.183%",
+            "opacity": 0.725,
+            "rotateZ": 81
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_10",
+          "timeMs": 1000,
+          "properties": {
+            "x": "30%",
+            "opacity": 0.75,
+            "rotateZ": 90
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_11",
+          "timeMs": 2000,
+          "properties": {
+            "x": "30%",
+            "opacity": 1,
+            "rotateZ": 180
+          },
+          "interpolation": "linear"
+        }
+      ]
+    }
+  ],
+  "durationMs": 5000,
+  "warnings": [
+    {
+      "code": "easingApproximated",
+      "params": {
+        "object": "p",
+        "property": "x",
+        "easing": "ease-in"
+      }
+    }
+  ]
+}

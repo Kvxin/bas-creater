@@ -1,0 +1,10 @@
+{
+  "danmus": [
+    { "id": "t1", "type": "text", "content": "你好 BAS", "x": "10%", "y": 120, "fontSize": "5%", "color": 16711680, "strokeWidth": 2, "strokeColor": 0 }
+  ],
+  "tracks": [
+    { "id": "track_1", "name": "Track 1", "visible": true, "locked": false, "clips": [
+      { "id": "c1", "kind": "resource", "resourceId": "t1", "trackId": "track_1", "startTime": 0, "duration": 3000 }
+    ] }
+  ]
+}

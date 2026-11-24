@@ -70,6 +70,7 @@ pnpm preview         # 在本地提供前端构建结果预览
 - 测试应覆盖用户可见的编辑器行为，例如加载工作区、主题切换、时间轴交互和资源处理。
 - 提交前运行 `pnpm type-check` 和 `pnpm build:renderer`；涉及 Rust 端时同时运行 `cargo clippy`。如果项目已经配置单元测试命令，也应一并运行。
 - 单独运行的浏览器检查应记录在拉取请求中。
+- 编译器与 BAS 导入使用 golden 测试（`pnpm test:compiler`，fixture 位于 `tests/fixtures/`），并用真实 `public/bas.js` 解析器校验编译输出；有意修改输出时用 `UPDATE_GOLDEN=1 pnpm test:compiler` 刷新快照，并在 PR 中审阅 golden diff。
 - 当前没有强制的覆盖率阈值。
 - 单元测试可以使用必要的 mock 隔离浏览器 API、存储 API 或外部模块，但不得用 mock 掩盖真实的实现错误。
 - 测试应验证实际行为，不要添加仅用于通过测试的 workaround。

@@ -18,6 +18,7 @@
     "type-check": "vue-tsc --build",
     "test:updater": "node --import tsx --test tests/updater-manifest.test.mjs tests/app-update.test.ts",
     "test:window-controls": "node --import tsx --test tests/window-preferences.test.ts",
+    "test:compiler": "node --import tsx --test tests/compiler-golden.test.ts tests/bas-import-golden.test.ts tests/bas-import.test.ts",
     "test:storage": "node --import tsx --test tests/browser-project-file.test.ts tests/folder-project-storage.test.ts tests/desktop-recent-projects.test.ts tests/project-asset-migration.test.ts tests/clip-instances.test.ts tests/audio-clip.test.ts tests/asset-bins.test.ts"
   },
   "dependencies": {

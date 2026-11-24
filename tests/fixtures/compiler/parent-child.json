@@ -1,0 +1,14 @@
+{
+  "danmus": [
+    { "id": "parent", "type": "text", "content": "父", "x": 300, "y": 200 },
+    { "id": "child", "type": "text", "content": "子", "x": 0.1, "y": 0.2 }
+  ],
+  "tracks": [
+    { "id": "track_1", "name": "Track 1", "visible": true, "locked": false, "clips": [
+      { "id": "cparent", "kind": "resource", "resourceId": "parent", "trackId": "track_1", "startTime": 0, "duration": 4000 }
+    ] },
+    { "id": "track_2", "name": "Track 2", "visible": true, "locked": false, "clips": [
+      { "id": "cchild", "kind": "resource", "resourceId": "child", "trackId": "track_2", "startTime": 0, "duration": 4000, "parentClipId": "cparent" }
+    ] }
+  ]
+}
