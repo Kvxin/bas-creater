@@ -5,7 +5,6 @@ import { useDanmuStore } from "@/stores/danmu";
 import { useAudioStore } from "@/stores/audio";
 import { useTimelineStore } from "@/stores/timeline";
 import type { ProjectAsset, ProjectBin } from "@/types/storage";
-import type { AnyDanmu } from "@/types/danmu";
 import type { TimelineTrack } from "@/types/timeline";
 import { restoreProjectAudio } from "@/services/storage/projectStorage";
 import type { AudioResource } from "@/types/resource";
@@ -15,7 +14,6 @@ const MAX_BYTES = 10 * 1024 * 1024;
 
 type Snapshot = {
   tracks: TimelineTrack[];
-  danmus: AnyDanmu[];
   assets: ProjectAsset[];
   bins: ProjectBin[];
   loadedAudioIds: string[];
@@ -48,7 +46,6 @@ export function useProjectHistory(isHydrating: Ref<boolean>, projectId: string) 
 
   const snapshot = () => JSON.stringify({
     tracks: timeline.rootTracks,
-    danmus: danmu.danmus,
     assets: assets.assets.map((asset) => {
       if (asset.type !== "audio-file") return asset;
       const resource = audio.getById(asset.id);
@@ -67,7 +64,7 @@ export function useProjectHistory(isHydrating: Ref<boolean>, projectId: string) 
 
   const projectData = (value: string) => {
     const state = JSON.parse(value) as Snapshot;
-    return JSON.stringify([state.tracks, state.danmus, state.assets, state.bins, state.loadedAudioIds]);
+    return JSON.stringify([state.tracks, state.assets, state.bins, state.loadedAudioIds]);
   };
 
   const commit = () => {
@@ -102,7 +99,7 @@ export function useProjectHistory(isHydrating: Ref<boolean>, projectId: string) 
     scheduleCommit();
   };
 
-  watch(() => [timeline.rootTracks, danmu.danmus, assets.assets, assets.bins,
+  watch(() => [timeline.rootTracks, assets.assets, assets.bins,
     audio.audioResources.map(({ id, name, duration, coverUrl, sourcePath, relativePath }) =>
       [id, name, duration, coverUrl, sourcePath, relativePath])], markDirty, { deep: true, flush: "sync" });
   watch(isHydrating, (hydrating) => {
@@ -130,7 +127,6 @@ export function useProjectHistory(isHydrating: Ref<boolean>, projectId: string) 
         }
       }
       timeline.rootTracks = state.tracks;
-      danmu.danmus = state.danmus;
       timeline.activeGroupPath = state.activeGroupPath;
       timeline.setSelectedClips(state.selectedClipIds, state.selectedClipId);
       const keep = new Set(resources);

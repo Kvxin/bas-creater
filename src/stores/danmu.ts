@@ -4,6 +4,7 @@ import type { AnyDanmu, DanmuType } from "@/types/danmu"
 import { i18n } from "@/i18n"
 import { createDanmuByKey } from "@/core/danmuFactory"
 import { getItemName } from "@/utils/resourceUtils"
+import { useAssetsStore } from "@/stores/assets"
 
 const clamp = (val: number, min: number, max: number) => Math.min(max, Math.max(min, val))
 
@@ -21,7 +22,12 @@ const localizedIdentity = (type: DanmuType): Partial<AnyDanmu> => {
 }
 
 export const useDanmuStore = defineStore("danmu", () => {
-  const danmus = ref<AnyDanmu[]>([])
+  const assets = useAssetsStore()
+  // 弹幕数据唯一存放在 assets store；这里只是按资源顺序派生的视图，写入会回写到 assets。
+  const danmus = computed<AnyDanmu[]>({
+    get: () => assets.assets.flatMap((asset) => (asset.type === "audio-file" ? [] : [asset.danmu])),
+    set: (next) => assets.replaceDanmus(next),
+  })
   const selectedId = ref<string | null>(null)
   const viewport = reactive<ViewportState>({
     scale: 1,
@@ -44,7 +50,7 @@ export const useDanmuStore = defineStore("danmu", () => {
    */
   function add(type: DanmuType, payload: Partial<AnyDanmu> = {}, options: { select?: boolean } = {}) {
     const dm = createDanmuByKey(type, { ...localizedIdentity(type), ...payload })
-    danmus.value.push(dm)
+    assets.upsertAsset({ id: dm.id, type: dm.type, binId: null, danmu: dm })
     if (options.select !== false) select(dm.id)
     return dm
   }
@@ -61,7 +67,8 @@ export const useDanmuStore = defineStore("danmu", () => {
       name: i18n.global.t("common.duplicateName", { name: getItemName(source) }),
     })
 
-    danmus.value.push(dm)
+    const sourceBinId = assets.assets.find((asset) => asset.id === id)?.binId ?? null
+    assets.upsertAsset({ id: dm.id, type: dm.type, binId: sourceBinId, danmu: dm })
     select(dm.id)
     return dm
   }
@@ -75,15 +82,14 @@ export const useDanmuStore = defineStore("danmu", () => {
   }
 
   function updateSelected(payload: Partial<AnyDanmu>) {
-    const idx = danmus.value.findIndex((dm) => dm.id === selectedId.value)
-    if (idx === -1) return
-    danmus.value[idx] = { ...danmus.value[idx], ...payload } as AnyDanmu
+    if (selectedId.value) updateDanmu(selectedId.value, payload)
   }
 
   function updateDanmu(id: string, payload: Partial<AnyDanmu>) {
-    const idx = danmus.value.findIndex((dm) => dm.id === id)
-    if (idx === -1) return
-    danmus.value[idx] = { ...danmus.value[idx], ...payload } as AnyDanmu
+    const asset = assets.assets.find((item) => item.id === id)
+    if (!asset || asset.type === "audio-file") return
+    const danmu = { ...asset.danmu, ...payload } as AnyDanmu
+    assets.upsertAsset({ ...asset, type: danmu.type, danmu })
   }
 
   function moveSelected(x: number, y: number) {
