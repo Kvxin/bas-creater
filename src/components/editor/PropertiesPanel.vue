@@ -340,7 +340,6 @@ const tryAutoKeyframeProperty = (key: string, value: unknown) => {
 
   const properties = pickKeyframePropertiesForResource(resource, { [key]: value } as Partial<AnyDanmu>);
   if (Object.keys(properties).length === 0) return false;
-  if ((clip.animations?.length ?? 0) > 0) return true;
 
   const rawLocalTimeMs = timelineStore.currentTime - clip.startTime;
   if (rawLocalTimeMs <= 0 || rawLocalTimeMs > clip.duration) return false;
@@ -615,9 +614,6 @@ const getButtonAV = (item: any): number | undefined => {
     </div>
     <div v-else-if="selected" class="flex-1 min-h-0 flex overflow-hidden">
       <div class="min-w-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-hidden p-3">
-        <p v-if="selectedClip?.kind === 'resource' && selectedClip.animations?.length" role="status" class="mb-3 text-xs text-muted-foreground">
-          旧动画不支持新关键帧编辑，原动画将保留。
-        </p>
         <!-- 第一阶段：内容与身份 (根据类型自适应) -->
         <p v-if="effectiveSelection.error" role="alert" class="mb-3 text-xs text-destructive">
           无法获取混合单位的参照尺寸，当前值不可编辑。
@@ -1220,7 +1216,6 @@ const getButtonAV = (item: any): number | undefined => {
               </div>
               <button
                 @click="addKeyframe"
-                :disabled="!!selectedClip.animations?.length"
                 class="h-full min-w-9 rounded-sm border border-border bg-accent hover:bg-primary/10 hover:text-primary transition-colors inline-flex items-center justify-center"
                 :title="t('properties.animation.addKeyframe')"
                 :aria-label="t('properties.animation.addKeyframe')"

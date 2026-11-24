@@ -148,7 +148,7 @@ type RawBasSet = {
   items?: RawBasSet[];
 };
 
-type BasSegment = {
+export type BasSegment = {
   targetName: string;
   startMs: number;
   endMs: number;
@@ -507,16 +507,33 @@ const isStepBoundary = (timeMs: number, segments: ResolvedSegment[]): boolean =>
   return !continuousEnd;
 };
 
-type BuildKeyframesParams = {
+/** 把段内属性转成编辑器字段；返回 null 表示该属性不参与关键帧合并，value 为 null 表示值无法识别。 */
+export type SegmentAttributeReader = (attribute: string, raw: unknown) => { key: string; value: unknown } | null;
+
+const readBasAttribute: SegmentAttributeReader = (basKey, raw) => {
+  if (RESERVED_ATTRIBUTES.has(basKey)) return null;
+  const key = toObjectKey(basKey);
+  return { key, value: convertAttributeValue(key, raw) };
+};
+
+export type BuildKeyframesParams = {
   name: string;
   resource: Record<string, unknown>;
   segments: BasSegment[];
   allowedKeys: ReadonlySet<string>;
   warnings: BasImportWarning[];
+  readAttribute?: SegmentAttributeReader;
+  /** 同一属性混用数值和百分比时，是否把整条时间线（含资源初值）统一成百分比。 */
+  unifyPercentUnits?: boolean;
 };
 
-const buildKeyframes = (params: BuildKeyframesParams) => {
+/**
+ * 把绝对时间段合并成关键帧：每个段的起止点各生成一帧，帧内存放所有被动画属性在该时刻的值。
+ * 只出现一次且从 0 开始的不可动画属性会并入 `resource`（会修改传入对象）。
+ */
+export const buildKeyframesFromSegments = (params: BuildKeyframesParams) => {
   const { name, resource, segments, allowedKeys, warnings } = params;
+  const readAttribute = params.readAttribute ?? readBasAttribute;
   const ordered = [...segments].sort((left, right) => left.startMs - right.startMs);
   const initialValue = (key: string) => resource[key] ?? FALLBACK_INITIAL_VALUES[key] ?? 0;
 
@@ -524,9 +541,10 @@ const buildKeyframes = (params: BuildKeyframesParams) => {
   const counts = new Map<string, number>();
   const firstStarts = new Map<string, number>();
   for (const segment of ordered) {
-    for (const basKey of Object.keys(segment.attrs)) {
-      if (RESERVED_ATTRIBUTES.has(basKey)) continue;
-      const key = toObjectKey(basKey);
+    for (const [basKey, rawValue] of Object.entries(segment.attrs)) {
+      const attribute = readAttribute(basKey, rawValue);
+      if (!attribute) continue;
+      const { key } = attribute;
       counts.set(key, (counts.get(key) ?? 0) + 1);
       if (!firstStarts.has(key)) firstStarts.set(key, segment.startMs);
     }
@@ -538,10 +556,9 @@ const buildKeyframes = (params: BuildKeyframesParams) => {
 
   for (const segment of ordered) {
     for (const [basKey, rawValue] of Object.entries(segment.attrs)) {
-      if (RESERVED_ATTRIBUTES.has(basKey)) continue;
-      const key = toObjectKey(basKey);
-      const value = convertAttributeValue(key, rawValue);
-      if (value === null) continue;
+      const attribute = readAttribute(basKey, rawValue);
+      if (!attribute || attribute.value === null) continue;
+      const { key, value } = attribute;
 
       if (!allowedKeys.has(key)) {
         if (counts.get(key) === 1 && firstStarts.get(key) === 0) {
@@ -573,7 +590,7 @@ const buildKeyframes = (params: BuildKeyframesParams) => {
   // 单位归一：同一属性在关键帧间混用 number / percent 时，预览插值需要参考
   // 尺寸才能换算；只要出现过百分比，就把整条时间线（含资源初值）统一成百分比。
   const percentKeys = new Set<string>();
-  for (const [key, list] of grouped) {
+  for (const [key, list] of params.unifyPercentUnits === false ? new Map<string, ResolvedSegment[]>() : grouped) {
     if (
       isPercentValue(initialValue(key)) ||
       list.some(segment => isPercentValue(segment.from) || isPercentValue(segment.to))
@@ -663,7 +680,7 @@ export const convertParsedBas = (
 
     const declaredDuration = readSegmentDuration(attrs.duration);
     const allowedKeys = new Set<string>(ANIMATABLE_KEYS_BY_TYPE[type]);
-    const { keyframes, animatedEndMs } = buildKeyframes({
+    const { keyframes, animatedEndMs } = buildKeyframesFromSegments({
       name,
       resource,
       segments: segments.filter(segment => segment.targetName === name),

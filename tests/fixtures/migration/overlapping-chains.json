@@ -1,0 +1,9 @@
+{
+  "danmu": { "id": "t1", "type": "text", "content": "x", "y": 20 },
+  "duration": 3000,
+  "animations": [
+    { "id": "a1", "type": "set", "duration": 1000, "properties": { "x": 100, "y": 50 } },
+    { "id": "a2", "type": "set", "duration": 1000, "delay": 500, "properties": { "x": 300 } },
+    { "id": "a3", "type": "then", "duration": 500, "properties": { "rotateZ": 90 } }
+  ]
+}

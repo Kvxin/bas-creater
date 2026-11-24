@@ -1,0 +1,35 @@
+{
+  "keyframes": [
+    {
+      "timeMs": 0,
+      "properties": {
+        "x": 10,
+        "text": "went",
+        "fontSize": 25,
+        "y": 10
+      },
+      "interpolation": "step"
+    },
+    {
+      "timeMs": 600,
+      "properties": {
+        "x": 200,
+        "text": "went",
+        "fontSize": 30,
+        "y": 10
+      },
+      "interpolation": "linear"
+    },
+    {
+      "timeMs": 1000,
+      "properties": {
+        "x": 200,
+        "text": "went",
+        "fontSize": 30,
+        "y": 80
+      },
+      "interpolation": "linear"
+    }
+  ],
+  "warnings": []
+}

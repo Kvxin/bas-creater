@@ -316,7 +316,6 @@ const handleTransformSelection = (payload: {
   timelineStore.setSelectedClips(payload.clipIds, payload.primaryClipId);
 
   if (!payload.primaryClipId) {
-    timelineStore.setSelectedAnimation(null);
     timelineStore.setSelectedKeyframe(null);
   }
 

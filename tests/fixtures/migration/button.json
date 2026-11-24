@@ -1,0 +1,8 @@
+{
+  "danmu": { "id": "b1", "type": "button", "text": "go", "x": 10, "y": 10 },
+  "duration": 2000,
+  "animations": [
+    { "id": "a1", "type": "set", "duration": 600, "properties": { "x": 200, "text": "went" } },
+    { "id": "a2", "type": "then", "duration": 400, "properties": { "fontSize": 30, "y": 80 } }
+  ]
+}

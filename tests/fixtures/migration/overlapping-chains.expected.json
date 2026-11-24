@@ -1,0 +1,50 @@
+{
+  "keyframes": [
+    {
+      "timeMs": 0,
+      "properties": {
+        "x": 0,
+        "y": 20,
+        "rotateZ": 0
+      },
+      "interpolation": "linear"
+    },
+    {
+      "timeMs": 500,
+      "properties": {
+        "x": 50,
+        "y": 35,
+        "rotateZ": 0
+      },
+      "interpolation": "linear"
+    },
+    {
+      "timeMs": 1000,
+      "properties": {
+        "x": 175,
+        "y": 50,
+        "rotateZ": 0
+      },
+      "interpolation": "linear"
+    },
+    {
+      "timeMs": 1500,
+      "properties": {
+        "x": 300,
+        "y": 50,
+        "rotateZ": 0
+      },
+      "interpolation": "linear"
+    },
+    {
+      "timeMs": 2000,
+      "properties": {
+        "x": 300,
+        "y": 50,
+        "rotateZ": 90
+      },
+      "interpolation": "linear"
+    }
+  ],
+  "warnings": []
+}

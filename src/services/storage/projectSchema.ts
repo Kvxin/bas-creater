@@ -1,8 +1,12 @@
 import type { BasProjectData } from "@/types/storage";
 import type { TimelineClip, TimelineTrack } from "@/types/timeline";
 import { updateGroupDurations } from "@/utils/timelineGroups";
+import { convertLegacyAnimations } from "@/utils/legacyAnimations";
+import type { LegacyAnimationSegment } from "@/utils/legacyAnimations";
 
-export const PROJECT_VERSION = 3;
+export const PROJECT_VERSION = 4;
+
+type LegacyAnimatedClip = { animations?: LegacyAnimationSegment[] };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -23,11 +27,13 @@ const isTime = (value: unknown): value is number =>
  */
 export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProject"): BasProjectData => {
   if (!isRecord(input) || !Array.isArray(input.tracks)) throw new Error("Invalid project structure");
-  const version = input.version ?? 1;
-  if (version !== 1 && version !== 2 && version !== PROJECT_VERSION) throw new Error("Unsupported project version");
-  if (version !== PROJECT_VERSION && !Array.isArray(input.danmus)) throw new Error("Invalid project structure");
+  const version = input.version == null ? 1 : typeof input.version === "number" ? input.version : NaN;
+  if (![1, 2, 3, PROJECT_VERSION].includes(version)) throw new Error("Unsupported project version");
+  // v3 起工程只保存 assets；更早的版本以 danmus/audioMeta 为准。
+  const hasLegacyLists = version < 3;
+  if (hasLegacyLists && !Array.isArray(input.danmus)) throw new Error("Invalid project structure");
   const data: BasProjectData = JSON.parse(JSON.stringify(input));
-  if (version !== PROJECT_VERSION) {
+  if (hasLegacyLists) {
     data.audioMeta ??= [];
     if (!Array.isArray(data.audioMeta)) throw new Error("Invalid audio metadata");
     data.assets = [
@@ -109,9 +115,11 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
         registerId(keyframe.id, nodeIds);
       }
     }
-    if (clip.animations !== undefined) {
-      if (!Array.isArray(clip.animations)) throw new Error("Invalid animations");
-      for (const animation of clip.animations) {
+    const { animations } = clip as LegacyAnimatedClip;
+    if (animations !== undefined) {
+      if (version >= 4) throw new Error("Legacy animations are not supported in this project version");
+      if (!Array.isArray(animations)) throw new Error("Invalid animations");
+      for (const animation of animations) {
         if (!isRecord(animation) || !["set", "then"].includes(String(animation.type)) ||
           !isTime(animation.duration) || !isRecord(animation.properties) ||
           (animation.delay !== undefined && !isTime(animation.delay))) {
@@ -120,7 +128,7 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
         registerId(animation.id, nodeIds);
       }
     }
-    if (clip.keyframes?.length && clip.animations?.length) {
+    if (clip.keyframes?.length && animations?.length) {
       throw new Error(`Clip ${clip.id} contains both keyframes and legacy animations; preserve the original project and restore or save a corrected copy`);
     }
   };
@@ -152,7 +160,7 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
         }
         if (clip.kind === "group") {
           if (track.type === "audio" || clip.resourceId !== undefined || clip.keyframes !== undefined ||
-            clip.animations !== undefined || clip.params !== undefined || clip.overrides !== undefined ||
+            (clip as LegacyAnimatedClip).animations !== undefined || clip.params !== undefined || clip.overrides !== undefined ||
             clip.parentClipId !== undefined || clip.sourceInMs !== undefined) throw new Error("Invalid group clip");
           validateTracks(clip.tracks, true);
         } else if (clip.kind === "resource") {
@@ -161,14 +169,14 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
           if ((insideGroup && isAudio) || (track.type === "audio" && !isAudio) ||
             (track.type === "danmu" && isAudio)) throw new Error("Incompatible clip type");
           if (clip.sourceInMs !== undefined && (!isAudio || !isTime(clip.sourceInMs))) throw new Error("Invalid source offset");
-          if (version !== PROJECT_VERSION && isAudio && clip.sourceInMs === undefined) clip.sourceInMs = 0;
+          if (hasLegacyLists && isAudio && clip.sourceInMs === undefined) clip.sourceInMs = 0;
           if (clip.overrides !== undefined && (isAudio || !isRecord(clip.overrides) ||
             (clip.overrides.id !== undefined && clip.overrides.id !== clip.resourceId) ||
             (clip.overrides.type !== undefined && clip.overrides.type !== data.danmus.find((item) => item.id === clip.resourceId)?.type))) {
             throw new Error("Invalid clip overrides");
           }
           if (clip.parentClipId !== undefined && (isAudio || typeof clip.parentClipId !== "string" || !clip.parentClipId)) throw new Error("Invalid parent clip");
-          if (version !== PROJECT_VERSION && !isAudio) {
+          if (hasLegacyLists && !isAudio) {
             const source = data.danmus.find((item) => item.id === clip.resourceId)!;
             clip.overrides = { ...source };
           }
@@ -186,12 +194,25 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
   };
   validateTracks(data.tracks, false);
   for (const clip of clipsById.values()) {
-    if (version !== PROJECT_VERSION && clip.overrides?.parentId) {
+    if (hasLegacyLists && clip.overrides?.parentId) {
       const parents = clipsByResource.get(clip.overrides.parentId) ?? [];
       if (parents.length !== 1 || parents[0]!.id === clip.id) throw new Error("Ambiguous or missing legacy parent clip");
       clip.parentClipId = parents[0]!.id;
     }
-    if (version !== PROJECT_VERSION && clip.overrides) delete clip.overrides.parentId;
+    if (hasLegacyLists && clip.overrides) delete clip.overrides.parentId;
+  }
+  // v4 删除了旧的 set/then 动画模型，加载旧工程时一次性转换为关键帧。
+  for (const clip of clipsById.values()) {
+    const legacy = clip as typeof clip & LegacyAnimatedClip;
+    if (legacy.animations === undefined) continue;
+    if (legacy.animations.length > 0) {
+      const source = data.danmus.find((item) => item.id === clip.resourceId)!;
+      const resource = { ...source, ...clip.overrides, id: source.id, type: source.type } as typeof source;
+      const converted = convertLegacyAnimations(clip.id, resource, legacy.animations);
+      clip.keyframes = converted.keyframes;
+      if (Object.keys(converted.overrides).length > 0) clip.overrides = { ...clip.overrides, ...converted.overrides };
+    }
+    delete legacy.animations;
   }
   for (const clip of clipsById.values()) {
     const seen = new Set([clip.id]);
@@ -203,7 +224,7 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
       parent = target.parentClipId;
     }
   }
-  if (version !== PROJECT_VERSION) {
+  if (hasLegacyLists) {
     for (const danmu of data.danmus) delete danmu.parentId;
   }
   data.version = PROJECT_VERSION;
