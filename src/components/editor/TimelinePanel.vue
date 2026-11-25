@@ -25,7 +25,7 @@ import {
   ArrowLeft
 } from "lucide-vue-next";
 import TimeRuler from "./TimeRuler.vue";
-import { formatTime } from "@/utils/timeline";
+import { formatTime } from "@/core/timeline";
 import { getItemName } from "@/utils/resourceUtils";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";

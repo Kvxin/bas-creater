@@ -1,49 +1,23 @@
-import type { AnyDanmu, DanmuType } from "@/types/danmu";
+import type { AnyDanmu } from "@/types/danmu";
 import type {
   TimelineClip,
   TimelineKeyframe,
-  TimelineKeyframeProperties,
+  TimelineKeyframeProperties
 } from "@/types/timeline";
 import { resolveDanmuDefaults } from "@/core/danmuDefaults";
+import {
+  ANIMATABLE_KEYS,
+  ANIMATABLE_KEYS_BY_TYPE,
+  NUMERIC_INTERPOLATION_KEYS
+} from "@/core/danmuProperties";
+import type { AnimatableKey } from "@/core/danmuProperties";
+
+export { ANIMATABLE_KEYS, ANIMATABLE_KEYS_BY_TYPE };
+export type { AnimatableKey };
 
 export const BASE_KEYFRAME_ID = "__base_keyframe__";
 
 export const KEYFRAME_TOLERANCE_MS = 24;
-
-export const ANIMATABLE_KEYS = [
-  "x",
-  "y",
-  "content",
-  "text",
-  "scale",
-  "rotateX",
-  "rotateY",
-  "rotateZ",
-  "opacity",
-  "color",
-  "fontSize",
-] as const;
-
-export type AnimatableKey = (typeof ANIMATABLE_KEYS)[number];
-
-/** 各资源类型可被关键帧插值的属性；BAS 导入据此判断哪些 `set` 能无损落成关键帧。 */
-export const ANIMATABLE_KEYS_BY_TYPE: Record<DanmuType, readonly AnimatableKey[]> = {
-  text: ["x", "y", "content", "scale", "rotateX", "rotateY", "rotateZ", "opacity", "color", "fontSize"],
-  button: ["x", "y", "text", "fontSize"],
-  path: ["x", "y"],
-};
-
-type NumericInterpolationKey = Exclude<AnimatableKey, "color" | "content" | "text" | "fontSize">;
-
-const NUMERIC_KEYS = new Set<NumericInterpolationKey>([
-  "x",
-  "y",
-  "scale",
-  "rotateX",
-  "rotateY",
-  "rotateZ",
-  "opacity",
-]);
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
@@ -192,7 +166,7 @@ const interpolateValue = (
     return interpolateColor(from, to, progress);
   }
 
-  if (NUMERIC_KEYS.has(key as NumericInterpolationKey)) {
+  if (NUMERIC_INTERPOLATION_KEYS.has(key)) {
     const start = toNumber(from);
     const end = toNumber(to);
     if (start !== null && end !== null) {

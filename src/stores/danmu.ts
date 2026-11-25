@@ -92,10 +92,6 @@ export const useDanmuStore = defineStore("danmu", () => {
     assets.upsertAsset({ ...asset, type: danmu.type, danmu })
   }
 
-  function moveSelected(x: number, y: number) {
-    updateSelected({ x, y })
-  }
-
   function setViewport(next: Partial<ViewportState>) {
     viewport.scale = clamp(next.scale ?? viewport.scale, 0.2, 3)
     viewport.offsetX = next.offsetX ?? viewport.offsetX
@@ -135,7 +131,6 @@ export const useDanmuStore = defineStore("danmu", () => {
     select,
     updateSelected,
     updateDanmu,
-    moveSelected,
     setViewport,
     zoom,
     pan,
