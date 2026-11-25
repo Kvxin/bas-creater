@@ -56,6 +56,10 @@ test("all per-type definition, importable, and animatable fields are registered"
 });
 
 test("derived property sets match expected BAS semantics", () => {
+  const expectedAnimatable = DANMU_PROPERTY_LIST.filter(
+    (spec) => "animatableOn" in spec && spec.animatableOn.length > 0
+  ).map((spec) => spec.key);
+  assert.deepEqual(ANIMATABLE_KEYS, expectedAnimatable);
   assert.deepEqual([...PERCENTAGE_PROPERTY_KEYS], ["x", "y", "fontSize", "width", "height"]);
   assert.deepEqual([...COLOR_PROPERTY_KEYS], ["color", "strokeColor", "textColor", "fillColor", "borderColor"]);
   assert.deepEqual([...INSTANT_PROPERTY_KEYS], ["content", "text", "fontSize"]);

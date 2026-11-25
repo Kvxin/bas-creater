@@ -253,39 +253,25 @@ export const INSTANT_PROPERTY_KEYS: ReadonlySet<string> = new Set(
   DANMU_PROPERTY_LIST.filter((spec) => "instant" in spec && spec.instant).map((spec) => spec.key)
 );
 
-export const ANIMATABLE_KEYS = [
-  "x",
-  "y",
-  "content",
-  "text",
-  "scale",
-  "rotateX",
-  "rotateY",
-  "rotateZ",
-  "opacity",
-  "color",
-  "fontSize"
-] as const;
+type AnimatablePropertySpec = Extract<(typeof DANMU_PROPERTY_LIST)[number], { readonly animatableOn: readonly DanmuType[] }>;
 
-export type AnimatableKey = (typeof ANIMATABLE_KEYS)[number];
+export type AnimatableKey = AnimatablePropertySpec["key"];
+
+const hasAnimatableOn = (spec: DanmuPropertySpec): spec is DanmuPropertySpec & { readonly key: AnimatableKey; readonly animatableOn: readonly DanmuType[] } =>
+  Boolean(spec.animatableOn?.length);
+
+const ANIMATABLE_SPECS = REGISTERED_SPECS.filter(hasAnimatableOn);
+
+export const ANIMATABLE_KEYS: readonly AnimatableKey[] = ANIMATABLE_SPECS.map((spec) => spec.key);
 
 /** 各资源类型可被关键帧插值的属性；BAS 导入与编译器共用该约束。 */
 export const ANIMATABLE_KEYS_BY_TYPE: Record<DanmuType, readonly AnimatableKey[]> = {
-  text: ANIMATABLE_KEYS.filter((key) => {
-    const spec = DANMU_PROPERTY_BY_KEY.get(key);
-    return Boolean(spec?.animatableOn?.includes("text"));
-  }),
-  button: ANIMATABLE_KEYS.filter((key) => {
-    const spec = DANMU_PROPERTY_BY_KEY.get(key);
-    return Boolean(spec?.animatableOn?.includes("button"));
-  }),
-  path: ANIMATABLE_KEYS.filter((key) => {
-    const spec = DANMU_PROPERTY_BY_KEY.get(key);
-    return Boolean(spec?.animatableOn?.includes("path"));
-  })
+  text: ANIMATABLE_SPECS.filter((spec) => spec.animatableOn.includes("text")).map((spec) => spec.key),
+  button: ANIMATABLE_SPECS.filter((spec) => spec.animatableOn.includes("button")).map((spec) => spec.key),
+  path: ANIMATABLE_SPECS.filter((spec) => spec.animatableOn.includes("path")).map((spec) => spec.key)
 };
 
 /** 关键帧中支持数值线性插值的属性集合。 */
 export const NUMERIC_INTERPOLATION_KEYS: ReadonlySet<AnimatableKey> = new Set(
-  ANIMATABLE_KEYS.filter((key) => Boolean(DANMU_PROPERTY_BY_KEY.get(key)?.interpolatesNumerically))
+  ANIMATABLE_SPECS.filter((spec) => Boolean(spec.interpolatesNumerically)).map((spec) => spec.key)
 );
