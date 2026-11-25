@@ -45,7 +45,7 @@ const importsOfSource = (sourceText: string, fileName = "module.ts"): string[] =
 
 const importsOf = (file: string): string[] => importsOfSource(fs.readFileSync(file, "utf8"), file);
 
-const relative = (file: string) => path.relative(srcDir, file);
+const relative = (file: string) => path.relative(srcDir, file).split(path.sep).join("/");
 
 const isWithinDir = (target: string, dir: string): boolean => {
   const rel = path.relative(dir, target);
