@@ -1,0 +1,49 @@
+{
+  "keyframes": [
+    {
+      "timeMs": 0,
+      "properties": {
+        "x": "10%",
+        "color": 16711680,
+        "content": "a",
+        "opacity": 1,
+        "fontSize": 25
+      },
+      "interpolation": "linear"
+    },
+    {
+      "timeMs": 500,
+      "properties": {
+        "x": "50%",
+        "color": 255,
+        "content": "a",
+        "opacity": 1,
+        "fontSize": 25
+      },
+      "interpolation": "linear"
+    },
+    {
+      "timeMs": 700,
+      "properties": {
+        "x": "50%",
+        "color": 255,
+        "content": "b",
+        "opacity": 1,
+        "fontSize": 40
+      },
+      "interpolation": "step"
+    },
+    {
+      "timeMs": 1000,
+      "properties": {
+        "x": "50%",
+        "color": 255,
+        "content": "b",
+        "opacity": 0.5,
+        "fontSize": 40
+      },
+      "interpolation": "linear"
+    }
+  ],
+  "warnings": []
+}

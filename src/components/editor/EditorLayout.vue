@@ -27,7 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
-import { compileTimelineToBas, formatBasParseError } from "@/utils/compiler";
+import { compileTimelineToBas, formatBasParseError } from "@/core/compiler";
 import { parseBasDSL } from "@/utils/bas";
 import { isDesktopApp, saveTextFile } from "@/utils/desktop";
 import { useWindowPreferencesStore } from "@/stores/windowPreferences";

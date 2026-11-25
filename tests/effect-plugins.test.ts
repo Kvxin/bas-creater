@@ -7,12 +7,12 @@ import fade from "../src/effects/plugins/fade-in";
 import outline from "../src/effects/plugins/text-outline";
 import { discoverEffects } from "../src/effects/registry";
 import { matchesEffect, type EffectInstance } from "../src/effects/types";
-import { normalizeProjectData, PROJECT_VERSION, serializeProjectData } from "../src/services/storage/projectSchema";
+import { basNameForClip, compileClipToBas, compileTimelineToBas } from "../src/core/compiler";
+import { normalizeProjectData, PROJECT_VERSION, serializeProjectData } from "../src/core/projectSchema";
 import { useDanmuStore } from "../src/stores/danmu";
 import { useTimelineStore } from "../src/stores/timeline";
 import type { AnyDanmu, TextDanmu } from "../src/types/danmu";
 import type { TimelineClip, TimelineResourceClip, TimelineTrack } from "../src/types/timeline";
-import { basNameForClip, compileClipToBas, compileTimelineToBas } from "../src/utils/compiler";
 
 const resource: TextDanmu = { id: "shared", type: "text", content: "字幕" };
 const instance = (id: string, extra: Partial<TimelineResourceClip> = {}): TimelineResourceClip => ({
@@ -217,7 +217,7 @@ test("delayed parented clip combines a fade with linear and step opacity without
         parentClipId: "parent",
         overrides: { opacity: 0.6 },
         keyframes: [
-          { id: "k1", timeMs: 1000, properties: { opacity: 0.4, x: 100 } },
+          { id: "k1", timeMs: 1000, properties: { opacity: 0.4, x: "25%" } },
           { id: "k2", timeMs: 1500, properties: { opacity: 0.8, content: "切换" }, interpolation: "step" }
         ]
       })
@@ -227,7 +227,7 @@ test("delayed parented clip combines a fade with linear and step opacity without
   const graph = await render(compile());
   assert.equal(graph.defs[1]!.attrs.parent, "obj_parent");
   const segments = graph.def2set.obj_child!;
-  assert.ok(segments.some(s => s.delay === 1 && s.duration === 1 && numeric(s.valueEnd.x) === 100));
+  assert.ok(segments.some(s => s.delay === 1 && s.duration === 1 && numeric(s.valueEnd.x) === 25));
   assert.ok(segments.some(s => s.delay === 2.5 && s.valueEnd.content === "切换"));
   for (const [time, expected] of [
     [0.9, 0],
@@ -242,18 +242,24 @@ test("delayed parented clip combines a fade with linear and step opacity without
 });
 
 test("legacy parallel position and delayed serial alpha survive multiple effects", async () => {
-  const { timeline, compile } = setup([
-    track([
-      instance("a", {
-        startTime: 1000,
-        animations: [
-          { id: "x", type: "set", duration: 1000, properties: { x: 250 } },
-          { id: "alpha", type: "set", delay: 500, duration: 500, properties: { opacity: 0.5 } },
-          { id: "hold", type: "then", duration: 100, properties: { content: "完成" } }
-        ]
-      })
-    ])
-  ]);
+  const migrated = normalizeProjectData({
+    version: 3,
+    canvas: { width: 800, height: 450 },
+    assets: [{ id: resource.id, type: resource.type, binId: null, danmu: resource }],
+    bins: [],
+    tracks: [
+      track([
+        Object.assign(instance("a", { startTime: 1000 }), {
+          animations: [
+            { id: "x", type: "set", duration: 1000, properties: { x: 250 } },
+            { id: "alpha", type: "set", delay: 500, duration: 500, properties: { opacity: 0.5 } },
+            { id: "hold", type: "then", duration: 100, properties: { content: "完成" } }
+          ]
+        })
+      ])
+    ]
+  });
+  const { timeline, compile } = setup(migrated.tracks);
   timeline.attachEffect("a", fade);
   const next = timeline.attachEffect("a", fade);
   timeline.updateEffect("a", next, fade, { percent: 50 });
@@ -261,31 +267,46 @@ test("legacy parallel position and delayed serial alpha survive multiple effects
   close(sample(graph, "obj_a", 1.25), 0.25);
   close(sample(graph, "obj_a", 1.8), 0.7);
   close(sample(graph, "obj_a", 2.5), 0.5);
-  assert.ok(graph.def2set.obj_a!.some(s => s.delay === 1 && numeric(s.valueEnd.x) === 250));
+  assert.equal(valueAt(graph, "obj_a", "x", 2), 31.25);
   assert.ok(graph.def2set.obj_a!.some(s => s.delay === 2 && s.valueEnd.content === "完成"));
 });
 
 test("composing opacity respects preceding and overlapping legacy animation groups", async () => {
-  const { timeline, compile } = setup([
-    track([
-      instance("successive", {
-        startTime: 500,
-        overrides: { opacity: 0.8 },
-        animations: [
-          { id: "first", type: "set", duration: 400, properties: { opacity: 0.2, x: 120 } },
-          { id: "later", type: "set", delay: 800, duration: 700, properties: { opacity: 0.8 } }
-        ]
-      }),
-      instance("overlap", {
-        startTime: 500,
-        overrides: { opacity: 0.8 },
-        animations: [
-          { id: "replaced", type: "set", duration: 600, properties: { opacity: 0.2, x: 200 } },
-          { id: "effective", type: "set", delay: 250, duration: 675, properties: { opacity: 0.7 } }
-        ]
-      })
-    ])
-  ]);
+  const migrated = normalizeProjectData({
+    version: 3,
+    canvas: { width: 800, height: 450 },
+    assets: [{ id: resource.id, type: resource.type, binId: null, danmu: resource }],
+    bins: [],
+    tracks: [
+      track([
+        Object.assign(
+          instance("successive", {
+            startTime: 500,
+            overrides: { opacity: 0.8 }
+          }),
+          {
+            animations: [
+              { id: "first", type: "set", duration: 400, properties: { opacity: 0.2, x: 120 } },
+              { id: "later", type: "set", delay: 800, duration: 700, properties: { opacity: 0.8 } }
+            ]
+          }
+        ),
+        Object.assign(
+          instance("overlap", {
+            startTime: 500,
+            overrides: { opacity: 0.8 }
+          }),
+          {
+            animations: [
+              { id: "replaced", type: "set", duration: 600, properties: { opacity: 0.2, x: 200 } },
+              { id: "effective", type: "set", delay: 250, duration: 675, properties: { opacity: 0.7 } }
+            ]
+          }
+        )
+      ])
+    ]
+  });
+  const { timeline, compile } = setup(migrated.tracks);
   const cap = {
     ...fade,
     build: () => ({
@@ -299,10 +320,10 @@ test("composing opacity respects preceding and overlapping legacy animation grou
   timeline.attachEffect("overlap", cap);
   const graph = await render(compile());
   close(sample(graph, "obj_successive", 1.475), 0.35);
-  assert.ok(graph.def2set.obj_successive!.some(s => numeric(s.valueEnd.x) === 120));
-  close(sample(graph, "obj_overlap", 0.6), 0.8);
+  assert.ok(graph.def2set.obj_successive!.some(s => numeric(s.valueEnd.x) === 15));
+  close(sample(graph, "obj_overlap", 0.6), 0.7);
   close(sample(graph, "obj_overlap", 1.425), 0.7);
-  assert.ok(graph.def2set.obj_overlap!.every(s => s.valueEnd.x === undefined));
+  assert.equal(valueAt(graph, "obj_overlap", "x", 1.1), 25);
 });
 
 test("a constant opacity limit only needs a definition for a static host", async () => {
@@ -386,7 +407,7 @@ test("round-trip renders without the original plugin and rejects invalid snapsho
 
 test("v4 independent effect groups migrate as ordinary editable groups with identical BAS", () => {
   const nested = track(
-    [instance("layer", { trackId: "layers", keyframes: [{ id: "key", timeMs: 500, properties: { x: 30 } }] })],
+    [instance("layer", { trackId: "layers", keyframes: [{ id: "key", timeMs: 500, properties: { x: "3.75%" } }] })],
     "layers"
   );
   const group: TimelineClip = {

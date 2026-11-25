@@ -1,0 +1,85 @@
+{
+  "objects": [
+    {
+      "name": "obj_c1",
+      "resource": {
+        "type": "text",
+        "content": "a",
+        "opacity": 0,
+        "color": 65280,
+        "anchorX": 0,
+        "anchorY": 0,
+        "fontSize": 25,
+        "fontFamily": "SimHei",
+        "bold": 1,
+        "textShadow": 1,
+        "strokeWidth": 0,
+        "strokeColor": 16777215,
+        "rotateX": 0,
+        "rotateY": 0,
+        "rotateZ": 0,
+        "x": "0%",
+        "y": "0%",
+        "zIndex": 0,
+        "scale": 1
+      },
+      "durationMs": 4500,
+      "keyframes": [
+        {
+          "id": "kf_0",
+          "timeMs": 500,
+          "properties": {
+            "opacity": 1,
+            "x": "0%",
+            "scale": 1,
+            "content": "a",
+            "fontSize": 25,
+            "rotateZ": 0
+          },
+          "interpolation": "step"
+        },
+        {
+          "id": "kf_1",
+          "timeMs": 1500,
+          "properties": {
+            "opacity": 0.5,
+            "x": "25%",
+            "scale": 2,
+            "content": "a",
+            "fontSize": 25,
+            "rotateZ": 0
+          },
+          "interpolation": "linear"
+        },
+        {
+          "id": "kf_2",
+          "timeMs": 2500,
+          "properties": {
+            "opacity": 0.5,
+            "x": "25%",
+            "scale": 2,
+            "content": "b",
+            "fontSize": 40,
+            "rotateZ": 0
+          },
+          "interpolation": "step"
+        },
+        {
+          "id": "kf_3",
+          "timeMs": 4000,
+          "properties": {
+            "opacity": 0.5,
+            "x": "12.5%",
+            "scale": 2,
+            "content": "c",
+            "fontSize": 40,
+            "rotateZ": 90
+          },
+          "interpolation": "linear"
+        }
+      ]
+    }
+  ],
+  "durationMs": 4500,
+  "warnings": []
+}

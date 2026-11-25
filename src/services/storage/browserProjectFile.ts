@@ -1,6 +1,6 @@
 import { backupBrowserProject } from "./browserBackups";
 import type { BasProjectData } from "@/types/storage";
-import { normalizeProjectData, serializeProjectData } from "./projectSchema";
+import { normalizeProjectData, serializeProjectData } from "@/core/projectSchema";
 
 type DirectoryPermission = FileSystemDirectoryHandle & {
   queryPermission(descriptor: { mode: "read" | "readwrite" }): Promise<PermissionState>;

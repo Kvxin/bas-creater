@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeProjectData, PROJECT_VERSION } from "../src/services/storage/projectSchema";
-import { compileTimelineToBas } from "../src/utils/compiler";
+import { normalizeProjectData, PROJECT_VERSION } from "../src/core/projectSchema";
+import { compileTimelineToBas } from "../src/core/compiler";
 
 const legacy = () => ({
   version: 2,
@@ -32,7 +32,7 @@ test("legacy assets and repeated timeline references migrate without losing appe
   assert.equal(clips[0]?.resourceId, "text-1");
   assert.equal(clips[1]?.resourceId, "text-1");
   assert.equal(clips[0]?.kind === "resource" && clips[0].overrides?.content, "Hello");
-  assert.equal(clips[1]?.kind === "resource" && clips[1].overrides?.x, 42);
+  assert.equal(clips[1]?.kind === "resource" && clips[1].overrides?.x, "5.25%");
 });
 
 test("v3 files with only assets preserve bins, clip overrides, nested timing and offline audio", () => {
@@ -102,13 +102,18 @@ test("ambiguous legacy parent references are not silently attached to an arbitra
   assert.throws(() => normalizeProjectData(data), /parent/i);
 });
 
-test("legacy animation projects remain intact and mixed animation data is rejected without mutating the input", () => {
+test("legacy animations migrate to keyframes and mixed animation data is rejected without mutating the input", () => {
   const source = legacy();
   const clip = source.tracks[0]!.clips[0]!;
   const animation = { id: "animation-1", type: "then", duration: 500, properties: { x: 100 } };
   Object.assign(clip, { animations: [animation] });
+  const migrated = project => project.tracks[0]!.clips[0]!;
   const project = normalizeProjectData(source);
-  assert.deepEqual(project.tracks[0]!.clips[0]!.animations, [animation]);
+  assert.equal("animations" in migrated(project), false);
+  assert.deepEqual(migrated(project).keyframes?.map(({ timeMs, properties }) => [timeMs, properties]), [
+    [0, { x: "5.25%" }],
+    [500, { x: "12.5%" }]
+  ]);
   Object.assign(clip, { keyframes: [{ id: "frame-1", timeMs: 500, properties: { x: 50 } }] });
   const original = JSON.stringify(source);
   assert.throws(() => normalizeProjectData(source), /clip-1.*both keyframes and legacy animations/i);

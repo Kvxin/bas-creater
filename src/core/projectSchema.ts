@@ -1,9 +1,14 @@
 import type { BasProjectData } from "@/types/storage";
 import { MAX_CLIP_EFFECTS, validateInstance } from "@/effects/validation";
 import type { TimelineClip, TimelineTrack } from "@/types/timeline";
-import { updateGroupDurations } from "@/utils/timelineGroups";
+import { updateGroupDurations } from "@/core/timelineGroups";
+import { convertLegacyAnimations } from "@/core/legacyAnimations";
+import { normalizeCoordinates } from "@/core/coordinates";
+import type { LegacyAnimationSegment } from "@/core/legacyAnimations";
 
 export const PROJECT_VERSION = 6;
+
+type LegacyAnimatedClip = { animations?: LegacyAnimationSegment[] };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -16,37 +21,49 @@ const isTime = (value: unknown): value is number =>
  *
  * 除了补齐旧版本片段的 kind 字段，还会递归验证分组轨道、资源引用、动画
  * 节点和 ID 唯一性；任何结构异常都会在写入 Store 前抛出，避免污染当前工程。
-   *
-   * @param input 待校验和迁移的工程数据
-   * @param fallbackName 输入数据缺少工程名称时使用的默认名称
-   * @returns 已校验并迁移到当前版本的工程数据
-   * @throws 当工程结构、资源引用或 ID 不合法时抛出错误
+ *
+ * @param input 待校验和迁移的工程数据
+ * @param fallbackName 输入数据缺少工程名称时使用的默认名称
+ * @returns 已校验并迁移到当前版本的工程数据
+ * @throws 当工程结构、资源引用或 ID 不合法时抛出错误
  */
 export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProject"): BasProjectData => {
   if (!isRecord(input) || !Array.isArray(input.tracks)) throw new Error("Invalid project structure");
-  const version = input.version ?? 1;
-  const legacy = version === 1 || version === 2;
-  if (!legacy && version !== 3 && version !== 4 && version !== 5 && version !== PROJECT_VERSION) throw new Error("Unsupported project version");
-  if (legacy && !Array.isArray(input.danmus)) throw new Error("Invalid project structure");
+  const version = input.version == null ? 1 : typeof input.version === "number" ? input.version : NaN;
+  if (![1, 2, 3, 4, 5, PROJECT_VERSION].includes(version)) throw new Error("Unsupported project version");
+  // v3 起工程只保存 assets；更早的版本以 danmus/audioMeta 为准。
+  const hasLegacyLists = version < 3;
+  if (hasLegacyLists && !Array.isArray(input.danmus)) throw new Error("Invalid project structure");
   const data: BasProjectData = JSON.parse(JSON.stringify(input));
-  if (legacy) {
+  if (hasLegacyLists) {
     data.audioMeta ??= [];
     if (!Array.isArray(data.audioMeta)) throw new Error("Invalid audio metadata");
     data.assets = [
       ...data.danmus.map((danmu) => ({ id: danmu.id, type: danmu.type, binId: null, danmu })),
       ...data.audioMeta.map((audio) => ({
-        id: audio.id, type: "audio-file" as const, binId: null, audio,
-        ...(audio.sourcePath ? { location: { kind: "external" as const, path: audio.sourcePath } } :
-          audio.relativePath ? { location: { kind: "project" as const, path: audio.relativePath } } : {}),
-      })),
+        id: audio.id,
+        type: "audio-file" as const,
+        binId: null,
+        audio,
+        ...(audio.sourcePath
+          ? { location: { kind: "external" as const, path: audio.sourcePath } }
+          : audio.relativePath
+            ? { location: { kind: "project" as const, path: audio.relativePath } }
+            : {})
+      }))
     ];
     data.bins = [];
   }
   if (!Array.isArray(data.assets) || !Array.isArray(data.bins)) throw new Error("Invalid assets or bins");
   const binIds = new Set<string>();
   for (const bin of data.bins) {
-    if (!isRecord(bin) || typeof bin.name !== "string" || !bin.name.trim() ||
-      (bin.parentId !== null && typeof bin.parentId !== "string")) throw new Error("Invalid bin");
+    if (
+      !isRecord(bin) ||
+      typeof bin.name !== "string" ||
+      !bin.name.trim() ||
+      (bin.parentId !== null && typeof bin.parentId !== "string")
+    )
+      throw new Error("Invalid bin");
     if (typeof bin.id !== "string" || !bin.id || binIds.has(bin.id)) throw new Error("Invalid or duplicate bin ID");
     binIds.add(bin.id);
   }
@@ -62,23 +79,50 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
   }
   const assetIds = new Set<string>();
   for (const asset of data.assets) {
-    if (!isRecord(asset) || typeof asset.id !== "string" || !asset.id || assetIds.has(asset.id) ||
-      (asset.binId !== null && (typeof asset.binId !== "string" || !binIds.has(asset.binId)))) throw new Error("Invalid asset");
+    if (
+      !isRecord(asset) ||
+      typeof asset.id !== "string" ||
+      !asset.id ||
+      assetIds.has(asset.id) ||
+      (asset.binId !== null && (typeof asset.binId !== "string" || !binIds.has(asset.binId)))
+    )
+      throw new Error("Invalid asset");
     assetIds.add(asset.id);
     if (asset.type === "audio-file") {
-      if (!isRecord(asset.audio) || asset.audio.id !== asset.id || typeof asset.audio.name !== "string") throw new Error("Invalid audio asset");
-      if (asset.location !== undefined && (!isRecord(asset.location) ||
-        !["external", "project"].includes(String(asset.location.kind)) || typeof asset.location.path !== "string" ||
-        !asset.location.path || (asset.location.kind === "project" &&
-          (/^(?:[a-z]:|[/\\])/i.test(asset.location.path) || asset.location.path.split(/[/\\]/).includes(".."))))) {
+      if (!isRecord(asset.audio) || asset.audio.id !== asset.id || typeof asset.audio.name !== "string")
+        throw new Error("Invalid audio asset");
+      if (
+        asset.location !== undefined &&
+        (!isRecord(asset.location) ||
+          !["external", "project"].includes(String(asset.location.kind)) ||
+          typeof asset.location.path !== "string" ||
+          !asset.location.path ||
+          (asset.location.kind === "project" &&
+            (/^(?:[a-z]:|[/\\])/i.test(asset.location.path) || asset.location.path.split(/[/\\]/).includes(".."))))
+      ) {
         throw new Error("Invalid asset location");
       }
-    } else if (!["text", "button", "path"].includes(String(asset.type)) || !isRecord(asset.danmu) ||
-      asset.danmu.id !== asset.id || asset.danmu.type !== asset.type) throw new Error("Invalid danmaku asset");
+    } else if (
+      !["text", "button", "path"].includes(String(asset.type)) ||
+      !isRecord(asset.danmu) ||
+      asset.danmu.id !== asset.id ||
+      asset.danmu.type !== asset.type
+    )
+      throw new Error("Invalid danmaku asset");
   }
-  data.danmus = data.assets.flatMap((asset) => asset.type === "audio-file" ? [] : [asset.danmu]);
-  data.audioMeta = data.assets.flatMap((asset) => asset.type === "audio-file" ? [asset.audio] : []);
-  const danmuTypes = new Map(data.danmus.map(item => [item.id, item.type]));
+  data.danmus = data.assets.flatMap((asset) => (asset.type === "audio-file" ? [] : [asset.danmu]));
+  data.audioMeta = data.assets.flatMap((asset) => (asset.type === "audio-file" ? [asset.audio] : []));
+  const danmuTypes = new Map(data.danmus.map((item) => [item.id, item.type]));
+  data.canvas ??= { width: 800, height: 450 };
+  if (
+    !isRecord(data.canvas) ||
+    !isTime(data.canvas.width) ||
+    !isTime(data.canvas.height) ||
+    !data.canvas.width ||
+    !data.canvas.height
+  )
+    throw new Error("Invalid canvas size");
+  const canvas = data.canvas;
   const resourceIds = new Set<string>();
   const audioIds = new Set<string>();
   const nodeIds = new Set<string>();
@@ -93,6 +137,8 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
       throw new Error("Invalid danmaku resource");
     }
     registerId(resource.id, resourceIds);
+    // v4 起 x/y 只保存百分比，旧工程的像素值按工程画布换算。
+    normalizeCoordinates(resource, canvas);
   }
   data.audioMeta ??= [];
   if (!Array.isArray(data.audioMeta)) throw new Error("Invalid audio metadata");
@@ -112,19 +158,27 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
         registerId(keyframe.id, nodeIds);
       }
     }
-    if (clip.animations !== undefined) {
-      if (!Array.isArray(clip.animations)) throw new Error("Invalid animations");
-      for (const animation of clip.animations) {
-        if (!isRecord(animation) || !["set", "then"].includes(String(animation.type)) ||
-          !isTime(animation.duration) || !isRecord(animation.properties) ||
-          (animation.delay !== undefined && !isTime(animation.delay))) {
+    const { animations } = clip as LegacyAnimatedClip;
+    if (animations !== undefined) {
+      if (version >= 4) throw new Error("Legacy animations are not supported in this project version");
+      if (!Array.isArray(animations)) throw new Error("Invalid animations");
+      for (const animation of animations) {
+        if (
+          !isRecord(animation) ||
+          !["set", "then"].includes(String(animation.type)) ||
+          !isTime(animation.duration) ||
+          !isRecord(animation.properties) ||
+          (animation.delay !== undefined && !isTime(animation.delay))
+        ) {
           throw new Error("Invalid animation");
         }
         registerId(animation.id, nodeIds);
       }
     }
-    if (clip.keyframes?.length && clip.animations?.length) {
-      throw new Error(`Clip ${clip.id} contains both keyframes and legacy animations; preserve the original project and restore or save a corrected copy`);
+    if (clip.keyframes?.length && animations?.length) {
+      throw new Error(
+        `Clip ${clip.id} contains both keyframes and legacy animations; preserve the original project and restore or save a corrected copy`
+      );
     }
   };
   /**
@@ -138,15 +192,25 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
   const validateTracks = (tracks: TimelineTrack[], insideGroup: boolean) => {
     if (!Array.isArray(tracks)) throw new Error("Invalid group tracks");
     for (const track of tracks) {
-      if (!isRecord(track) || !Array.isArray(track.clips) || typeof track.name !== "string" ||
-        typeof track.visible !== "boolean" || typeof track.locked !== "boolean" ||
-        (track.type !== undefined && track.type !== "audio" && track.type !== "danmu")) {
+      if (
+        !isRecord(track) ||
+        !Array.isArray(track.clips) ||
+        typeof track.name !== "string" ||
+        typeof track.visible !== "boolean" ||
+        typeof track.locked !== "boolean" ||
+        (track.type !== undefined && track.type !== "audio" && track.type !== "danmu")
+      ) {
         throw new Error("Invalid timeline track");
       }
       registerId(track.id, nodeIds);
       for (const clip of track.clips) {
-        if (!isRecord(clip) || clip.trackId !== track.id || !isTime(clip.startTime) || !isTime(clip.duration) ||
-          (clip.name !== undefined && typeof clip.name !== "string")) {
+        if (
+          !isRecord(clip) ||
+          clip.trackId !== track.id ||
+          !isTime(clip.startTime) ||
+          !isTime(clip.duration) ||
+          (clip.name !== undefined && typeof clip.name !== "string")
+        ) {
           throw new Error("Invalid timeline clip");
         }
         registerId(clip.id, nodeIds);
@@ -154,9 +218,17 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
           Object.assign(clip, { kind: "resource" });
         }
         if (clip.kind === "group") {
-          if (track.type === "audio" || clip.resourceId !== undefined || clip.keyframes !== undefined ||
-            clip.animations !== undefined || clip.params !== undefined || clip.overrides !== undefined ||
-            clip.parentClipId !== undefined || clip.sourceInMs !== undefined) throw new Error("Invalid group clip");
+          if (
+            track.type === "audio" ||
+            clip.resourceId !== undefined ||
+            clip.keyframes !== undefined ||
+            (clip as LegacyAnimatedClip).animations !== undefined ||
+            clip.params !== undefined ||
+            clip.overrides !== undefined ||
+            clip.parentClipId !== undefined ||
+            clip.sourceInMs !== undefined
+          )
+            throw new Error("Invalid group clip");
           validateTracks(clip.tracks, true);
           if (clip.effects !== undefined) throw new Error("Groups cannot own attached effects");
           if ("effect" in clip) {
@@ -170,8 +242,13 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
           const isAudio = audioIds.has(clip.resourceId);
           if (clip.effects !== undefined) {
             const type = danmuTypes.get(clip.resourceId);
-            if (!type || (version !== 5 && version !== PROJECT_VERSION) || !Array.isArray(clip.effects) ||
-              clip.effects.length > MAX_CLIP_EFFECTS) throw new Error("Invalid clip effects");
+            if (
+              !type ||
+              (version !== 5 && version !== PROJECT_VERSION) ||
+              !Array.isArray(clip.effects) ||
+              clip.effects.length > MAX_CLIP_EFFECTS
+            )
+              throw new Error("Invalid clip effects");
             for (const effect of clip.effects) {
               // v5 的特效随片段整体拉伸，没有独立区间；迁移为覆盖整个片段，播放结果不变。
               if (version === 5 && isRecord(effect)) {
@@ -182,17 +259,27 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
               registerId(effect.id, nodeIds);
             }
           }
-          if ((insideGroup && isAudio) || (track.type === "audio" && !isAudio) ||
-            (track.type === "danmu" && isAudio)) throw new Error("Incompatible clip type");
-          if (clip.sourceInMs !== undefined && (!isAudio || !isTime(clip.sourceInMs))) throw new Error("Invalid source offset");
-          if (legacy && isAudio && clip.sourceInMs === undefined) clip.sourceInMs = 0;
-          if (clip.overrides !== undefined && (isAudio || !isRecord(clip.overrides) ||
-            (clip.overrides.id !== undefined && clip.overrides.id !== clip.resourceId) ||
-            (clip.overrides.type !== undefined && clip.overrides.type !== data.danmus.find((item) => item.id === clip.resourceId)?.type))) {
+          if ((insideGroup && isAudio) || (track.type === "audio" && !isAudio) || (track.type === "danmu" && isAudio))
+            throw new Error("Incompatible clip type");
+          if (clip.sourceInMs !== undefined && (!isAudio || !isTime(clip.sourceInMs)))
+            throw new Error("Invalid source offset");
+          if (hasLegacyLists && isAudio && clip.sourceInMs === undefined) clip.sourceInMs = 0;
+          if (
+            clip.overrides !== undefined &&
+            (isAudio ||
+              !isRecord(clip.overrides) ||
+              (clip.overrides.id !== undefined && clip.overrides.id !== clip.resourceId) ||
+              (clip.overrides.type !== undefined &&
+                clip.overrides.type !== data.danmus.find((item) => item.id === clip.resourceId)?.type))
+          ) {
             throw new Error("Invalid clip overrides");
           }
-          if (clip.parentClipId !== undefined && (isAudio || typeof clip.parentClipId !== "string" || !clip.parentClipId)) throw new Error("Invalid parent clip");
-          if (legacy && !isAudio) {
+          if (
+            clip.parentClipId !== undefined &&
+            (isAudio || typeof clip.parentClipId !== "string" || !clip.parentClipId)
+          )
+            throw new Error("Invalid parent clip");
+          if (hasLegacyLists && !isAudio) {
             const source = data.danmus.find((item) => item.id === clip.resourceId)!;
             clip.overrides = { ...source };
           }
@@ -201,6 +288,12 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
           instances.push(clip);
           clipsByResource.set(clip.resourceId, instances);
           validateAnimationData(clip);
+          if (!isAudio) {
+            normalizeCoordinates(clip.overrides, canvas);
+            for (const keyframe of clip.keyframes ?? []) normalizeCoordinates(keyframe.properties, canvas);
+            for (const animation of (clip as LegacyAnimatedClip).animations ?? [])
+              normalizeCoordinates(animation.properties, canvas);
+          }
         } else {
           throw new Error("Invalid clip kind");
         }
@@ -210,12 +303,25 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
   };
   validateTracks(data.tracks, false);
   for (const clip of clipsById.values()) {
-    if (legacy && clip.overrides?.parentId) {
+    if (hasLegacyLists && clip.overrides?.parentId) {
       const parents = clipsByResource.get(clip.overrides.parentId) ?? [];
       if (parents.length !== 1 || parents[0]!.id === clip.id) throw new Error("Ambiguous or missing legacy parent clip");
       clip.parentClipId = parents[0]!.id;
     }
-    if (legacy && clip.overrides) delete clip.overrides.parentId;
+    if (hasLegacyLists && clip.overrides) delete clip.overrides.parentId;
+  }
+  // v4 删除了旧的 set/then 动画模型，加载旧工程时一次性转换为关键帧。
+  for (const clip of clipsById.values()) {
+    const legacy = clip as typeof clip & LegacyAnimatedClip;
+    if (legacy.animations === undefined) continue;
+    if (legacy.animations.length > 0) {
+      const source = data.danmus.find((item) => item.id === clip.resourceId)!;
+      const resource = { ...source, ...clip.overrides, id: source.id, type: source.type } as typeof source;
+      const converted = convertLegacyAnimations(clip.id, resource, legacy.animations, clip.duration);
+      clip.keyframes = converted.keyframes;
+      if (Object.keys(converted.overrides).length > 0) clip.overrides = { ...clip.overrides, ...converted.overrides };
+    }
+    delete legacy.animations;
   }
   for (const clip of clipsById.values()) {
     const seen = new Set([clip.id]);
@@ -227,7 +333,7 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
       parent = target.parentClipId;
     }
   }
-  if (legacy) {
+  if (hasLegacyLists) {
     for (const danmu of data.danmus) delete danmu.parentId;
   }
   data.version = PROJECT_VERSION;
@@ -235,9 +341,6 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
   data.name = typeof data.name === "string" ? data.name : fallbackName;
   data.createdAt = isTime(data.createdAt) ? data.createdAt : Date.now();
   data.updatedAt = isTime(data.updatedAt) ? data.updatedAt : Date.now();
-  data.canvas ??= { width: 800, height: 450 };
-  if (!isRecord(data.canvas) || !isTime(data.canvas.width) || !isTime(data.canvas.height) ||
-    !data.canvas.width || !data.canvas.height) throw new Error("Invalid canvas size");
   data.timeline = { ...data.timeline, duration: updateGroupDurations(data.tracks) };
   return data;
 };

@@ -4,9 +4,9 @@ import { readFileSync } from "node:fs";
 import { runInNewContext } from "node:vm";
 import type { TextDanmu } from "../src/types/danmu";
 import type { TimelineResourceClip, TimelineTrack } from "../src/types/timeline";
-import { basNameForClip, compileTimelineToBas } from "../src/utils/compiler";
-import { getEffectiveDanmuAtTime } from "../src/utils/keyframes";
-import { splitClipAnimation } from "../src/utils/splitClip";
+import { basNameForClip, compileTimelineToBas } from "../src/core/compiler";
+import { getEffectiveDanmuAtTime } from "../src/core/keyframes";
+import { splitClipAnimation } from "../src/core/splitClip";
 
 const resource: TextDanmu = { id: "asset", type: "text", content: "shared", x: 0 };
 const clip = (id: string, overrides: Partial<TextDanmu> = {}): TimelineResourceClip => ({

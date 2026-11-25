@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from "vue";
 import { useMutationObserver } from "@vueuse/core";
-import { getGridPixel, getGridSize, formatTime, getPixelsPerSecond } from "@/utils/timeline";
+import { getGridPixel, getGridSize, formatTime, getPixelsPerSecond } from "@/core/timeline";
 
 type Props = {
   scale?: number; // 缩放比例 (1-100)

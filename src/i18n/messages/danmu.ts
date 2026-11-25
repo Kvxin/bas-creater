@@ -2,8 +2,9 @@
  * Namespace: danmu
  * ---------------------------------------------------------------------------
  * Danmaku domain vocabulary: the three danmaku kinds plus the default values
- * written into a freshly created resource (utils/danmuDefaults.ts,
- * utils/danmuFactory.ts) and the short labels used by resource helpers.
+ * written into a freshly created resource (passed in by stores/danmu.ts; core
+ * itself only knows the BAS runtime default) and the short labels used by
+ * resource helpers.
  *
  * NOTE: `defaultText` / `defaultButtonText` become *data* — they are stored in
  * the resource and in the generated BAS code. They are resolved on creation,

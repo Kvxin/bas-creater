@@ -19,7 +19,9 @@
     "test:effects": "node --import tsx --test tests/effect-plugins.test.ts",
     "test:updater": "node --import tsx --test tests/updater-manifest.test.mjs tests/app-update.test.ts",
     "test:window-controls": "node --import tsx --test tests/window-preferences.test.ts",
-    "test:storage": "node --import tsx --test tests/browser-project-file.test.ts tests/folder-project-storage.test.ts tests/desktop-recent-projects.test.ts tests/project-asset-migration.test.ts tests/clip-instances.test.ts tests/audio-clip.test.ts tests/asset-bins.test.ts"
+    "test:compiler": "node --import tsx --test tests/danmu-properties.test.ts tests/compiler-golden.test.ts tests/bas-import-golden.test.ts tests/bas-import.test.ts tests/legacy-animation-migration.test.ts",
+    "test:architecture": "node --import tsx --test tests/architecture.test.ts",
+    "test:storage": "node --import tsx --test tests/browser-project-file.test.ts tests/folder-project-storage.test.ts tests/desktop-recent-projects.test.ts tests/project-asset-migration.test.ts tests/clip-instances.test.ts tests/audio-clip.test.ts tests/asset-bins.test.ts tests/danmu-store.test.ts tests/timeline-store.test.ts"
   },
   "dependencies": {
     "@dantheman827/taglib-ts": "^0.1.5",

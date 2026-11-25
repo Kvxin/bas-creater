@@ -2,8 +2,9 @@ import { computed, reactive, ref } from "vue"
 import { defineStore } from "pinia"
 import type { AnyDanmu, DanmuType } from "@/types/danmu"
 import { i18n } from "@/i18n"
-import { createDanmuByKey } from "@/utils/danmuFactory"
+import { createDanmuByKey } from "@/core/danmuFactory"
 import { getItemName } from "@/utils/resourceUtils"
+import { useAssetsStore } from "@/stores/assets"
 
 const clamp = (val: number, min: number, max: number) => Math.min(max, Math.max(min, val))
 
@@ -13,8 +14,20 @@ export type ViewportState = {
   offsetY: number
 }
 
+/** 新建弹幕的默认文字随界面语言变化；core 层只知道 BAS 自身的默认值。 */
+const localizedIdentity = (type: DanmuType): Partial<AnyDanmu> => {
+  if (type === "text") return { content: i18n.global.t("danmu.defaultText") }
+  if (type === "button") return { text: i18n.global.t("danmu.defaultButtonText") }
+  return {}
+}
+
 export const useDanmuStore = defineStore("danmu", () => {
-  const danmus = ref<AnyDanmu[]>([])
+  const assets = useAssetsStore()
+  // 弹幕数据唯一存放在 assets store；这里只是按资源顺序派生的视图，写入会回写到 assets。
+  const danmus = computed<AnyDanmu[]>({
+    get: () => assets.assets.flatMap((asset) => (asset.type === "audio-file" ? [] : [asset.danmu])),
+    set: (next) => assets.replaceDanmus(next),
+  })
   const selectedId = ref<string | null>(null)
   const viewport = reactive<ViewportState>({
     scale: 1,
@@ -36,8 +49,8 @@ export const useDanmuStore = defineStore("danmu", () => {
    * @param options `select: false` 时不切换选中项，供批量导入使用
    */
   function add(type: DanmuType, payload: Partial<AnyDanmu> = {}, options: { select?: boolean } = {}) {
-    const dm = createDanmuByKey(type, payload)
-    danmus.value.push(dm)
+    const dm = createDanmuByKey(type, { ...localizedIdentity(type), ...payload })
+    assets.upsertAsset({ id: dm.id, type: dm.type, binId: null, danmu: dm })
     if (options.select !== false) select(dm.id)
     return dm
   }
@@ -54,7 +67,8 @@ export const useDanmuStore = defineStore("danmu", () => {
       name: i18n.global.t("common.duplicateName", { name: getItemName(source) }),
     })
 
-    danmus.value.push(dm)
+    const sourceBinId = assets.assets.find((asset) => asset.id === id)?.binId ?? null
+    assets.upsertAsset({ id: dm.id, type: dm.type, binId: sourceBinId, danmu: dm })
     select(dm.id)
     return dm
   }
@@ -68,19 +82,14 @@ export const useDanmuStore = defineStore("danmu", () => {
   }
 
   function updateSelected(payload: Partial<AnyDanmu>) {
-    const idx = danmus.value.findIndex((dm) => dm.id === selectedId.value)
-    if (idx === -1) return
-    danmus.value[idx] = { ...danmus.value[idx], ...payload } as AnyDanmu
+    if (selectedId.value) updateDanmu(selectedId.value, payload)
   }
 
   function updateDanmu(id: string, payload: Partial<AnyDanmu>) {
-    const idx = danmus.value.findIndex((dm) => dm.id === id)
-    if (idx === -1) return
-    danmus.value[idx] = { ...danmus.value[idx], ...payload } as AnyDanmu
-  }
-
-  function moveSelected(x: number, y: number) {
-    updateSelected({ x, y })
+    const asset = assets.assets.find((item) => item.id === id)
+    if (!asset || asset.type === "audio-file") return
+    const danmu = { ...asset.danmu, ...payload } as AnyDanmu
+    assets.upsertAsset({ ...asset, type: danmu.type, danmu })
   }
 
   function setViewport(next: Partial<ViewportState>) {
@@ -122,7 +131,6 @@ export const useDanmuStore = defineStore("danmu", () => {
     select,
     updateSelected,
     updateDanmu,
-    moveSelected,
     setViewport,
     zoom,
     pan,

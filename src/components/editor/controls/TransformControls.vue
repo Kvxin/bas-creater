@@ -4,7 +4,7 @@ import type { CSSProperties } from 'vue'
 import type { AnyDanmu } from '@/types/danmu'
 import { useI18n } from 'vue-i18n'
 import { RotateCw } from "lucide-vue-next";
-import { basNameForClip } from '@/utils/compiler'
+import { basNameForClip } from '@/core/compiler'
 import { useTimelineStore } from '@/stores/timeline'
 
 const { t } = useI18n()
@@ -25,10 +25,6 @@ interface TransformOverlayItem {
   clipId: string
   danmu: AnyDanmu
   parentClipId?: string
-  coordinatePercentageMode?: {
-    x: boolean
-    y: boolean
-  }
 }
 
 interface ElementRect {
@@ -221,17 +217,6 @@ const pixelsToPercent = (px: number, dimension: 'x' | 'y'): number => {
   return size > 0 && Number.isFinite(px) ? (px / size) * 100 : 0
 }
 
-const shouldStoreCoordinateAsPercentage = (
-  item: TransformOverlayItem,
-  dimension: 'x' | 'y'
-) => {
-  const preferredMode = item.coordinatePercentageMode?.[dimension]
-  if (preferredMode !== undefined) return preferredMode
-
-  const value = item.danmu[dimension]
-  return value == null ||
-    (typeof value === 'string' && value.trim().endsWith('%'))
-}
 
 
 const cloneDraft = (draft: DraftTransform): DraftTransform => ({ ...draft })
@@ -898,12 +883,8 @@ function commitDrafts(
     if (!changedFields.length) continue
 
     const values: Record<DraftCommitField, number | string> = {
-      x: shouldStoreCoordinateAsPercentage(item, 'x')
-        ? `${round(pixelsToPercent(draft.x, 'x'))}%`
-        : round(draft.x),
-      y: shouldStoreCoordinateAsPercentage(item, 'y')
-        ? `${round(pixelsToPercent(draft.y, 'y'))}%`
-        : round(draft.y),
+      x: `${round(pixelsToPercent(draft.x, 'x'))}%`,
+      y: `${round(pixelsToPercent(draft.y, 'y'))}%`,
       scale: round(clampScale(draft.scale)),
       rotateZ: round(draft.rotateZ),
       anchorX: round(clamp(draft.anchorX, 0, 1)),
@@ -1218,14 +1199,10 @@ function finishGesture(event?: PointerEvent) {
       }
       const changes: Partial<AnyDanmu> = {}
       if (Math.abs(snapshot.localX - snapshot.transform.e) > DRAFT_CHANGE_EPSILON) {
-        changes.x = shouldStoreCoordinateAsPercentage(item, 'x')
-          ? `${round(snapshot.localX / snapshot.parentWidth * 100)}%`
-          : round(snapshot.localX / snapshot.parentWidth * snapshot.canvasWidth)
+        changes.x = `${round(snapshot.localX / snapshot.parentWidth * 100)}%`
       }
       if (Math.abs(snapshot.localY - snapshot.transform.f) > DRAFT_CHANGE_EPSILON) {
-        changes.y = shouldStoreCoordinateAsPercentage(item, 'y')
-          ? `${round(snapshot.localY / snapshot.parentHeight * 100)}%`
-          : round(snapshot.localY / snapshot.parentHeight * snapshot.canvasHeight)
+        changes.y = `${round(snapshot.localY / snapshot.parentHeight * 100)}%`
       }
       if (Object.keys(changes).length) updates.push({ clipId: snapshot.clipId, changes })
     }

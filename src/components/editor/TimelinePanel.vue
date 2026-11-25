@@ -1,42 +1,24 @@
 <script setup lang="ts">
-import { ref, computed, watch, reactive, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import { useElementSize } from "@vueuse/core";
-import {
-  Clock,
-  ZoomIn,
-  ZoomOut,
-  Plus,
-  Trash2,
-  ChevronRight,
-  ChevronDown,
-  Eye,
-  EyeOff,
-  Volume2,
-  VolumeX,
-  Captions,
-  Music2,
-  Scissors,
-  ScissorsLineDashed,
-  Video,
-  FolderOpen,
-  FolderPlus,
-  Ungroup,
-  ArrowLeft
-} from "lucide-vue-next";
-import { draggedEffect, EFFECT_DRAG_TYPE, effectCatalog } from "@/effects/registry";
+import { FolderOpen } from "lucide-vue-next";
 import TimeRuler from "./TimeRuler.vue";
-import { formatTime } from "@/utils/timeline";
+import TimelineToolbar from "./timeline/TimelineToolbar.vue";
+import TimelineTrackHeaders from "./timeline/TimelineTrackHeaders.vue";
+import { formatTime } from "@/core/timeline";
 import { getItemName } from "@/utils/resourceUtils";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
 import { useAudioStore } from "@/stores/audio";
 import { useContextMenuStore } from "@/stores/contextMenu";
-import { BASE_KEYFRAME_ID, clampKeyframeTime, normalizeKeyframes } from "@/utils/keyframes";
-import { runSplitAction } from "@/utils/splitAction";
+import { useTimelinePlayhead } from "@/composables/useTimelinePlayhead";
+import { useTimelineInteractions } from "@/composables/useTimelineInteractions";
+import { BASE_KEYFRAME_ID, normalizeKeyframes } from "@/core/keyframes";
+import { draggedEffect, EFFECT_DRAG_TYPE, effectCatalog } from "@/effects/registry";
 import { effectText, matchesEffect, type EffectInstance } from "@/effects/types";
-
-import type { AnimationSegment, TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
+import { runSplitAction } from "@/utils/splitAction";
+import type { TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
 import AudioWaveform from "./audio/AudioWaveform.vue";
 import AudioVolumeLine from "./audio/AudioVolumeLine.vue";
 import { dBToLinear } from "@/utils/audio/audio-math";
@@ -49,8 +31,104 @@ const timelineStore = useTimelineStore();
 const danmuStore = useDanmuStore();
 const audioStore = useAudioStore();
 const contextMenu = useContextMenuStore();
+
 const editingGroupId = ref<string | null>(null);
 const editingGroupName = ref("");
+const timelineContentRef = ref<HTMLElement | null>(null);
+const trackHeadersRef = ref<InstanceType<typeof TimelineTrackHeaders> | null>(null);
+const scrollLeft = ref(0);
+
+const TIMELINE_END_PADDING_MS = 10000;
+const MAX_TIMELINE_ZOOM = 500;
+
+const pixelsPerSecond = computed(() => timelineStore.zoomScale * 2);
+const { width: timelineViewportWidth } = useElementSize(timelineContentRef);
+
+// 内容宽度由真实时长驱动，右侧余量只用于视图操作，不写入项目时长。
+const totalWidth = computed(() => {
+  const viewPaddingMs = timelineStore.duration > 0 ? TIMELINE_END_PADDING_MS : 0;
+  const contentWidth = ((timelineStore.duration + viewPaddingMs) / 1000) * pixelsPerSecond.value;
+  return Math.max(timelineViewportWidth.value, contentWidth, 1);
+});
+
+const inferTrackTypeFromClips = (track: TimelineTrack): TimelineTrackType | null => {
+  if (track.clips.length === 0) return null;
+  return track.clips.some(clip => audioStore.audioResources.some(resource => resource.id === clip.resourceId))
+    ? "audio"
+    : "danmu";
+};
+
+const getTrackType = (track: TimelineTrack): TimelineTrackType | null => {
+  return track.type ?? inferTrackTypeFromClips(track);
+};
+
+const getClipTimelineType = (clip: TimelineClip): TimelineTrackType => {
+  const sourceTrack = timelineStore.tracks.find(track => track.clips.some(trackClip => trackClip.id === clip.id));
+  if (sourceTrack?.type) return sourceTrack.type;
+
+  return audioStore.audioResources.some(resource => resource.id === clip.resourceId) ? "audio" : "danmu";
+};
+
+const {
+  isDraggingPlayhead,
+  playheadSnapKind,
+  playheadSnapText,
+  playheadTooltipStyle,
+  playheadStyle,
+  rulerPlayheadStyle,
+  updateTime,
+  startDragPlayhead,
+  stopDragPlayhead
+} = useTimelinePlayhead({
+  tracks: computed(() => timelineStore.tracks),
+  duration: computed(() => timelineStore.duration),
+  currentTime: computed(() => timelineStore.currentTime),
+  pixelsPerSecond,
+  scrollLeft,
+  timelineContentRef,
+  setCurrentTime: timeMs => timelineStore.setCurrentTime(timeMs),
+  translate: key => t(key)
+});
+
+const {
+  tempState,
+  tooltipPosition,
+  isDraggingClip,
+  draggedClipId,
+  originalClipTrackId,
+  dragTargetTrackId,
+  dragTargetGroupId,
+  isAltDragCopy,
+  draggedClip,
+  isResizingClip,
+  resizingClipId,
+  resizingHandle,
+  initialResizeStartTime,
+  isDraggingKeyframe,
+  getTrackIdAtPoint,
+  canDropDraggedClipIntoGroup,
+  canDropDraggedClipOnTrack,
+  isDragTargetTrack,
+  isInvalidDragTargetTrack,
+  isDraggedClipLeavingTrack,
+  getClipStyle,
+  getDragGhostClipStyle,
+  startDragClip,
+  startResizeClip,
+  selectKeyframeMarker,
+  getKeyframeMarkerStyle,
+  startDragKeyframe,
+  cancelAllInteractions
+} = useTimelineInteractions({
+  timelineStore,
+  danmuStore,
+  audioStore,
+  pixelsPerSecond,
+  editingGroupId,
+  getTrackType,
+  getClipTimelineType
+});
+
 const beginGroupRename = (clip: TimelineClip) => {
   if (clip.kind !== "group" || timelineStore.tracks.find(track => track.id === clip.trackId)?.locked) return;
   editingGroupName.value = clip.name ?? "";
@@ -61,6 +139,7 @@ const beginGroupRename = (clip: TimelineClip) => {
     input?.select();
   });
 };
+
 const finishGroupRename = () => {
   if (editingGroupId.value && editingGroupName.value.trim()) {
     timelineStore.updateClip(editingGroupId.value, { name: editingGroupName.value.trim() });
@@ -76,7 +155,7 @@ const TIMELINE_CLIP_THEME: Record<string, { backgroundColor: string; borderColor
   default: { backgroundColor: "var(--clip-path)", borderColor: "var(--clip-path-border)" }
 };
 
-const getClipThemeStyle = (clip: any) => {
+const getClipThemeStyle = (clip: TimelineClip) => {
   if (clip.kind === "group") return { backgroundColor: "var(--clip-group)", borderColor: "var(--clip-group-border)" };
   const danmu = danmuStore.danmus.find(d => d.id === clip.resourceId);
   const isAudio = audioStore.audioResources.some(resource => resource.id === clip.resourceId);
@@ -106,109 +185,12 @@ const handleContextMenu = (e: MouseEvent, type: "track" | "clip" | "background",
   }
 };
 
-// 计算动画片段的样式
-const getAnimationSegmentStyle = (clip: any, anim: AnimationSegment, index: number) => {
-  let startOffset = 0;
-
-  // Check if dragging or resizing this specific animation
-  const isDragging = isDraggingAnimation.value && draggedAnimationId.value === anim.id;
-  const isResizing = isResizingAnimation.value && resizingAnimationId.value === anim.id;
-
-  // Use temp state if active
-  const delay = isDragging && anim.type === "set" ? tempAnimationState.delay : anim.delay || 0;
-  const duration = isResizing ? tempAnimationState.duration : anim.duration;
-
-  if (anim.type === "set") {
-    startOffset = delay;
-  } else {
-    // For 'then', calculate start based on previous items
-    for (let i = 0; i < index; i++) {
-      const prev = clip.animations[i];
-      if (!prev) continue;
-
-      // If prev is being resized, use its temp duration
-      const prevDuration =
-        isResizingAnimation.value && resizingAnimationId.value === prev.id
-          ? tempAnimationState.duration
-          : prev.duration;
-      const prevDelay =
-        isDraggingAnimation.value && draggedAnimationId.value === prev.id && prev.type === "set"
-          ? tempAnimationState.delay
-          : prev.delay || 0;
-
-      // Check if prev is a 'then' block being dragged (inserting gap AFTER it? No, insert BEFORE it)
-      // If dragging prev (then block), it visually shifts right.
-      // Does it affect subsequent blocks? Yes, subsequent blocks shift right too.
-      const prevGap =
-        isDraggingAnimation.value && draggedAnimationId.value === prev.id && prev.type === "then"
-          ? tempAnimationState.delay
-          : 0;
-
-      startOffset += prevDuration + prevDelay + prevGap;
-    }
-
-    // If current block is 'then' and being dragged, add its own gap offset
-    if (isDragging && anim.type === "then") {
-      startOffset += tempAnimationState.delay;
-    }
-  }
-
-  const leftPercent = (startOffset / clip.duration) * 100;
-  const widthPercent = (duration / clip.duration) * 100;
-
-  // Colors
-  const bgColor = anim.type === "set" ? "var(--clip-text)" : "var(--clip-path)";
-  const borderColor = anim.type === "set" ? "var(--clip-text-border)" : "var(--clip-path-border)";
-
-  return {
-    left: `${leftPercent}%`,
-    width: `${widthPercent}%`,
-    height: "80%", // Fill most of the expanded row height
-    top: "10%",
-    backgroundColor: bgColor,
-    borderColor: borderColor,
-    borderWidth: "1px",
-    borderRadius: "3px",
-    zIndex: isDragging || isResizing ? 20 : 15
-  };
-};
-
-const handleAnimationClick = (clip: any, anim: AnimationSegment, e: MouseEvent) => {
-  e.stopPropagation();
-  timelineStore.setSelectedClip(clip.id);
-  timelineStore.setSelectedAnimation(anim.id);
-  danmuStore.select(clip.resourceId);
-};
-
-const TIMELINE_END_PADDING_MS = 10000;
-const MAX_TIMELINE_ZOOM = 500;
-
-// 像素/秒 计算
-const pixelsPerSecond = computed(() => timelineStore.zoomScale * 2);
-const timelineContentRef = ref<HTMLElement | null>(null);
-const { width: timelineViewportWidth } = useElementSize(timelineContentRef);
-
-// 内容宽度由真实时长驱动，右侧余量只用于视图操作，不写入项目时长。
-const totalWidth = computed(() => {
-  const viewPaddingMs = timelineStore.duration > 0 ? TIMELINE_END_PADDING_MS : 0;
-  const contentWidth = ((timelineStore.duration + viewPaddingMs) / 1000) * pixelsPerSecond.value;
-  return Math.max(timelineViewportWidth.value, contentWidth, 1);
-});
-
-// 滚动容器
-const trackListRef = ref<HTMLElement | null>(null);
-const scrollLeft = ref(0);
-
 const handleScroll = (e: Event) => {
   const target = e.target as HTMLElement;
-  effectTrackMenu.value = null;
   scrollLeft.value = target.scrollLeft;
   timelineStore.timelineScroll = { left: target.scrollLeft, top: target.scrollTop };
-
-  // 同步左侧轨道列表的垂直滚动
-  if (trackListRef.value) {
-    trackListRef.value.scrollTop = target.scrollTop;
-  }
+  trackHeadersRef.value?.setScrollTop(target.scrollTop);
+  effectTrackMenu.value = null;
 };
 
 // 缩放控制：缩放前后保持 Playhead 在视口中的横向位置不变。
@@ -240,7 +222,6 @@ const zoomOut = () => {
   void setTimelineZoom(timelineStore.zoomScale - 10);
 };
 
-// 格式化当前时间显示
 const currentTimeDisplay = computed(() => {
   const { h, m, s, ms } = formatTime(timelineStore.currentTime);
   const frames = Math.floor((ms / 1000) * 30);
@@ -319,7 +300,12 @@ const toggleTrackEffectMenu = (event: MouseEvent, track: TimelineTrack) => {
 };
 
 const startDragEffect = (e: MouseEvent, clip: TimelineClip, effect: EffectInstance, mode: "move" | "left" | "right") => {
-  if (clip.kind !== "resource" || timelineStore.tracks.find(track => track.clips.some(item => item.id === clip.id))?.locked) return;
+  if (
+    clip.kind !== "resource" ||
+    timelineStore.tracks.find(track => track.clips.some(item => item.id === clip.id))?.locked
+  ) {
+    return;
+  }
   e.preventDefault();
   e.stopPropagation();
   selectEffect(clip, effect);
@@ -338,7 +324,7 @@ const onDragEffect = (e: MouseEvent) => {
   if (!effectDragMode.value || !effectDragClipId.value || !effectDragId.value) return;
   const clip = timelineStore.tracks.flatMap(track => track.clips).find(item => item.id === effectDragClipId.value);
   if (!clip || clip.kind !== "resource") return;
-  const deltaMs = (e.clientX - effectDragStartX.value) / pixelsPerSecond.value * 1000;
+  const deltaMs = ((e.clientX - effectDragStartX.value) / pixelsPerSecond.value) * 1000;
   const [initialStart, initialEnd] = effectDragInitialSpan.value;
   const minDuration = Math.min(100, clip.duration);
   let start = initialStart;
@@ -374,11 +360,14 @@ const stopDragEffect = () => {
 const handleDocumentMouseDown = (e: MouseEvent) => {
   if (!(e.target as HTMLElement).closest("[data-effect-menu]")) effectTrackMenu.value = null;
 };
+
 watch(draggedEffect, plugin => {
   effectHoverId.value = null;
   if (plugin) effectDropError.value = "";
 });
+
 const isEffectDrag = (event: DragEvent) => event.dataTransfer?.types.includes(EFFECT_DRAG_TYPE);
+
 function trackDragOver(event: DragEvent) {
   event.preventDefault();
   if (isEffectDrag(event) && event.dataTransfer) {
@@ -386,6 +375,7 @@ function trackDragOver(event: DragEvent) {
     event.dataTransfer.dropEffect = "none";
   }
 }
+
 function clipDragOver(event: DragEvent, id: string) {
   if (!isEffectDrag(event) || !event.dataTransfer) return;
   event.stopPropagation();
@@ -395,6 +385,7 @@ function clipDragOver(event: DragEvent, id: string) {
   effectHoverId.value = compatible ? id : null;
   event.dataTransfer.dropEffect = compatible ? "copy" : "none";
 }
+
 function dropEffect(event: DragEvent, id: string) {
   if (!isEffectDrag(event)) return;
   event.preventDefault();
@@ -410,20 +401,14 @@ function dropEffect(event: DragEvent, id: string) {
   }
 }
 
-// 处理拖拽放置
 const handleDrop = (event: DragEvent, trackId: string) => {
   const data = event.dataTransfer?.getData("application/json");
   if (data && timelineContentRef.value) {
     try {
       const item = JSON.parse(data);
-      // 计算拖放位置的时间
       const rect = timelineContentRef.value.getBoundingClientRect();
-      // 这里 relativeX 直接用 clientX - rect.left + scrollLeft 即可
-      // 因为 timelineContentRef 现在就是单纯的滚动容器
       const relativeX = event.clientX - rect.left + scrollLeft.value;
-
       const timeMs = Math.max(0, Math.floor((relativeX / pixelsPerSecond.value) * 1000));
-
       timelineStore.addClip(item, trackId, timeMs);
     } catch (e) {
       console.error("解析拖拽数据失败", e);
@@ -431,118 +416,7 @@ const handleDrop = (event: DragEvent, trackId: string) => {
   }
 };
 
-// 添加轨道
-const handleAddTrack = () => {
-  timelineStore.addTrack();
-};
-
-// 删除轨道
-const handleRemoveTrack = (trackId: string) => {
-  timelineStore.removeTrack(trackId);
-};
-
-const toggleTrackVisibility = (trackId: string) => {
-  timelineStore.toggleTrackVisibility(trackId);
-};
-
-const toggleTrackMute = (trackId: string) => {
-  timelineStore.toggleTrackMute(trackId);
-};
-
-const inferTrackTypeFromClips = (track: TimelineTrack): TimelineTrackType | null => {
-  if (track.clips.length === 0) return null;
-  return track.clips.some(clip => audioStore.audioResources.some(resource => resource.id === clip.resourceId))
-    ? "audio"
-    : "danmu";
-};
-
-const getTrackType = (track: TimelineTrack): TimelineTrackType | null => {
-  return track.type ?? inferTrackTypeFromClips(track);
-};
-
-const getClipTimelineType = (clip: TimelineClip): TimelineTrackType => {
-  const sourceTrack = timelineStore.tracks.find(track => track.clips.some(trackClip => trackClip.id === clip.id));
-  if (sourceTrack?.type) return sourceTrack.type;
-
-  return audioStore.audioResources.some(resource => resource.id === clip.resourceId) ? "audio" : "danmu";
-};
-
-const getTrackTypeLabel = (track: TimelineTrack) => {
-  const type = getTrackType(track);
-  if (type === "audio") return t("timeline.track.type.audio");
-  if (type === "danmu") return t("timeline.track.type.danmu");
-  return t("timeline.track.type.empty");
-};
-
-const getTrackTypeIcon = (track: TimelineTrack) => {
-  const type = getTrackType(track);
-  if (type === "audio") return Music2;
-  return Captions;
-};
-
-const getTrackPrimaryIcon = (track: TimelineTrack) => {
-  if (getTrackType(track) === "audio") {
-    return track.muted ? VolumeX : Volume2;
-  }
-  return track.visible ? Eye : EyeOff;
-};
-
-const getTrackPrimaryLabel = (track: TimelineTrack) => {
-  if (getTrackType(track) === "audio") {
-    return track.muted ? t("timeline.track.unmute") : t("timeline.track.mute");
-  }
-  return track.visible ? t("timeline.track.hide") : t("timeline.track.show");
-};
-
-const isTrackPrimaryActive = (track: TimelineTrack) => {
-  return getTrackType(track) === "audio" ? Boolean(track.muted) : track.visible;
-};
-
-const toggleTrackPrimaryAction = (track: TimelineTrack) => {
-  if (getTrackType(track) === "audio") {
-    toggleTrackMute(track.id);
-    return;
-  }
-  toggleTrackVisibility(track.id);
-};
-
-// 临时状态，用于拖拽/调整大小时的高性能更新
-const tempState = reactive({
-  startTime: 0,
-  duration: 0
-});
-
-const tooltipPosition = reactive({ x: 0, y: 0 });
-
-// 获取 Clip 样式
-const getClipStyle = (clip: any) => {
-  let startTime = clip.startTime;
-  let duration = clip.duration;
-  let zIndex = 1;
-
-  // 如果正在拖拽这个片段，使用临时状态
-  if (isDraggingClip.value && draggedClipId.value === clip.id) {
-    startTime = tempState.startTime;
-    zIndex = 100;
-  }
-  // 如果正在调整这个片段大小，使用临时状态
-  else if (isResizingClip.value && resizingClipId.value === clip.id) {
-    startTime = tempState.startTime;
-    duration = tempState.duration;
-    zIndex = 100;
-  }
-
-  const left = (startTime / 1000) * pixelsPerSecond.value;
-  const width = (duration / 1000) * pixelsPerSecond.value;
-
-  return {
-    left: `${left}px`,
-    width: `${Math.max(clip.kind === "group" ? 28 : 1, width)}px`,
-    zIndex
-  };
-};
-
-const getClipName = (clip: any) => {
+const getClipName = (clip: TimelineClip) => {
   const danmu = danmuStore.danmus.find(d => d.id === clip.resourceId);
   if (danmu) {
     return getItemName(danmu);
@@ -571,257 +445,30 @@ const getClipKeyframeMarkers = (clip: TimelineClip) =>
 const isKeyframeSelected = (clip: TimelineClip, keyframeId: string) =>
   timelineStore.selectedClipId === clip.id && timelineStore.selectedKeyframeId === keyframeId;
 
-const getKeyframeMarkerStyle = (clip: TimelineClip, marker: { id: string; timeMs: number }) => {
-  const timeMs =
-    isDraggingKeyframe.value && draggedKeyframeClipId.value === clip.id && draggedKeyframeId.value === marker.id
-      ? tempKeyframeTime.value
-      : marker.timeMs;
-  const leftPercent = (clampKeyframeTime(timeMs, clip.duration) / Math.max(1, clip.duration)) * 100;
-
-  return {
-    left: `${leftPercent}%`
-  };
-};
-
-const selectKeyframeMarker = (clip: TimelineClip, marker: { id: string; isBase: boolean }, event?: MouseEvent) => {
-  if (clip.kind !== "resource") return;
-  event?.stopPropagation();
-  timelineStore.setSelectedClip(clip.id);
-  timelineStore.setSelectedKeyframe(marker.id);
-  danmuStore.select(clip.resourceId);
-};
-
 /** 双击关键帧 → 将播放头定位到关键帧所在时间 */
 const handleKeyframeDblClick = (clip: TimelineClip, marker: { timeMs: number }) => {
   const absoluteTime = clip.startTime + marker.timeMs;
   timelineStore.setCurrentTime(absoluteTime);
 };
 
-// 游标位置 (相对于内容区域)
-/** 吸附候选的语义种类；显示文本在渲染时通过 t() 解析。 */
-type PlayheadSemanticSnapKind = "clipStart" | "clipEnd" | "keyframe";
-type PlayheadSemanticSnapCandidate = {
-  timeMs: number;
-  kind: PlayheadSemanticSnapKind;
-};
-// 吸附像素大小
-const PLAYHEAD_SEMANTIC_SNAP_SCREEN_PX = 5;
-const playheadSnapKind = ref<PlayheadSemanticSnapKind | null>(null);
-const playheadTooltipClientX = ref(0);
-const playheadTooltipTop = ref(0);
-
-const getPlayheadSnapText = (kind: PlayheadSemanticSnapKind) => {
-  if (kind === "clipStart") return t("timeline.snap.clipStart");
-  if (kind === "clipEnd") return t("timeline.snap.clipEnd");
-  return t("timeline.snap.keyframe");
-};
-
-const playheadSnapText = computed(() => (playheadSnapKind.value ? getPlayheadSnapText(playheadSnapKind.value) : ""));
-
-const playheadSemanticSnapCandidates = computed<PlayheadSemanticSnapCandidate[]>(() => {
-  const candidates = new Map<string, PlayheadSemanticSnapCandidate>();
-  const addCandidate = (timeMs: number, kind: PlayheadSemanticSnapKind) => {
-    const clampedTime = Math.min(Math.max(0, timeMs), timelineStore.duration);
-    if (!Number.isFinite(clampedTime)) return;
-    const key = clampedTime.toFixed(3);
-    if (!candidates.has(key)) candidates.set(key, { timeMs: clampedTime, kind });
-  };
-
-  for (const track of timelineStore.tracks) {
-    for (const clip of track.clips) {
-      addCandidate(clip.startTime, "clipStart");
-      addCandidate(clip.startTime + clip.duration, "clipEnd");
-      for (const keyframe of normalizeKeyframes(clip.keyframes, clip.duration)) {
-        addCandidate(clip.startTime + keyframe.timeMs, "keyframe");
-      }
-    }
-  }
-
-  return [...candidates.values()].sort((left, right) => left.timeMs - right.timeMs);
-});
-
-const resolvePlayheadSemanticSnap = (rawTimeMs: number, disabled = false) => {
-  const clampedTime = Math.min(Math.max(0, rawTimeMs), timelineStore.duration);
-  if (disabled) return { timeMs: clampedTime, kind: null };
-
-  const candidates = playheadSemanticSnapCandidates.value;
-  let low = 0;
-  let high = candidates.length;
-  while (low < high) {
-    const middle = (low + high) >> 1;
-    if ((candidates[middle]?.timeMs ?? 0) < clampedTime) low = middle + 1;
-    else high = middle;
-  }
-
-  let nearest: PlayheadSemanticSnapCandidate | null = null;
-  for (const candidate of [candidates[low - 1], candidates[low]]) {
-    if (!candidate) continue;
-    if (!nearest || Math.abs(candidate.timeMs - clampedTime) < Math.abs(nearest.timeMs - clampedTime)) {
-      nearest = candidate;
-    }
-  }
-
-  const thresholdMs = (PLAYHEAD_SEMANTIC_SNAP_SCREEN_PX / pixelsPerSecond.value) * 1000;
-  if (nearest && Math.abs(nearest.timeMs - clampedTime) <= thresholdMs) {
-    return { timeMs: nearest.timeMs, kind: nearest.kind };
-  }
-
-  return { timeMs: clampedTime, kind: null };
-};
-
-const playheadTooltipStyle = computed(() => ({
-  left: `${Math.min(Math.max(80, playheadTooltipClientX.value), window.innerWidth - 80)}px`,
-  top: `${playheadTooltipTop.value}px`
-}));
-
-const playheadStyle = computed(() => {
-  const left = (timelineStore.currentTime / 1000) * pixelsPerSecond.value;
-  return {
-    left: `${left}px`
-  };
-});
-
-// 标尺区域的游标位置 (相对于视口，需要减去 scrollLeft)
-const rulerPlayheadStyle = computed(() => {
-  const rawLeft = (timelineStore.currentTime / 1000) * pixelsPerSecond.value;
-  return {
-    left: `${rawLeft - scrollLeft.value}px`,
-    display: rawLeft - scrollLeft.value >= 0 ? "block" : "none" // 简单优化，视口外隐藏
-  };
-});
-
-// 处理 TimeRuler 发出的点击事件
 const handleRulerClick = (timeMs: number) => {
   updateTime(timeMs);
 };
 
-// 处理轨道区域点击
 const handleTimelineClick = (e: MouseEvent) => {
-  // 如果正在拖拽 Playhead，不处理点击
   if (isDraggingPlayhead.value) return;
 
   const rect = timelineContentRef.value!.getBoundingClientRect();
   const clickX = e.clientX - rect.left + scrollLeft.value;
-  // 计算时间 (ms)
   const time = Math.max(0, (clickX / pixelsPerSecond.value) * 1000);
 
   updateTime(time);
 
-  // 点击空白区域取消选中
   timelineStore.setSelectedClip(null);
-  timelineStore.setSelectedAnimation(null);
   danmuStore.select(null);
 };
 
-const updateTime = (time: number, disableSnap = false) => {
-  const resolved = resolvePlayheadSemanticSnap(time, disableSnap);
-  playheadSnapKind.value = resolved.kind;
-  timelineStore.setCurrentTime(resolved.timeMs);
-};
-
-// Clip 拖拽逻辑
-const isDraggingClip = ref(false);
-const draggedClipId = ref<string | null>(null);
-const initialClipStartTime = ref(0);
-const dragStartX = ref(0);
-const originalClipTrackId = ref<string | null>(null);
-const dragTargetTrackId = ref<string | null>(null);
-const dragTargetGroupId = ref<string | null>(null);
-const draggedClipType = ref<TimelineTrackType | null>(null);
-const isAltDragCopy = ref(false);
-
-const draggedClip = computed(() => {
-  if (!draggedClipId.value) return null;
-
-  for (const track of timelineStore.tracks) {
-    const clip = track.clips.find(trackClip => trackClip.id === draggedClipId.value);
-    if (clip) return clip;
-  }
-
-  return null;
-});
-
-const getTrackIdAtPoint = (event: MouseEvent) => {
-  const element = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
-  const trackElement = element?.closest<HTMLElement>("[data-timeline-track-id]");
-  const trackId = trackElement?.dataset.timelineTrackId ?? null;
-
-  if (!trackId || !timelineStore.tracks.some(track => track.id === trackId)) {
-    return null;
-  }
-
-  return trackId;
-};
-
-/**
- * 获取鼠标位置下可作为拖拽目标的分组 ID。
- *
- * 使用 elementsFromPoint 兼容拖拽源覆盖目标的情况，并排除当前拖拽片段自身，
- * 避免拖动分组时把源分组误判为嵌套目标。
- *
- * @param event 当前鼠标事件，用于读取屏幕坐标
- * @returns 命中的目标分组 ID；没有合法目标时返回 null
- */
-const getGroupIdAtPoint = (event: MouseEvent) => {
-  const elements = document.elementsFromPoint(event.clientX, event.clientY);
-  const groupElement = elements
-    .map(element => element.closest<HTMLElement>('[data-clip-kind="group"]'))
-    .find((element): element is HTMLElement => element !== null && element.dataset.clipId !== draggedClipId.value);
-  const groupId = groupElement?.dataset.clipId ?? null;
-  if (!groupId) return null;
-
-  const group = timelineStore.tracks.flatMap(track => track.clips).find(clip => clip.id === groupId);
-  return group?.kind === "group" ? groupId : null;
-};
-
-/**
- * 判断当前拖拽片段是否允许投放到指定分组。
- *
- * @param groupId 待检测的目标分组 ID
- * @returns 允许投放时返回 true，否则返回 false
- */
-const canDropDraggedClipIntoGroup = (groupId: string) =>
-  timelineStore.canMoveClipIntoGroup(draggedClipId.value, groupId);
-
-const canDropDraggedClipOnTrack = (track: TimelineTrack) => {
-  if (!isDraggingClip.value || !draggedClipId.value || !draggedClipType.value) return false;
-  if (track.id === originalClipTrackId.value) return true;
-
-  const targetType = getTrackType(track);
-  if (targetType && targetType !== draggedClipType.value) return false;
-
-  return track.clips.length === 0 || targetType === draggedClipType.value;
-};
-
-const isDragTargetTrack = (track: TimelineTrack) => {
-  return isDraggingClip.value && dragTargetTrackId.value === track.id;
-};
-
-const isInvalidDragTargetTrack = (track: TimelineTrack) => {
-  return isDragTargetTrack(track) && !canDropDraggedClipOnTrack(track);
-};
-
-const isDraggedClipLeavingTrack = (clip: TimelineClip) => {
-  return (
-    isDraggingClip.value &&
-    draggedClipId.value === clip.id &&
-    ((Boolean(dragTargetGroupId.value) && dragTargetGroupId.value !== clip.id) ||
-      (Boolean(dragTargetTrackId.value) && dragTargetTrackId.value !== clip.trackId))
-  );
-};
-
-const getDragGhostClipStyle = (clip: TimelineClip) => {
-  const left = (tempState.startTime / 1000) * pixelsPerSecond.value;
-  const width = (clip.duration / 1000) * pixelsPerSecond.value;
-
-  return {
-    left: `${left}px`,
-    width: `${width}px`,
-    zIndex: 110
-  };
-};
-
-const handleClipClick = (clip: any, e: MouseEvent) => {
+const handleClipClick = (clip: TimelineClip, e: MouseEvent) => {
   if (e.ctrlKey || e.metaKey || e.shiftKey) {
     timelineStore.toggleClipSelection(clip.id);
     return;
@@ -829,489 +476,6 @@ const handleClipClick = (clip: any, e: MouseEvent) => {
   timelineStore.setSelectedClip(clip.id);
 };
 
-const startDragClip = (e: MouseEvent, clip: any) => {
-  // 左键点击才触发
-  if (e.button !== 0) return;
-  if (e.ctrlKey || e.metaKey || e.shiftKey || editingGroupId.value === clip.id) return;
-  if (timelineStore.tracks.find(track => track.id === clip.trackId)?.locked) return;
-
-  // 如果点击的是 resize handle，不要触发拖拽移动
-  if ((e.target as HTMLElement).dataset.handle) return;
-
-  e.stopPropagation(); // 阻止冒泡
-  e.preventDefault();
-
-  // 拖拽时同时也选中
-  if (!timelineStore.selectedClipIds.includes(clip.id)) timelineStore.setSelectedClip(clip.id);
-
-  isDraggingClip.value = true;
-  draggedClipId.value = clip.id;
-  initialClipStartTime.value = clip.startTime;
-  dragStartX.value = e.clientX;
-  originalClipTrackId.value = clip.trackId;
-  dragTargetTrackId.value = clip.trackId;
-  dragTargetGroupId.value = null;
-  draggedClipType.value = getClipTimelineType(clip);
-  isAltDragCopy.value = false;
-
-  // 初始化临时状态
-  tempState.startTime = clip.startTime;
-  tempState.duration = clip.duration;
-
-  // 初始化 tooltip 位置
-  tooltipPosition.x = e.clientX + 15;
-  tooltipPosition.y = e.clientY + 15;
-
-  document.body.style.cursor = "move";
-  window.addEventListener("mousemove", onDragClip);
-  window.addEventListener("mouseup", stopDragClip);
-};
-
-const onDragClip = (e: MouseEvent) => {
-  if (!isDraggingClip.value || !draggedClipId.value) return;
-
-  const deltaX = e.clientX - dragStartX.value;
-  const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
-
-  let newStartTime = initialClipStartTime.value + deltaMs;
-  newStartTime = Math.max(0, newStartTime); // 限制最小时间为 0
-
-  // 只更新本地临时状态，不触发 Store 更新
-  tempState.startTime = newStartTime;
-  const groupId = getGroupIdAtPoint(e);
-  dragTargetGroupId.value = groupId;
-  dragTargetTrackId.value = groupId ? null : (getTrackIdAtPoint(e) ?? dragTargetTrackId.value);
-
-  // 跟踪 Alt 键状态：Alt + 跨轨道拖拽 = 复制
-  isAltDragCopy.value = e.altKey;
-  const crossingTracks = Boolean(groupId) || dragTargetTrackId.value !== originalClipTrackId.value;
-  document.body.style.cursor = e.altKey && crossingTracks ? "copy" : "move";
-
-  // 更新 tooltip 位置
-  tooltipPosition.x = e.clientX + 15;
-  tooltipPosition.y = e.clientY + 15;
-};
-
-const stopDragClip = () => {
-  if (isDraggingClip.value && draggedClipId.value) {
-    if (dragTargetGroupId.value) {
-      if (isAltDragCopy.value) {
-        timelineStore.copyClipIntoGroup(draggedClipId.value, dragTargetGroupId.value);
-      } else {
-        timelineStore.moveClipIntoGroup(draggedClipId.value, dragTargetGroupId.value);
-      }
-    } else {
-      const targetTrackId = dragTargetTrackId.value ?? originalClipTrackId.value;
-      const targetTrack = timelineStore.tracks.find(track => track.id === targetTrackId);
-
-      // Alt + 跨轨道拖拽复制片段，并保留其素材引用。
-      if (isAltDragCopy.value && targetTrackId && targetTrackId !== originalClipTrackId.value && targetTrack) {
-        timelineStore.copyClipToTrack(draggedClipId.value, targetTrackId, {
-          startTime: tempState.startTime
-        });
-      } else {
-        const moved =
-          Boolean(targetTrackId) &&
-          Boolean(targetTrack) &&
-          timelineStore.moveClipToTrack(
-            draggedClipId.value,
-            targetTrackId!,
-            { startTime: tempState.startTime },
-            {
-              clipType: draggedClipType.value ?? undefined,
-              targetTrackType: targetTrack ? getTrackType(targetTrack) : null
-            }
-          );
-
-        if (!moved && originalClipTrackId.value) {
-          timelineStore.moveClipToTrack(
-            draggedClipId.value,
-            originalClipTrackId.value,
-            { startTime: tempState.startTime },
-            { clipType: draggedClipType.value ?? undefined }
-          );
-        }
-      }
-    }
-  }
-
-  isDraggingClip.value = false;
-  draggedClipId.value = null;
-  originalClipTrackId.value = null;
-  dragTargetTrackId.value = null;
-  dragTargetGroupId.value = null;
-  draggedClipType.value = null;
-  isAltDragCopy.value = false;
-  document.body.style.cursor = "";
-  window.removeEventListener("mousemove", onDragClip);
-  window.removeEventListener("mouseup", stopDragClip);
-};
-
-// Clip 调整大小逻辑 (Resize)
-const isResizingClip = ref(false);
-const resizingClipId = ref<string | null>(null);
-const resizingHandle = ref<"left" | "right" | null>(null);
-const initialResizeStartTime = ref(0);
-const initialResizeDuration = ref(0);
-const resizeStartX = ref(0);
-const initialResizeSourceInMs = ref(0);
-const resizeAudioDurationMs = ref<number | null>(null);
-const resizingAudio = ref(false);
-
-const startResizeClip = (e: MouseEvent, clip: any, handle: "left" | "right") => {
-  if (clip.kind === "group" || timelineStore.tracks.find(track => track.id === clip.trackId)?.locked) return;
-  e.stopPropagation();
-  e.preventDefault(); // 防止选中文本
-
-  isResizingClip.value = true;
-  resizingClipId.value = clip.id;
-  resizingHandle.value = handle;
-  initialResizeStartTime.value = clip.startTime;
-  initialResizeDuration.value = clip.duration;
-  initialResizeSourceInMs.value = clip.sourceInMs ?? 0;
-  const audio = audioStore.audioResources.find(resource => resource.id === clip.resourceId);
-  resizingAudio.value = Boolean(audio);
-  resizeAudioDurationMs.value = audio?.duration && audio.duration > 0 ? audio.duration : null;
-  resizeStartX.value = e.clientX;
-
-  // 初始化临时状态
-  tempState.startTime = clip.startTime;
-  tempState.duration = clip.duration;
-
-  // 初始化 tooltip 位置
-  tooltipPosition.x = e.clientX + 15;
-  tooltipPosition.y = e.clientY + 15;
-
-  document.body.style.cursor = handle === "left" ? "w-resize" : "e-resize";
-  window.addEventListener("mousemove", onResizeClip);
-  window.addEventListener("mouseup", stopResizeClip);
-};
-
-const onResizeClip = (e: MouseEvent) => {
-  if (!isResizingClip.value || !resizingClipId.value) return;
-
-  const deltaX = e.clientX - resizeStartX.value;
-  const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
-
-  if (resizingHandle.value === "right") {
-    // 右侧拖拽：只改变时长
-    let newDuration = initialResizeDuration.value + deltaMs;
-    newDuration = Math.max(100, newDuration); // 最小 100ms
-    if (resizeAudioDurationMs.value !== null) {
-      newDuration = Math.min(newDuration, Math.max(0, resizeAudioDurationMs.value - initialResizeSourceInMs.value));
-    }
-
-    // 更新临时状态
-    tempState.duration = newDuration;
-  } else {
-    // 左侧拖拽：改变开始时间和时长
-    let newStartTime = initialResizeStartTime.value + deltaMs;
-    let newDuration = initialResizeDuration.value - deltaMs;
-
-    // 限制
-    if (newStartTime < 0) {
-      newStartTime = 0;
-      newDuration = initialResizeStartTime.value + initialResizeDuration.value;
-    }
-    if (resizingAudio.value && newStartTime < initialResizeStartTime.value - initialResizeSourceInMs.value) {
-      newStartTime = initialResizeStartTime.value - initialResizeSourceInMs.value;
-      newDuration = initialResizeStartTime.value + initialResizeDuration.value - newStartTime;
-    }
-    const minimumDuration = Math.min(100, initialResizeDuration.value);
-    if (newDuration < minimumDuration) {
-      newDuration = minimumDuration;
-      newStartTime = initialResizeStartTime.value + initialResizeDuration.value - minimumDuration;
-    }
-
-    // 更新临时状态
-    tempState.startTime = newStartTime;
-    tempState.duration = newDuration;
-  }
-
-  // 更新 tooltip 位置
-  tooltipPosition.x = e.clientX + 15;
-  tooltipPosition.y = e.clientY + 15;
-};
-
-const stopResizeClip = () => {
-  if (isResizingClip.value && resizingClipId.value) {
-    // 调整结束，一次性提交到 Store
-    const updates = { startTime: tempState.startTime, duration: tempState.duration };
-    if (resizingAudio.value && resizingHandle.value === "left") {
-      timelineStore.updateClip(resizingClipId.value, {
-        ...updates,
-        sourceInMs: initialResizeSourceInMs.value + tempState.startTime - initialResizeStartTime.value
-      });
-    } else {
-      timelineStore.trimClip(resizingClipId.value, updates.startTime, updates.duration);
-    }
-  }
-
-  isResizingClip.value = false;
-  resizingClipId.value = null;
-  resizingHandle.value = null;
-  document.body.style.cursor = "";
-  window.removeEventListener("mousemove", onResizeClip);
-  window.removeEventListener("mouseup", stopResizeClip);
-};
-
-const isDraggingKeyframe = ref(false);
-const draggedKeyframeId = ref<string | null>(null);
-const draggedKeyframeClipId = ref<string | null>(null);
-const initialKeyframeTime = ref(0);
-const dragKeyframeStartX = ref(0);
-const tempKeyframeTime = ref(0);
-
-const startDragKeyframe = (
-  event: MouseEvent,
-  clip: TimelineClip,
-  marker: { id: string; timeMs: number; isBase: boolean }
-) => {
-  if (event.button !== 0) return;
-
-  selectKeyframeMarker(clip, marker, event);
-  if (marker.isBase) return;
-
-  event.preventDefault();
-  isDraggingKeyframe.value = true;
-  draggedKeyframeId.value = marker.id;
-  draggedKeyframeClipId.value = clip.id;
-  initialKeyframeTime.value = marker.timeMs;
-  tempKeyframeTime.value = marker.timeMs;
-  dragKeyframeStartX.value = event.clientX;
-  document.body.style.cursor = "ew-resize";
-  window.addEventListener("mousemove", onDragKeyframe);
-  window.addEventListener("mouseup", stopDragKeyframe);
-};
-
-const onDragKeyframe = (event: MouseEvent) => {
-  if (!isDraggingKeyframe.value || !draggedKeyframeClipId.value) return;
-  const clip = timelineStore.tracks.flatMap(track => track.clips).find(item => item.id === draggedKeyframeClipId.value);
-  if (!clip) return;
-
-  const deltaMs = ((event.clientX - dragKeyframeStartX.value) / pixelsPerSecond.value) * 1000;
-  tempKeyframeTime.value = clampKeyframeTime(initialKeyframeTime.value + deltaMs, clip.duration);
-};
-
-const stopDragKeyframe = () => {
-  if (isDraggingKeyframe.value && draggedKeyframeClipId.value && draggedKeyframeId.value) {
-    timelineStore.updateClipKeyframe(draggedKeyframeClipId.value, draggedKeyframeId.value, {
-      timeMs: tempKeyframeTime.value
-    });
-  }
-
-  isDraggingKeyframe.value = false;
-  draggedKeyframeId.value = null;
-  draggedKeyframeClipId.value = null;
-  document.body.style.cursor = "";
-  window.removeEventListener("mousemove", onDragKeyframe);
-  window.removeEventListener("mouseup", stopDragKeyframe);
-};
-
-// Animation Drag/Resize Logic
-const isDraggingAnimation = ref(false);
-const draggedAnimationId = ref<string | null>(null);
-const initialAnimationDelay = ref(0);
-const dragAnimStartX = ref(0);
-
-const isResizingAnimation = ref(false);
-const resizingAnimationId = ref<string | null>(null);
-const initialAnimationDuration = ref(0);
-const resizeAnimStartX = ref(0);
-
-const tempAnimationState = reactive({
-  delay: 0,
-  duration: 0
-});
-
-// Helper to find animation start time (offset) within clip
-const getAnimationStartOffset = (clip: any, anim: AnimationSegment, index: number) => {
-  let startOffset = 0;
-  if (anim.type === "set") {
-    startOffset = anim.delay || 0;
-  } else {
-    // 'then': cumulative
-    for (let i = 0; i < index; i++) {
-      const prev = clip.animations[i];
-      startOffset += prev.duration + (prev.delay || 0);
-    }
-  }
-  return startOffset;
-};
-
-const startDragAnimation = (e: MouseEvent, clip: any, anim: AnimationSegment) => {
-  if (e.button !== 0) return;
-  if ((e.target as HTMLElement).dataset.handle) return; // Ignore resize handle
-
-  e.stopPropagation();
-
-  timelineStore.setSelectedClip(clip.id);
-  timelineStore.setSelectedAnimation(anim.id);
-
-  isDraggingAnimation.value = true;
-  draggedAnimationId.value = anim.id;
-  dragAnimStartX.value = e.clientX;
-
-  // For 'set', we track absolute delay. For 'then', we track the *new gap* (delta).
-  if (anim.type === "set") {
-    initialAnimationDelay.value = anim.delay || 0;
-    tempAnimationState.delay = anim.delay || 0;
-  } else {
-    initialAnimationDelay.value = 0; // Represents gap
-    tempAnimationState.delay = 0;
-  }
-
-  document.body.style.cursor = "move";
-  window.addEventListener("mousemove", onDragAnimation);
-  window.addEventListener("mouseup", stopDragAnimation);
-};
-
-const onDragAnimation = (e: MouseEvent) => {
-  if (!isDraggingAnimation.value || !draggedAnimationId.value) return;
-
-  const deltaX = e.clientX - dragAnimStartX.value;
-  const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
-
-  // Determine type from selected animation
-  // Note: We need access to the animation object or type here.
-  // We can infer it or look it up.
-  // Simple way: check selectedAnimationId in store? Or just assume logic based on initialization.
-  // Let's look it up.
-  const clip = timelineStore.tracks
-    .find(t => t.clips.some(c => c.id === timelineStore.selectedClipId))
-    ?.clips.find(c => c.id === timelineStore.selectedClipId);
-  const anim = clip?.animations?.find(a => a.id === draggedAnimationId.value);
-
-  if (!anim) return;
-
-  if (anim.type === "set") {
-    let newDelay = initialAnimationDelay.value + deltaMs;
-    newDelay = Math.max(0, newDelay);
-    tempAnimationState.delay = newDelay;
-  } else {
-    // 'then': dragging right creates a gap
-    let gap = deltaMs; // initialAnimationDelay is 0
-    gap = Math.max(0, gap);
-    tempAnimationState.delay = gap;
-  }
-};
-
-const stopDragAnimation = () => {
-  if (isDraggingAnimation.value && draggedAnimationId.value && timelineStore.selectedClipId) {
-    const clip = timelineStore.tracks
-      .find(t => t.clips.some(c => c.id === timelineStore.selectedClipId))
-      ?.clips.find(c => c.id === timelineStore.selectedClipId);
-    const anim = clip?.animations?.find(a => a.id === draggedAnimationId.value);
-
-    if (clip && anim) {
-      if (anim.type === "set") {
-        timelineStore.updateClipAnimation(timelineStore.selectedClipId, draggedAnimationId.value, {
-          delay: tempAnimationState.delay
-        });
-      } else if (tempAnimationState.delay > 50) {
-        // Threshold to create gap
-        // Create 'gap' animation
-        const index = clip.animations!.findIndex(a => a.id === anim.id);
-        if (index !== -1) {
-          const gapAnim: AnimationSegment = {
-            id: `anim_${Date.now()}`,
-            type: "then",
-            duration: tempAnimationState.delay,
-            properties: {} // Empty properties = maintain state
-          };
-          timelineStore.insertClipAnimation(timelineStore.selectedClipId, index, gapAnim);
-        }
-      }
-    }
-  }
-  isDraggingAnimation.value = false;
-  draggedAnimationId.value = null;
-  document.body.style.cursor = "";
-  window.removeEventListener("mousemove", onDragAnimation);
-  window.removeEventListener("mouseup", stopDragAnimation);
-};
-
-const startResizeAnimation = (e: MouseEvent, clip: any, anim: AnimationSegment) => {
-  e.stopPropagation();
-  e.preventDefault();
-
-  timelineStore.setSelectedClip(clip.id);
-  timelineStore.setSelectedAnimation(anim.id);
-
-  isResizingAnimation.value = true;
-  resizingAnimationId.value = anim.id;
-  initialAnimationDuration.value = anim.duration;
-  resizeAnimStartX.value = e.clientX;
-
-  tempAnimationState.duration = anim.duration;
-
-  document.body.style.cursor = "e-resize";
-  window.addEventListener("mousemove", onResizeAnimation);
-  window.addEventListener("mouseup", stopResizeAnimation);
-};
-
-const onResizeAnimation = (e: MouseEvent) => {
-  if (!isResizingAnimation.value || !resizingAnimationId.value) return;
-
-  const deltaX = e.clientX - resizeAnimStartX.value;
-  const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
-
-  let newDuration = initialAnimationDuration.value + deltaMs;
-  newDuration = Math.max(100, newDuration); // Min 100ms
-
-  tempAnimationState.duration = newDuration;
-};
-
-const stopResizeAnimation = () => {
-  if (isResizingAnimation.value && resizingAnimationId.value && timelineStore.selectedClipId) {
-    timelineStore.updateClipAnimation(timelineStore.selectedClipId, resizingAnimationId.value, {
-      duration: tempAnimationState.duration
-    });
-  }
-  isResizingAnimation.value = false;
-  resizingAnimationId.value = null;
-  document.body.style.cursor = "";
-  window.removeEventListener("mousemove", onResizeAnimation);
-  window.removeEventListener("mouseup", stopResizeAnimation);
-};
-
-// Playhead 拖拽逻辑
-const isDraggingPlayhead = ref(false);
-
-const startDragPlayhead = (e: MouseEvent) => {
-  e.preventDefault();
-  isDraggingPlayhead.value = true;
-  playheadSnapKind.value = null;
-  playheadTooltipClientX.value = e.clientX;
-  playheadTooltipTop.value = (timelineContentRef.value?.getBoundingClientRect().top ?? 0) + 8;
-  document.body.style.cursor = "ew-resize";
-  window.addEventListener("mousemove", onDragPlayhead);
-  window.addEventListener("mouseup", stopDragPlayhead);
-};
-
-const onDragPlayhead = (e: MouseEvent) => {
-  if (!isDraggingPlayhead.value || !timelineContentRef.value) return;
-
-  const rect = timelineContentRef.value.getBoundingClientRect();
-  const moveX = e.clientX - rect.left + scrollLeft.value;
-  const rawTime = (moveX / pixelsPerSecond.value) * 1000;
-  const resolved = resolvePlayheadSemanticSnap(rawTime, e.shiftKey);
-
-  playheadSnapKind.value = resolved.kind;
-  playheadTooltipClientX.value = e.clientX;
-  timelineStore.setCurrentTime(resolved.timeMs);
-};
-
-const stopDragPlayhead = () => {
-  isDraggingPlayhead.value = false;
-  playheadSnapKind.value = null;
-  document.body.style.cursor = "";
-  window.removeEventListener("mousemove", onDragPlayhead);
-  window.removeEventListener("mouseup", stopDragPlayhead);
-
-};
-
-// 键盘事件处理 (删除片段)
 const handleKeyDown = (e: KeyboardEvent) => {
   const activeElement = document.activeElement as HTMLElement | null;
   if (activeElement?.matches("input, textarea, select") || activeElement?.isContentEditable) return;
@@ -1331,7 +495,6 @@ const handleKeyDown = (e: KeyboardEvent) => {
     return;
   }
   if (e.key === "Delete" || e.key === "Backspace") {
-    // 如果焦点在输入框中，不触发删除
     const activeTag = document.activeElement?.tagName.toLowerCase();
     if (
       activeTag === "input" ||
@@ -1347,9 +510,6 @@ const handleKeyDown = (e: KeyboardEvent) => {
       timelineStore.selectedClipId
     ) {
       timelineStore.removeClipKeyframe(timelineStore.selectedClipId, timelineStore.selectedKeyframeId);
-    } else if (timelineStore.selectedAnimationId && timelineStore.selectedClipId) {
-      timelineStore.removeClipAnimation(timelineStore.selectedClipId, timelineStore.selectedAnimationId);
-      timelineStore.selectedAnimationId = null;
     } else if (timelineStore.selectedClipId) {
       timelineStore.removeSelectedClips();
     }
@@ -1372,17 +532,9 @@ watch(
   async () => {
     contextMenu.hide();
     editingGroupId.value = null;
-    isDraggingClip.value = false;
-    isResizingClip.value = false;
-    isDraggingKeyframe.value = false;
-    isDraggingAnimation.value = false;
-    isResizingAnimation.value = false;
-    stopDragClip();
-    stopResizeClip();
-    stopDragKeyframe();
-    stopDragAnimation();
-    stopResizeAnimation();
+    cancelAllInteractions();
     stopDragPlayhead();
+    stopDragEffect();
     await nextTick();
     if (timelineContentRef.value) {
       timelineContentRef.value.scrollLeft = timelineStore.timelineScroll.left;
@@ -1396,47 +548,37 @@ watch(
 // 音频相关辅助函数
 // ============================================================
 
-/** 获取音频资源的 Blob URL */
 function getAudioUrl(clip: TimelineClip): string {
   const resource = audioStore.audioResources.find(r => r.id === clip.resourceId);
   return resource?.url ?? "";
 }
 
-/** 判断 clip 是否为音频类型 */
 function isAudioClip(clip: TimelineClip): boolean {
   return audioStore.audioResources.some(r => r.id === clip.resourceId);
 }
 
-/** 获取 clip 的有效音量参数（考虑预览覆盖） */
 function getClipVolume(clip: TimelineClip): number {
   return timelineStore.getEffectiveVolume(clip);
 }
 
-/** 判断 clip 是否被静音（元素级） */
 function isClipMuted(clip: TimelineClip): boolean {
   return timelineStore.isClipMuted(clip);
 }
 
-/** 为波形生成增益采样数组 */
 function buildGainSamples(clip: TimelineClip): number[] {
-  const durationSec = Math.max(0.001, clip.duration / 1000);
   const volumeDb = getClipVolume(clip);
   const muted = isClipMuted(clip);
 
-  // 查找所属轨道
   const track = timelineStore.tracks.find(t => t.clips.some(c => c.id === clip.id));
   const trackMuted = track?.muted === true;
 
   if (muted || trackMuted) {
-    // 静音 → 全部返回 0 增益
     return new Array(WAVEFORM_GAIN_SAMPLE_COUNT).fill(0);
   }
 
   const linearGain = dBToLinear(volumeDb);
   return new Array(WAVEFORM_GAIN_SAMPLE_COUNT).fill(linearGain);
 }
-
-// ---- 音量线事件处理 ----
 
 function handleVolumeChange(clipId: string, db: number) {
   timelineStore.previewClipParams(clipId, { volume: db });
@@ -1463,130 +605,7 @@ function handleVolumeSelect(clipId: string) {
 <template>
   <div class="panel workbench-panel h-full w-full overflow-hidden flex flex-col select-none" data-ui="timeline-panel">
     <p v-if="effectDropError" role="alert" class="px-3 py-1 text-xs text-destructive">{{ effectDropError }}</p>
-    <!-- 顶部工具栏 -->
-    <div
-      class="toolbar h-10 bg-panel flex items-center justify-between px-2 py-1 text-xs text-muted-foreground gap-4 shrink-0"
-    >
-      <div class="flex items-center gap-2">
-        <Clock class="size-3.5" />
-        <span class="font-mono text-foreground/80">{{ currentTimeDisplay }}</span>
-        <button
-          type="button"
-          class="size-7 inline-flex items-center justify-center rounded-sm hover:bg-accent disabled:opacity-40"
-          data-ui="create-group"
-          :title="t('groups.createHint')"
-          :aria-label="t('groups.create')"
-          :disabled="!timelineStore.canCreateGroup()"
-          @click="timelineStore.createGroup()"
-        >
-          <FolderPlus class="size-4" />
-        </button>
-        <button
-          type="button"
-          class="size-7 inline-flex items-center justify-center rounded-sm hover:bg-accent disabled:opacity-40"
-          data-ui="ungroup"
-          :title="t('groups.ungroupHint')"
-          :aria-label="t('groups.ungroup')"
-          :disabled="!timelineStore.canUngroupClip()"
-          @click="timelineStore.ungroupClip()"
-        >
-          <Ungroup class="size-4" />
-        </button>
-        <button
-          type="button"
-          class="size-7 inline-flex items-center justify-center rounded-sm hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
-          data-ui="split-element"
-          :title="t('menus.splitElement')"
-          :aria-label="t('menus.splitElement')"
-          :disabled="!timelineStore.canSplitClip(timelineStore.selectedClipId)"
-          @click="runSplitAction(() => timelineStore.splitClip(timelineStore.selectedClipId))"
-        >
-          <Scissors class="size-3.5" />
-        </button>
-        <button
-          type="button"
-          class="size-7 inline-flex items-center justify-center rounded-sm hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
-          data-ui="split-left"
-          :title="t('menus.splitLeft')"
-          :aria-label="t('menus.splitLeft')"
-          :disabled="!timelineStore.canSplitClip(timelineStore.selectedClipId)"
-          @click="runSplitAction(() => timelineStore.splitClipLeft(timelineStore.selectedClipId))"
-        >
-          <ScissorsLineDashed class="size-3.5 rotate-180" />
-        </button>
-        <button
-          type="button"
-          class="size-7 inline-flex items-center justify-center rounded-sm hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
-          data-ui="split-right"
-          :title="t('menus.splitRight')"
-          :aria-label="t('menus.splitRight')"
-          :disabled="!timelineStore.canSplitClip(timelineStore.selectedClipId)"
-          @click="runSplitAction(() => timelineStore.splitClipRight(timelineStore.selectedClipId))"
-        >
-          <ScissorsLineDashed class="size-3.5" />
-        </button>
-      </div>
-
-      <div class="flex items-center gap-2">
-        <span class="text-xs w-10 text-right tabular-nums">{{ timelineStore.zoomScale }}%</span>
-        <div class="flex gap-0.5 border border-border rounded-sm overflow-hidden bg-accent">
-          <button
-            class="size-7 inline-flex items-center justify-center hover:bg-foreground/10 cursor-pointer"
-            @click="zoomOut"
-            :aria-label="t('preview.zoom.out')"
-            :title="t('preview.zoom.out')"
-            data-ui="timeline-zoom-out"
-          >
-            <ZoomOut class="size-3" />
-          </button>
-          <div class="w-px bg-border"></div>
-          <button
-            class="size-7 inline-flex items-center justify-center hover:bg-foreground/10 cursor-pointer"
-            @click="zoomIn"
-            :aria-label="t('preview.zoom.in')"
-            :title="t('preview.zoom.in')"
-            data-ui="timeline-zoom-in"
-          >
-            <ZoomIn class="size-3" />
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <nav
-      class="flex min-h-8 shrink-0 items-center gap-1 overflow-x-auto border-b border-border px-2 text-xs"
-      data-ui="group-breadcrumb"
-      :aria-label="t('groups.root')"
-    >
-      <button
-        v-if="timelineStore.activeGroupPath.length"
-        type="button"
-        class="inline-flex size-6 shrink-0 items-center justify-center rounded-sm hover:bg-accent"
-        :title="t('groups.back')"
-        :aria-label="t('groups.back')"
-        @click="timelineStore.leaveGroup()"
-      >
-        <ArrowLeft class="size-3.5" />
-      </button>
-      <button
-        type="button"
-        class="shrink-0 rounded-sm px-2 py-1 hover:bg-accent"
-        @click="timelineStore.navigateToGroup(0)"
-      >
-        {{ t("groups.root") }}
-      </button>
-      <template v-for="(group, index) in timelineStore.activeGroups" :key="group.id">
-        <ChevronRight class="size-3 shrink-0 text-muted-foreground" />
-        <button
-          type="button"
-          class="max-w-48 shrink-0 truncate rounded-sm px-2 py-1 hover:bg-accent"
-          :class="{ 'text-primary font-medium': index === timelineStore.activeGroups.length - 1 }"
-          @click="timelineStore.navigateToGroup(index + 1)"
-        >
-          {{ group.name }}
-        </button>
-      </template>
-    </nav>
+    <TimelineToolbar :current-time-display="currentTimeDisplay" @zoom-in="zoomIn" @zoom-out="zoomOut" />
 
     <!-- 头部区域 (Header Row) -->
     <div class="flex h-8 shrink-0 bg-track-header border-b border-divider">
@@ -1618,132 +637,41 @@ function handleVolumeSelect(clipId: string) {
     <!-- 主体区域 (Body Row) -->
     <div class="flex-1 min-h-0 flex overflow-hidden">
       <!-- 左侧：轨道列表 (无滚动条，由右侧控制 scrollTop) -->
+      <TimelineTrackHeaders
+        ref="trackHeadersRef"
+        :tracks="timelineStore.tracks"
+        :selected-track-id="timelineStore.selectedTrackId"
+        :effect-menu-track-id="effectTrackMenu?.trackId ?? null"
+        :get-track-type="getTrackType"
+        :get-track-effect-count="getTrackEffectCount"
+        @select-track="timelineStore.selectTrack"
+        @toggle-track-effect-menu="toggleTrackEffectMenu"
+        @toggle-expand="timelineStore.toggleTrackExpand"
+        @toggle-visibility="timelineStore.toggleTrackVisibility"
+        @toggle-mute="timelineStore.toggleTrackMute"
+        @remove-track="timelineStore.removeTrack"
+        @add-track="timelineStore.addTrack"
+        @track-contextmenu="(event, trackId) => handleContextMenu(event, 'track', trackId)"
+      />
+
+      <!-- 右侧：时间轴内容区 (主滚动区域) -->
       <div
-        class="w-56 border-r border-divider bg-track-header flex flex-col shrink-0 overflow-hidden"
-        ref="trackListRef"
-        data-ui="track-headers"
-      >
-        <!-- 轨道头列表 -->
-        <template v-for="track in timelineStore.tracks" :key="track.id">
-          <div
-            class="h-10 grid grid-cols-[1rem_minmax(0,1fr)_1.25rem_1.25rem_1.25rem_1.25rem_1.25rem] items-center gap-0.5 px-2 text-xs group border-b border-divider hover:bg-accent/50 transition-colors shrink-0"
-            :class="{ 'text-muted-foreground/55': !track.visible, 'bg-secondary': timelineStore.selectedTrackId === track.id }"
-            :data-track-header-id="track.id"
-            @contextmenu="handleContextMenu($event, 'track', track.id)"
-          >
-            <button
-              @click="timelineStore.toggleTrackExpand(track.id)"
-              class="size-5 hover:bg-accent rounded-sm transition-colors inline-flex items-center justify-center"
-              :aria-label="t('timeline.track.expand')"
-            >
-              <component :is="track.expanded ? ChevronDown : ChevronRight" class="size-3 text-muted-foreground" />
-            </button>
-
-            <button
-              type="button"
-              class="min-w-0 truncate text-left font-medium text-muted-foreground hover:text-foreground"
-              :aria-label="t('effects.selectTrack', { name: track.name })"
-              :aria-pressed="timelineStore.selectedTrackId === track.id"
-              @click="timelineStore.selectTrack(track.id)"
-              :title="track.name"
-            >
-              {{ track.name }}
-            </button>
-            <button
-              class="size-5 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-              :class="{ 'text-primary bg-primary/10': isTrackPrimaryActive(track) }"
-              :aria-label="getTrackPrimaryLabel(track)"
-              :title="getTrackPrimaryLabel(track)"
-              @click.stop="toggleTrackPrimaryAction(track)"
-            >
-              <component :is="getTrackPrimaryIcon(track)" class="size-3" />
-            </button>
-            <button
-              type="button"
-              class="size-5 inline-flex items-center justify-center gap-px rounded-sm border text-[9px] font-semibold tracking-tight transition-colors"
-              :class="
-                getTrackEffectCount(track) > 0
-                  ? 'border-border/80 bg-background/60 text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground'
-                  : 'border-border/40 bg-transparent text-muted-foreground/30'
-              "
-              :disabled="getTrackEffectCount(track) === 0"
-              :title="t('effects.trackMenu', { n: getTrackEffectCount(track) })"
-              :aria-label="t('effects.trackMenu', { n: getTrackEffectCount(track) })"
-              :aria-expanded="effectTrackMenu?.trackId === track.id"
-              data-effect-menu
-              @mousedown.stop
-              @click.stop="toggleTrackEffectMenu($event, track)"
-            >
-              <span aria-hidden="true">FX</span>
-              <span v-if="getTrackEffectCount(track)" class="tabular-nums">{{ getTrackEffectCount(track) }}</span>
-            </button>
-            <span
-              class="size-5 inline-flex items-center justify-center rounded-sm border border-border/70 bg-background/80 text-muted-foreground"
-              :aria-label="t('timeline.track.typeLockedAria', { type: getTrackTypeLabel(track) })"
-              :title="t('timeline.track.typeLockedTitle', { type: getTrackTypeLabel(track) })"
-            >
-              <component :is="getTrackTypeIcon(track)" class="size-3" />
-            </span>
-            <span
-              class="size-5 inline-flex items-center justify-center rounded-sm border border-border/50 bg-background/50 text-muted-foreground/45"
-              :title="t('timeline.track.videoPlaceholder')"
-              :aria-label="t('timeline.track.videoPlaceholder')"
-            >
-              <Video class="size-3" />
-            </span>
-            <button
-              class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 size-5 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-opacity"
-              :aria-label="t('timeline.track.remove')"
-              :title="t('timeline.track.remove')"
-              @click.stop="handleRemoveTrack(track.id)"
-            >
-              <Trash2 class="size-3" />
-            </button>
-          </div>
-
-          <!-- Expanded Panel Header -->
-          <div
-            v-if="track.expanded"
-            class="h-16 bg-muted/30 border-b border-divider flex items-center justify-end px-3 text-xs text-muted-foreground shrink-0"
-            :class="{ 'opacity-55': !track.visible }"
-          >
-            <span class="opacity-70">{{ t("timeline.keyframes") }}</span>
-          </div>
-        </template>
-
-        <button
-          @click="handleAddTrack"
-          class="w-full h-8 flex items-center justify-center gap-1 text-xs text-muted-foreground hover:text-primary hover:bg-accent transition-colors mt-1 shrink-0"
-        >
-          <Plus class="size-3" />
-          {{ t("timeline.addTrack") }}
-        </button>
-
-        <!-- 底部占位，防止内容被遮挡 -->
-        <div class="h-20 shrink-0"></div>
-      </div>
-
-      <!-- 右侧：时间轴内容 (主滚动容器) -->
-      <div
-        class="flex-1 min-h-0 min-w-0 flex flex-col overflow-auto scrollbar-thin relative bg-timeline"
+        class="flex-1 overflow-auto relative bg-timeline"
         ref="timelineContentRef"
-        data-ui="timeline-content"
+        data-ui="timeline-tracks"
         @scroll="handleScroll"
+        @click="handleTimelineClick"
+        @contextmenu="handleContextMenu($event, 'background')"
       >
-        <!-- Tracks Container -->
-        <div
-          class="timeline-track-surface relative shrink-0"
-          :style="{ width: totalWidth + 'px' }"
-          @mousedown.self="handleTimelineClick"
-          @contextmenu.prevent="handleContextMenu($event, 'background')"
-        >
-          <!-- 轨道行 -->
+        <div class="timeline-track-surface relative" :style="{ width: totalWidth + 'px' }">
+          <!-- 轨道列表 -->
           <template v-for="track in timelineStore.tracks" :key="track.id">
+            <!-- Main Track Row -->
             <div
-              class="h-10 relative group border-b border-divider hover:bg-accent/35 transition-colors"
+              class="h-10 relative transition-colors border-b border-divider"
               :class="{
-                'opacity-55': !track.visible,
-                'bg-primary/10 ring-1 ring-inset ring-primary/30':
+                'opacity-45 saturate-50': !track.visible,
+                'bg-primary/10 ring-1 ring-inset ring-primary/35':
                   isDragTargetTrack(track) && canDropDraggedClipOnTrack(track),
                 'bg-destructive/10 ring-1 ring-inset ring-destructive/30': isInvalidDragTargetTrack(track)
               }"
@@ -1761,7 +689,8 @@ function handleVolumeSelect(clipId: string) {
                     clip.id
                   ),
                   'outline outline-2 outline-primary z-20':
-                    effectHoverId === clip.id || (dragTargetGroupId === clip.id && canDropDraggedClipIntoGroup(clip.id)),
+                    effectHoverId === clip.id ||
+                    (dragTargetGroupId === clip.id && canDropDraggedClipIntoGroup(clip.id)),
                   'outline outline-2 outline-destructive z-20':
                     dragTargetGroupId === clip.id && !canDropDraggedClipIntoGroup(clip.id),
                   'opacity-35': isDraggedClipLeavingTrack(clip)
@@ -1786,8 +715,22 @@ function handleVolumeSelect(clipId: string) {
                   class="absolute inset-0"
                   :audio-url="getAudioUrl(clip)"
                   :clip-duration-ms="isResizingClip && resizingClipId === clip.id ? tempState.duration : clip.duration"
-                  :source-start-sec="clip.kind === 'resource' ? ((clip.sourceInMs ?? 0) + (isResizingClip && resizingClipId === clip.id && resizingHandle === 'left' ? tempState.startTime - initialResizeStartTime : 0)) / 1000 : 0"
-                  :clip-start-ms="isDraggingClip && draggedClipId === clip.id ? tempState.startTime : isResizingClip && resizingClipId === clip.id ? tempState.startTime : clip.startTime"
+                  :source-start-sec="
+                    clip.kind === 'resource'
+                      ? ((clip.sourceInMs ?? 0) +
+                          (isResizingClip && resizingClipId === clip.id && resizingHandle === 'left'
+                            ? tempState.startTime - initialResizeStartTime
+                            : 0)) /
+                        1000
+                      : 0
+                  "
+                  :clip-start-ms="
+                    isDraggingClip && draggedClipId === clip.id
+                      ? tempState.startTime
+                      : isResizingClip && resizingClipId === clip.id
+                        ? tempState.startTime
+                        : clip.startTime
+                  "
                   :gain-samples="buildGainSamples(clip)"
                   :pixels-per-second="pixelsPerSecond"
                   :scroll-left="scrollLeft"

@@ -1,19 +1,8 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import type {
-  TimelineTrack,
-  TimelineClip,
-  AnimationSegment,
-  TimelineTrackType,
-  TimelineKeyframe,
-  TimelineKeyframeProperties,
-  TimelineClipParams,
-  TimelineGroupClip,
-  TimelineResourceClip,
-} from "@/types/timeline";
+import type { TimelineTrack, TimelineClip, TimelineTrackType, TimelineGroupClip } from "@/types/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
-import type { BasImportObject } from "@/utils/basImport";
 import { defaultEffectParams, matchesEffect, type EffectParams, type EffectPlugin } from "@/effects/types";
 import { buildInstance, sliceEffects } from "@/effects/instances";
 import { MAX_CLIP_EFFECTS } from "@/effects/validation";
@@ -21,17 +10,24 @@ import { useAudioStore } from "@/stores/audio";
 import { i18n } from "@/i18n";
 import { getItemName } from "@/utils/resourceUtils";
 import { useDanmuStore } from "@/stores/danmu";
-import { compileTimelineToBas, findEffectTimingConflict } from "@/utils/compiler";
-import { splitClipAnimation } from "@/utils/splitClip";
-import { createTimelineId, getTimelineDuration, updateGroupDurations, visitTimelineClips } from "@/utils/timelineGroups";
+import { findEffectTimingConflict } from "@/core/compiler";
+import { splitClipAnimation } from "@/core/splitClip";
+import { getTimelineDuration, updateGroupDurations, visitTimelineClips } from "@/core/timelineGroups";
+import { BASE_KEYFRAME_ID } from "@/core/keyframes";
 import {
-  BASE_KEYFRAME_ID,
-  KEYFRAME_TOLERANCE_MS,
-  clampKeyframeTime,
-  createKeyframeId,
-  normalizeKeyframes,
-  pickKeyframeProperties,
-} from "@/utils/keyframes";
+  applyClipUpdates,
+  applyTrackType,
+  clearTrackTypeIfEmpty,
+  cloneClip,
+  findClipLocation as findClipLocationIn,
+  getResourceTrackType
+} from "@/core/timelineTracks";
+import type { TimelineStoreContext } from "@/stores/timeline/context";
+import { createTimelineClipboard } from "@/stores/timeline/clipboard";
+import { createTimelinePreview } from "@/stores/timeline/preview";
+import { createTimelineGroups } from "@/stores/timeline/groups";
+import { createTimelineBasImport } from "@/stores/timeline/basImport";
+import { createTimelineKeyframes } from "@/stores/timeline/keyframes";
 
 export const useTimelineStore = defineStore("timeline", () => {
   // 默认轨道名是真实数据：创建时按当前语言生成快照，切换语言不会重写已有轨道名。
@@ -42,8 +38,8 @@ export const useTimelineStore = defineStore("timeline", () => {
       clips: [],
       visible: true,
       muted: false,
-      locked: false,
-    },
+      locked: false
+    }
   ]);
 
   const activeGroupPath = ref<string[]>([]);
@@ -82,251 +78,40 @@ export const useTimelineStore = defineStore("timeline", () => {
     set: (id: string | null) => {
       if (primarySelectedClipId.value !== id) editingEffectId.value = null;
       primarySelectedClipId.value = id;
-      selectedTrackId.value = id ? findClipLocation(id)?.track.id ?? null : null;
+      selectedTrackId.value = id ? (findClipLocation(id)?.track.id ?? null) : null;
       if (!id) selectedClipIds.value = [];
       else if (!selectedClipIds.value.includes(id)) selectedClipIds.value = [id];
     }
   });
-  const selectedAnimationId = ref<string | null>(null);
   const selectedKeyframeId = ref<string | null>(null);
   const autoKeyframe = ref(true);
   const navigationRevision = ref(0);
   const timelineScroll = ref({ left: 0, top: 0 });
   const viewStates = new Map<string, { zoom: number; left: number; top: number }>();
 
-  // ============================================================
-  // 剪贴板系统（Clipboard System）
-  // 用于轨道的复制/粘贴功能
-  // ============================================================
+  const findClipLocation = (clipId: string) => findClipLocationIn(tracks.value, clipId);
 
-  interface ClipboardData {
-    clipData: TimelineClip;
-    /** 原始轨道类型（复制时记录，粘贴时用于类型兼容性检查） */
-    trackType: TimelineTrackType | undefined;
-  }
-
-  /** 剪贴板中存储的片段数据 */
-  const clipboardClip = ref<ClipboardData | null>(null);
-
-  /** 是否有可粘贴的片段 */
-  const hasClipboardClip = () => clipboardClip.value !== null;
-
-  /**
-   * 将片段复制到剪贴板
-   * 深拷贝片段数据，剥离 id 和 trackId，同时记录轨道类型
-   */
-  const copyClipToClipboard = (clip: TimelineClip) => {
-    const location = findClipLocation(clip.id);
-    const trackType = location?.track.type;
-    clipboardClip.value = {
-      clipData: JSON.parse(JSON.stringify(clip)),
-      trackType: clip.kind === "group" ? "danmu" : trackType
-    };
-    console.log(`[TimelineStore] 已复制片段到剪贴板: ${clip.name || clip.id}`);
+  // 各模块在 setup 阶段创建，主 store 的函数此时尚未定义，所以通过包装函数延迟取用。
+  const context: TimelineStoreContext = {
+    rootTracks,
+    tracks,
+    activeGroupPath,
+    selectedClipIds,
+    selectedClipId,
+    selectedKeyframeId,
+    findClipLocation,
+    recalculateDuration: () => recalculateDuration(),
+    setSelectedClip: (id) => setSelectedClip(id),
+    setSelectedClips: (ids, primaryId) => setSelectedClips(ids, primaryId),
+    addTrack: (name, type) => addTrack(name, type) ?? null
   };
-
-  /**
-   * 从剪贴板粘贴片段到指定轨道
-   * 自动为所有嵌套结构生成新的 ID
-   */
-  const pasteClipFromClipboard = (trackId: string, startTime: number): TimelineClip | null => {
-    if (!clipboardClip.value) {
-      console.warn("[TimelineStore] 剪贴板为空，无法粘贴");
-      return null;
-    }
-
-    const track = tracks.value.find((t) => t.id === trackId);
-    if (!track || track.locked) {
-      console.warn(`[TimelineStore] 目标轨道不存在: ${trackId}`);
-      return null;
-    }
-
-    const { clipData: source, trackType: sourceTrackType } = clipboardClip.value;
-    if (activeGroupPath.value.length && sourceTrackType === "audio") return null;
-
-    // 检查轨道类型兼容性
-    if (track.clips.length && track.type && sourceTrackType && track.type !== sourceTrackType) {
-      console.warn(
-        `[TimelineStore] 无法将 ${sourceTrackType} 片段粘贴到 ${track.type} 轨道`
-      );
-      return null;
-    }
-
-    // 深拷贝剪贴板数据
-    const newClip = cloneClip(source, trackId);
-    newClip.startTime = Math.max(0, startTime);
-
-    // 确保轨道类型匹配
-    if (sourceTrackType && track.type !== sourceTrackType) {
-      applyTrackType(track, sourceTrackType);
-    }
-
-    track.clips.push(newClip);
-    track.clips.sort((a, b) => a.startTime - b.startTime);
-    recalculateDuration();
-    setSelectedClip(newClip.id);
-    selectedAnimationId.value = null;
-    selectedKeyframeId.value = BASE_KEYFRAME_ID;
-
-    console.log(`[TimelineStore] 已粘贴片段到轨道 ${track.name}:`, newClip);
-    return newClip;
-  };
-
-  /** 清空剪贴板 */
-  const clearClipboard = () => {
-    clipboardClip.value = null;
-  };
-
-  // ============================================================
-  // 预览系统（Preview System）
-  // 用于非破坏性编辑：拖动音量线等操作时不写入历史，
-  // 只在松手后统一提交。
-  // ============================================================
-
-  /** 预览覆盖层：clipId -> 临时参数覆盖 */
-  const previewOverlay = ref<Map<string, TimelineClipParams>>(new Map());
-
-  /** 应用预览覆盖（不写入历史） */
-  const previewClipParams = (clipId: string, patch: TimelineClipParams) => {
-    const existing = previewOverlay.value.get(clipId) ?? {};
-    previewOverlay.value = new Map(previewOverlay.value).set(clipId, {
-      ...existing,
-      ...patch,
-    });
-  };
-
-  /** 提交预览：将预览值写入真实的 clip 参数 */
-  const commitPreview = () => {
-    for (const [clipId, patch] of previewOverlay.value) {
-      const location = findClipLocation(clipId);
-      if (location?.clip.kind === "resource") {
-        const params = location.clip.params ?? {};
-        location.clip.params = { ...params, ...patch };
-      }
-    }
-    previewOverlay.value = new Map();
-  };
-
-  /** 丢弃预览：清空所有预览覆盖 */
-  const discardPreview = () => {
-    previewOverlay.value = new Map();
-  };
-
-  /** 获取 clip 的有效参数（预览优先） */
-  const getEffectiveParams = (clip: TimelineClip): TimelineClipParams => {
-    const preview = previewOverlay.value.get(clip.id);
-    const base = clip.params ?? {};
-    if (!preview) return base;
-    return { ...base, ...preview };
-  };
-
-  /** 获取 clip 的有效音量（dB），考虑预览和静音 */
-  const getEffectiveVolume = (clip: TimelineClip): number => {
-    const params = getEffectiveParams(clip);
-    return params.volume ?? 0;
-  };
-
-  /** 获取 clip 是否被静音 */
-  const isClipMuted = (clip: TimelineClip): boolean => {
-    const params = getEffectiveParams(clip);
-    return params.muted === true;
-  };
-
-  /** 更新 clip 的音量 */
-  const updateClipVolume = (clipId: string, volume: number) => {
-    const location = findClipLocation(clipId);
-    if (location?.clip.kind === "resource") {
-      const params = location.clip.params ?? {};
-      location.clip.params = { ...params, volume };
-    }
-  };
-
-  /** 切换 clip 的静音状态 */
-  const toggleClipMuted = (clipId: string) => {
-    const location = findClipLocation(clipId);
-    if (location?.clip.kind === "resource") {
-      const params = location.clip.params ?? {};
-      location.clip.params = { ...params, muted: !params.muted };
-    }
-  };
-
-  const getResourceTrackType = (resource: AnyDanmu | AudioResource): TimelineTrackType => {
-    return resource.type === "audio-file" ? "audio" : "danmu";
-  };
-
-  const applyTrackType = (track: TimelineTrack, type: TimelineTrackType) => {
-    track.type = type;
-    if (type === "audio") {
-      track.visible = true;
-    } else {
-      track.muted = false;
-    }
-  };
-
-  const clearTrackTypeIfEmpty = (track: TimelineTrack) => {
-    if (track.clips.length === 0) {
-      track.type = undefined;
-      track.visible = true;
-      track.muted = false;
-    }
-  };
-
-  const findClipLocation = (clipId: string) => {
-    for (const track of tracks.value) {
-      const clipIndex = track.clips.findIndex((clip) => clip.id === clipId);
-      if (clipIndex !== -1) {
-        const clip = track.clips[clipIndex];
-        if (!clip) continue;
-
-        return {
-          track,
-          clip,
-          clipIndex,
-        };
-      }
-    }
-
-    return null;
-  };
-
-  const applyClipUpdates = (clip: TimelineClip, updates: Partial<TimelineClip>) => {
-    if (clip.kind === "group") {
-      if (updates.name !== undefined) clip.name = updates.name;
-      if (updates.startTime !== undefined && Number.isFinite(updates.startTime)) {
-        clip.startTime = Math.max(0, updates.startTime);
-      }
-      return;
-    }
-    if (updates.sourceInMs !== undefined && (!Number.isFinite(updates.sourceInMs) || updates.sourceInMs < 0)) {
-      throw new Error("Invalid clip source offset");
-    }
-    const {
-      trackId: _ignoredTrackId,
-      startTime,
-      duration: clipDuration,
-      ...rest
-    } = updates;
-
-    Object.assign(clip, rest);
-
-    if (startTime !== undefined) {
-      clip.startTime = Math.max(0, startTime);
-    }
-
-    if (clipDuration !== undefined) {
-      clip.duration = Math.max(0, clipDuration);
-      clip.keyframes = normalizeKeyframes(clip.keyframes, clip.duration);
-      // 特效保持自身时长，只截掉超出新终点的部分；左侧裁剪由 trimClip 传入已平移的 effects。
-      if (clip.effects && !("effects" in updates)) clip.effects = sliceEffects(clip.effects, 0, clip.duration);
-    }
-    if (clip.effects && !clip.effects.length) delete clip.effects;
-  };
-
-  const getClipEndTime = (clip: TimelineClip) => {
-    const startTime = Number.isFinite(clip.startTime) ? Math.max(0, clip.startTime) : 0;
-    const clipDuration = Number.isFinite(clip.duration) ? Math.max(0, clip.duration) : 0;
-    return startTime + clipDuration;
-  };
+  const clipboard = createTimelineClipboard(context);
+  const preview = createTimelinePreview(context);
+  const groups = createTimelineGroups(context);
+  const basImport = createTimelineBasImport(context);
+  const keyframes = createTimelineKeyframes(context);
+  const { clearClipboard } = clipboard;
+  const { discardPreview } = preview;
 
   const recalculateDuration = () => {
     updateGroupDurations(rootTracks.value);
@@ -337,7 +122,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     }
     if (selectedClipIds.value.length) {
       setSelectedClips(selectedClipIds.value, selectedClipId.value);
-    } else if (selectedTrackId.value && !tracks.value.some(track => track.id === selectedTrackId.value)) {
+    } else if (selectedTrackId.value && !tracks.value.some((track) => track.id === selectedTrackId.value)) {
       selectedTrackId.value = null;
     }
     currentTime.value = Math.max(0, Math.min(currentTime.value, duration.value));
@@ -346,7 +131,7 @@ export const useTimelineStore = defineStore("timeline", () => {
   const effectScopeLocked = computed(() => {
     let scope = rootTracks.value;
     for (const group of activeGroups.value) {
-      if (scope.find(track => track.id === group.trackId)?.locked) return true;
+      if (scope.find((track) => track.id === group.trackId)?.locked) return true;
       scope = group.tracks;
     }
     return false;
@@ -363,7 +148,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     )
       return null;
     const clip = location.clip;
-    const resource = useDanmuStore().danmus.find(item => item.id === clip.resourceId);
+    const resource = useDanmuStore().danmus.find((item) => item.id === clip.resourceId);
     return resource ? { clip, resource } : null;
   }
 
@@ -382,17 +167,17 @@ export const useTimelineStore = defineStore("timeline", () => {
 
   function updateEffect(clipId: string, effectId: string, plugin: EffectPlugin, params: EffectParams) {
     const target = getEffectTarget(clipId);
-    const effect = target?.clip.effects?.find(item => item.id === effectId);
+    const effect = target?.clip.effects?.find((item) => item.id === effectId);
     if (!target || !effect || !matchesEffect(plugin, effect) || !plugin.targets.includes(target.resource.type))
       throw new Error(i18n.global.t("effects.cannotEdit"));
     const updated = buildInstance(plugin, target.resource.type, params, effect);
-    target.clip.effects = target.clip.effects!.map(item => (item.id === effectId ? updated : item));
+    target.clip.effects = target.clip.effects!.map((item) => (item.id === effectId ? updated : item));
   }
 
   function removeEffect(clipId: string, effectId: string) {
     const target = getEffectTarget(clipId);
-    if (!target?.clip.effects?.some(item => item.id === effectId)) return;
-    const remaining = target.clip.effects.filter(item => item.id !== effectId);
+    if (!target?.clip.effects?.some((item) => item.id === effectId)) return;
+    const remaining = target.clip.effects.filter((item) => item.id !== effectId);
     if (remaining.length) target.clip.effects = remaining;
     else delete target.clip.effects;
     if (editingEffectId.value === effectId) editingEffectId.value = null;
@@ -400,7 +185,7 @@ export const useTimelineStore = defineStore("timeline", () => {
 
   function updateEffectSpan(clipId: string, effectId: string, span: [number, number]) {
     const target = getEffectTarget(clipId);
-    const effect = target?.clip.effects?.find(item => item.id === effectId);
+    const effect = target?.clip.effects?.find((item) => item.id === effectId);
     if (!target || !effect) throw new Error(i18n.global.t("effects.cannotEdit"));
     const [start, end] = span;
     const { duration: clipDuration } = target.clip;
@@ -413,7 +198,9 @@ export const useTimelineStore = defineStore("timeline", () => {
       (start === end && clipDuration > 0)
     )
       throw new Error(i18n.global.t("effects.invalidSpan"));
-    const effects = target.clip.effects!.map(item => (item.id === effectId ? { ...item, span: [start, end] as [number, number] } : item));
+    const effects = target.clip.effects!.map((item) =>
+      item.id === effectId ? { ...item, span: [start, end] as [number, number] } : item
+    );
     const conflict = findEffectTimingConflict(
       { ...target.clip, effects },
       { ...target.resource, ...target.clip.overrides, id: target.resource.id, type: target.resource.type } as AnyDanmu
@@ -426,7 +213,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     if (!editingEffectId.value || selectedClipIds.value.length !== 1) return null;
     const location = findClipLocation(selectedClipIds.value[0]!);
     if (location?.clip.kind !== "resource") return null;
-    const effect = location.clip.effects?.find(item => item.id === editingEffectId.value);
+    const effect = location.clip.effects?.find((item) => item.id === editingEffectId.value);
     return effect ? { clip: location.clip, effect } : null;
   });
 
@@ -436,7 +223,7 @@ export const useTimelineStore = defineStore("timeline", () => {
       return;
     }
     const target = getEffectTarget(clipId);
-    if (!target?.clip.effects?.some(effect => effect.id === effectId)) return;
+    if (!target?.clip.effects?.some((effect) => effect.id === effectId)) return;
     if (selectedClipIds.value.join() !== clipId) setSelectedClip(clipId);
     editingEffectId.value = effectId;
   }
@@ -445,7 +232,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     const target = getEffectTarget(clipId);
     if (!target?.clip.effects) return;
     const effects = [...target.clip.effects];
-    const index = effects.findIndex(item => item.id === effectId);
+    const index = effects.findIndex((item) => item.id === effectId);
     const next = index + offset;
     if (index < 0 || next < 0 || next >= effects.length) return;
     [effects[index], effects[next]] = [effects[next]!, effects[index]!];
@@ -464,7 +251,7 @@ export const useTimelineStore = defineStore("timeline", () => {
       visible: true,
       muted: false,
       locked: false,
-      expanded: false,
+      expanded: false
     });
     return id;
   };
@@ -481,9 +268,6 @@ export const useTimelineStore = defineStore("timeline", () => {
   };
 
   // 添加片段
-  // resource: 拖入的资源
-  // trackId: 目标轨道 ID
-  // time: 插入的时间点 (ms)
   const addClip = (resource: AnyDanmu | AudioResource, trackId: string, time: number) => {
     const track = tracks.value.find((t) => t.id === trackId);
     if (!track || track.locked) {
@@ -494,9 +278,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     const resourceType = getResourceTrackType(resource);
     if (activeGroupPath.value.length && resourceType === "audio") return;
     if (track.clips.length > 0 && track.type && track.type !== resourceType) {
-      console.warn(
-        `[TimelineStore] Cannot add ${resourceType} clip to ${track.type} track: ${trackId}`
-      );
+      console.warn(`[TimelineStore] Cannot add ${resourceType} clip to ${track.type} track: ${trackId}`);
       return;
     }
     if (!track.type || track.clips.length === 0) {
@@ -518,19 +300,16 @@ export const useTimelineStore = defineStore("timeline", () => {
       startTime: time,
       duration: clipDuration,
       trackId: trackId,
-      animations: [],
       keyframes: [],
-      params: resourceType === "audio" ? { volume: 0, muted: false } : undefined,
+      params: resourceType === "audio" ? { volume: 0, muted: false } : undefined
     };
 
     track.clips.push(newClip);
-    // 简单的排序，保证片段按时间顺序排列
     track.clips.sort((a, b) => a.startTime - b.startTime);
     recalculateDuration();
 
     console.log("[TimelineStore] Added clip:", newClip);
     setSelectedClip(newClip.id);
-    selectedAnimationId.value = null;
     selectedKeyframeId.value = BASE_KEYFRAME_ID;
     return newClip;
   };
@@ -577,7 +356,7 @@ export const useTimelineStore = defineStore("timeline", () => {
       if (clip) {
         if (clip.kind === "resource" && updates.parentClipId !== undefined) {
           const byId = new Map<string, TimelineClip>();
-          visitTimelineClips(rootTracks.value, item => byId.set(item.id, item));
+          visitTimelineClips(rootTracks.value, (item) => byId.set(item.id, item));
           let parent: TimelineClip | undefined = byId.get(updates.parentClipId);
           const seen = new Set([clip.id]);
           if (!parent || parent.kind !== "resource") throw new Error("Invalid parent clip");
@@ -588,11 +367,10 @@ export const useTimelineStore = defineStore("timeline", () => {
           }
         }
         applyClipUpdates(clip, updates);
-        
-        // 如果更新了时间，重新排序
+
         if (updates.startTime !== undefined || updates.duration !== undefined) {
-             track.clips.sort((a, b) => a.startTime - b.startTime);
-             recalculateDuration();
+          track.clips.sort((a, b) => a.startTime - b.startTime);
+          recalculateDuration();
         }
         return;
       }
@@ -613,7 +391,11 @@ export const useTimelineStore = defineStore("timeline", () => {
       return;
     const { clip } = location;
     if (clip.kind === "resource" && clip.effects?.length) {
-      updateClip(clipId, { startTime, duration, effects: sliceEffects(clip.effects, startTime - clip.startTime, duration) });
+      updateClip(clipId, {
+        startTime,
+        duration,
+        effects: sliceEffects(clip.effects, startTime - clip.startTime, duration)
+      });
     } else {
       updateClip(clipId, { startTime, duration });
     }
@@ -642,7 +424,7 @@ export const useTimelineStore = defineStore("timeline", () => {
 
     const { track: sourceTrack, clip, clipIndex } = location;
     if (sourceTrack.locked || targetTrack.locked) return false;
-    const clipType = clip.kind === "group" ? "danmu" : sourceTrack.type ?? options.clipType;
+    const clipType = clip.kind === "group" ? "danmu" : (sourceTrack.type ?? options.clipType);
     if (activeGroupPath.value.length && clipType === "audio") return false;
 
     if (!clipType) {
@@ -661,9 +443,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     const targetHasClips = targetTrack.clips.length > 0;
 
     if (targetType && targetType !== clipType) {
-      console.warn(
-        `[TimelineStore] Cannot move ${clipType} clip to ${targetType} track: ${targetTrackId}`
-      );
+      console.warn(`[TimelineStore] Cannot move ${clipType} clip to ${targetType} track: ${targetTrackId}`);
       return false;
     }
 
@@ -685,123 +465,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     clearTrackTypeIfEmpty(sourceTrack);
     recalculateDuration();
 
-    return true;
-  };
-
-  /**
-   * 判断当前编辑层中的片段是否可以放入目标分组。
-   *
-   * 仅允许未锁定的非音频片段操作，并拒绝把片段放入自身；调用方可据此
-   * 同时控制拖拽高亮、投放结果和快捷操作的可用状态。
-   *
-   * @param clipId 待移动或复制的片段 ID
-   * @param groupId 目标分组 ID
-   * @returns 片段可以放入目标分组时返回 true，否则返回 false
-   */
-  const canMoveClipIntoGroup = (clipId: string | null, groupId: string | null) => {
-    if (!clipId || !groupId || clipId === groupId) return false;
-    const source = findClipLocation(clipId);
-    const target = findClipLocation(groupId);
-    if (!source || !target || target.clip.kind !== "group") return false;
-    if (source.track.locked || target.track.locked || source.track.type === "audio") return false;
-    if (source.clip.kind === "resource" && useAudioStore().audioResources.some((resource) => resource.id === source.clip.resourceId)) {
-      return false;
-    }
-    return true;
-  };
-
-  /**
-   * 将当前编辑层的片段移动到目标分组。
-   *
-   * 操作会在分组内部创建新的弹幕轨道，并把片段时间转换为相对分组起点的
-   * 局部时间；如果片段早于分组起点，则前移分组及其已有内容以保持绝对时间。
-   *
-   * @param clipId 待移动的片段 ID
-   * @param groupId 目标分组 ID
-   * @returns 移动成功时返回 true，校验失败或目标不存在时返回 false
-   */
-  const moveClipIntoGroup = (clipId: string | null, groupId: string | null) => {
-    if (!canMoveClipIntoGroup(clipId, groupId)) return false;
-    const source = findClipLocation(clipId!);
-    const target = findClipLocation(groupId!);
-    if (!source || !target || target.clip.kind !== "group") return false;
-
-    const sourceClip = source.clip;
-    const group = target.clip;
-    const absoluteStart = sourceClip.startTime;
-
-    // 如果素材早于分组开始时间，整体前移分组内容，保证拖入后绝对时间不变。
-    if (absoluteStart < group.startTime) {
-      const shift = group.startTime - absoluteStart;
-      for (const childTrack of group.tracks) {
-        for (const childClip of childTrack.clips) childClip.startTime += shift;
-      }
-      group.startTime = absoluteStart;
-    }
-
-    source.track.clips.splice(source.clipIndex, 1);
-    clearTrackTypeIfEmpty(source.track);
-
-    const childTrackId = createTimelineId("track");
-    sourceClip.trackId = childTrackId;
-    sourceClip.startTime = Math.max(0, absoluteStart - group.startTime);
-    group.tracks.push({
-      id: childTrackId,
-      name: i18n.global.t("timeline.defaultTrackName", { n: group.tracks.length + 1 }),
-      type: "danmu",
-      clips: [sourceClip],
-      visible: target.track.visible,
-      muted: false,
-      locked: false,
-      expanded: false,
-    });
-
-    recalculateDuration();
-    setSelectedClip(group.id);
-    return true;
-  };
-
-  /**
-   * 将当前编辑层的片段复制到目标分组。
-   *
-   * 复制会递归克隆分组结构、片段 ID、动画、关键帧和弹幕资源，保证副本与
-   * 原片段独立编辑；时间换算规则与移动到分组保持一致。
-   *
-   * @param clipId 待复制的片段 ID
-   * @param groupId 目标分组 ID
-   * @returns 复制成功时返回 true，校验失败或目标不存在时返回 false
-   */
-  const copyClipIntoGroup = (clipId: string | null, groupId: string | null) => {
-    if (!canMoveClipIntoGroup(clipId, groupId)) return false;
-    const source = findClipLocation(clipId!);
-    const target = findClipLocation(groupId!);
-    if (!source || !target || target.clip.kind !== "group") return false;
-
-    const group = target.clip;
-    const absoluteStart = source.clip.startTime;
-    const childTrackId = createTimelineId("track");
-    const copiedClip = cloneClip(source.clip, childTrackId);
-    if (absoluteStart < group.startTime) {
-      const shift = group.startTime - absoluteStart;
-      for (const childTrack of group.tracks) {
-        for (const childClip of childTrack.clips) childClip.startTime += shift;
-      }
-      group.startTime = absoluteStart;
-    }
-
-    copiedClip.startTime = Math.max(0, absoluteStart - group.startTime);
-    group.tracks.push({
-      id: childTrackId,
-      name: i18n.global.t("timeline.defaultTrackName", { n: group.tracks.length + 1 }),
-      type: "danmu",
-      clips: [copiedClip],
-      visible: target.track.visible,
-      muted: false,
-      locked: false,
-      expanded: false,
-    });
-    recalculateDuration();
-    setSelectedClip(group.id);
     return true;
   };
 
@@ -831,13 +494,10 @@ export const useTimelineStore = defineStore("timeline", () => {
     const clipType = sourceClip.kind === "group" ? "danmu" : sourceTrack.type;
     if (activeGroupPath.value.length && clipType === "audio") return null;
 
-    // 类型兼容性检查 (同轨道复制无需检查，跨轨道才需要)
     if (sourceTrack.id !== targetTrackId) {
       const targetType = targetTrack.type;
       if (targetType && clipType && targetType !== clipType) {
-        console.warn(
-          `[TimelineStore] Cannot copy ${clipType} clip to ${targetType} track: ${targetTrackId}`
-        );
+        console.warn(`[TimelineStore] Cannot copy ${clipType} clip to ${targetType} track: ${targetTrackId}`);
         return null;
       }
       if (targetTrack.clips.length > 0 && !targetType) {
@@ -846,11 +506,9 @@ export const useTimelineStore = defineStore("timeline", () => {
       }
     }
 
-    // 深拷贝源片段，剥离 id 和 trackId
     const newClip = cloneClip(sourceClip, targetTrackId);
     applyClipUpdates(newClip, updates);
 
-    // 确保目标轨道有类型
     if (!targetTrack.type && clipType) {
       applyTrackType(targetTrack, clipType);
     }
@@ -860,24 +518,31 @@ export const useTimelineStore = defineStore("timeline", () => {
     recalculateDuration();
 
     setSelectedClip(newClip.id);
-    selectedAnimationId.value = null;
     selectedKeyframeId.value = BASE_KEYFRAME_ID;
 
-    console.log(
-      `[TimelineStore] Copied clip "${sourceClip.name || sourceClip.id}" to track "${targetTrack.name}"`
-    );
+    console.log(`[TimelineStore] Copied clip "${sourceClip.name || sourceClip.id}" to track "${targetTrack.name}"`);
     return newClip;
   };
 
   const canSplitClip = (clipId: string | null, timeMs = currentTime.value) => {
     if (!clipId || !Number.isFinite(timeMs)) return false;
     const location = findClipLocation(clipId);
-    if (!location || location.clip.kind !== "resource" || location.track.locked || selectedClipIds.value.length > 1) return false;
+    if (
+      !location ||
+      location.clip.kind !== "resource" ||
+      location.track.locked ||
+      selectedClipIds.value.length > 1
+    )
+      return false;
     const { clip } = location;
     const offsetMs = Math.round(timeMs - clip.startTime);
-    return Number.isFinite(clip.duration) && offsetMs > 0 && offsetMs < clip.duration &&
+    return (
+      Number.isFinite(clip.duration) &&
+      offsetMs > 0 &&
+      offsetMs < clip.duration &&
       (useDanmuStore().danmus.some((resource) => resource.id === clip.resourceId) ||
-        useAudioStore().audioResources.some((resource) => resource.id === clip.resourceId));
+        useAudioStore().audioResources.some((resource) => resource.id === clip.resourceId))
+    );
   };
 
   const splitClip = (clipId: string | null, timeMs = currentTime.value): TimelineClip | null => {
@@ -897,8 +562,7 @@ export const useTimelineStore = defineStore("timeline", () => {
       duration: clip.duration - offsetMs,
       sourceInMs: resource ? source.sourceInMs : (source.sourceInMs ?? 0) + offsetMs,
       overrides: split ? { ...source.overrides, ...split.rightProperties } : source.overrides,
-      keyframes: split?.rightKeyframes ?? source.keyframes,
-      animations: split?.rightAnimations ?? source.animations
+      keyframes: split?.rightKeyframes ?? source.keyframes
     };
     if (source.effects?.length) {
       const left = sliceEffects(source.effects, 0, offsetMs);
@@ -911,13 +575,11 @@ export const useTimelineStore = defineStore("timeline", () => {
     clip.duration = offsetMs;
     if (split) {
       clip.keyframes = split.leftKeyframes;
-      clip.animations = split.leftAnimations;
     }
     track.clips.push(rightClip);
     track.clips.sort((a, b) => a.startTime - b.startTime);
     recalculateDuration();
     selectedClipId.value = rightClip.id;
-    selectedAnimationId.value = null;
     selectedKeyframeId.value = BASE_KEYFRAME_ID;
     return rightClip;
   };
@@ -935,7 +597,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     if (!rightClip || !clipId) return null;
     removeClip(rightClip.id);
     selectedClipId.value = clipId;
-    selectedAnimationId.value = null;
     selectedKeyframeId.value = BASE_KEYFRAME_ID;
     const leftClip = findClipLocation(clipId)?.clip ?? null;
     if (leftClip?.kind === "resource") useDanmuStore().select(leftClip.resourceId);
@@ -948,34 +609,22 @@ export const useTimelineStore = defineStore("timeline", () => {
   };
 
   const setSelectedClip = (id: string | null) => {
-      selectedClipIds.value = id ? [id] : [];
-      if (selectedClipId.value !== id) {
-          selectedAnimationId.value = null;
-          selectedKeyframeId.value = null;
-          editingEffectId.value = null;
-      }
-      selectedClipId.value = id;
-      const clip = id ? findClipLocation(id)?.clip : null;
-      useDanmuStore().select(clip?.kind === "resource" ? clip.resourceId : null);
-      if (id === null) {
-          selectedAnimationId.value = null;
-          selectedKeyframeId.value = null;
-      }
-  }
+    selectedClipIds.value = id ? [id] : [];
+    if (selectedClipId.value !== id) {
+      selectedKeyframeId.value = null;
+      editingEffectId.value = null;
+    }
+    selectedClipId.value = id;
+    const clip = id ? findClipLocation(id)?.clip : null;
+    useDanmuStore().select(clip?.kind === "resource" ? clip.resourceId : null);
+    if (id === null) {
+      selectedKeyframeId.value = null;
+    }
+  };
 
-  /**
-   * 更新当前编辑层的多选状态，并同步主选片段及弹幕资源选择。
-   *
-   * 当多选收缩为单选时也必须重新同步资源，否则属性面板会继续保留多选时的
-   * 空资源状态，导致用户无法编辑最后留下的片段。
-   *
-   * @param ids 要选中的片段 ID 列表，重复或不存在的 ID 会被忽略
-   * @param primaryId 可选的主选片段 ID；不在有效选区时使用第一个有效片段
-   * @returns 无返回值
-   */
   const setSelectedClips = (ids: string[], primaryId?: string | null) => {
     const validIds = [...new Set(ids)].filter((id) => findClipLocation(id));
-    const primary = primaryId && validIds.includes(primaryId) ? primaryId : validIds[0] ?? null;
+    const primary = primaryId && validIds.includes(primaryId) ? primaryId : (validIds[0] ?? null);
     const changed = primary !== primarySelectedClipId.value;
     const selectionCountChanged = validIds.length !== selectedClipIds.value.length;
     selectedClipIds.value = validIds;
@@ -983,7 +632,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     const clip = primary ? findClipLocation(primary)?.clip : null;
     selectedTrackId.value = clip?.trackId ?? null;
     if (changed || selectionCountChanged || validIds.length > 1) {
-      selectedAnimationId.value = null;
       selectedKeyframeId.value = null;
       editingEffectId.value = null;
       useDanmuStore().select(validIds.length === 1 && clip?.kind === "resource" ? clip.resourceId : null);
@@ -992,7 +640,7 @@ export const useTimelineStore = defineStore("timeline", () => {
 
   function selectTrack(id: string) {
     setSelectedClip(null);
-    selectedTrackId.value = tracks.value.some(track => track.id === id) ? id : null;
+    selectedTrackId.value = tracks.value.some((track) => track.id === id) ? id : null;
   }
 
   const toggleClipSelection = (id: string) => {
@@ -1005,292 +653,6 @@ export const useTimelineStore = defineStore("timeline", () => {
   const removeSelectedClips = () => {
     const ids = [...selectedClipIds.value];
     for (const id of ids) removeClip(id);
-  };
-
-
-  const cloneClip = (source: TimelineClip, trackId: string): TimelineClip => {
-    const cloned: TimelineClip = JSON.parse(JSON.stringify(source));
-    const clipIdMap = new Map<string, string>();
-    const regenerate = (clip: TimelineClip, ownerTrackId: string) => {
-      const originalId = clip.id;
-      clip.id = createTimelineId("clip");
-      clipIdMap.set(originalId, clip.id);
-      clip.trackId = ownerTrackId;
-      if (clip.kind === "group") {
-        for (const track of clip.tracks) {
-          track.id = createTimelineId("track");
-          for (const child of track.clips) regenerate(child, track.id);
-        }
-      } else {
-        for (const effect of clip.effects ?? []) effect.id = createTimelineId("fx");
-        for (const animation of clip.animations ?? []) animation.id = createTimelineId("anim");
-        for (const keyframe of clip.keyframes ?? []) keyframe.id = createTimelineId("kf");
-      }
-    };
-    regenerate(cloned, trackId);
-    const remapParents = (clip: TimelineClip) => {
-      if (clip.kind === "group") {
-        for (const track of clip.tracks) for (const child of track.clips) remapParents(child);
-      } else if (clip.parentClipId && clipIdMap.has(clip.parentClipId)) {
-        clip.parentClipId = clipIdMap.get(clip.parentClipId);
-      }
-    };
-    remapParents(cloned);
-    return cloned;
-  };
-
-  const canCreateGroup = () => selectedClipIds.value.length > 0 && selectedClipIds.value.every((id) => {
-    const location = findClipLocation(id);
-    return location && !location.track.locked && location.track.type !== "audio" &&
-      (location.clip.kind === "group" || useDanmuStore().danmus.some((resource) => resource.id === location.clip.resourceId));
-  });
-
-  const createGroup = (): TimelineGroupClip | null => {
-    if (!canCreateGroup()) return null;
-    const selectedIds = new Set(selectedClipIds.value);
-    const scope = tracks.value;
-    const sourceTracks = scope.filter((track) => track.clips.some((clip) => selectedIds.has(clip.id)));
-    const sourceClips = sourceTracks.flatMap((track) => track.clips.filter((clip) => selectedIds.has(clip.id)));
-    const startTime = Math.min(...sourceClips.map((clip) => clip.startTime));
-    const insertIndex = scope.findIndex((track) => track.id === sourceTracks[0]?.id);
-    const childTracks: TimelineTrack[] = sourceTracks.map((track) => {
-      const childTrackId = createTimelineId("track");
-      const clips = track.clips.filter((clip) => selectedIds.has(clip.id));
-      for (const clip of clips) {
-        clip.startTime -= startTime;
-        clip.trackId = childTrackId;
-      }
-      track.clips = track.clips.filter((clip) => !selectedIds.has(clip.id));
-      return { ...track, id: childTrackId, type: "danmu", clips };
-    });
-    let groupNumber = 1;
-    const names = new Set<string>();
-    visitTimelineClips(rootTracks.value, (clip) => {
-      if (clip.kind === "group" && clip.name) names.add(clip.name);
-    });
-    while (names.has(i18n.global.t("groups.defaultName", { n: groupNumber }))) groupNumber += 1;
-    const name = i18n.global.t("groups.defaultName", { n: groupNumber });
-    const groupTrackId = createTimelineId("track");
-    const group: TimelineGroupClip = {
-      kind: "group", id: createTimelineId("clip"), trackId: groupTrackId,
-      name, startTime, duration: getTimelineDuration(childTracks), tracks: childTracks
-    };
-    scope.splice(insertIndex, 0, {
-      id: groupTrackId, name, type: "danmu", clips: [group], visible: true, muted: false, locked: false
-    });
-    for (const sourceTrack of sourceTracks) {
-      if (!sourceTrack.clips.length) scope.splice(scope.indexOf(sourceTrack), 1);
-    }
-    recalculateDuration();
-    setSelectedClip(group.id);
-    return group;
-  };
-
-  const canUngroupClip = (id = selectedClipId.value) => {
-    const location = id ? findClipLocation(id) : null;
-    return selectedClipIds.value.length === 1 && location?.clip.kind === "group" && !location.track.locked;
-  };
-
-  const ungroupClip = (id = selectedClipId.value) => {
-    if (!id || !canUngroupClip(id)) return false;
-    const location = findClipLocation(id);
-    if (!location || location.clip.kind !== "group") return false;
-    const { clip: group, track, clipIndex } = location;
-    const insertIndex = tracks.value.indexOf(track);
-    track.clips.splice(clipIndex, 1);
-    for (const childTrack of group.tracks) {
-      childTrack.visible = track.visible && childTrack.visible;
-      for (const child of childTrack.clips) child.startTime += group.startTime;
-    }
-    const childIds = group.tracks.flatMap((childTrack) => childTrack.clips.map((clip) => clip.id));
-    tracks.value.splice(insertIndex, track.clips.length ? 0 : 1, ...group.tracks);
-    recalculateDuration();
-    setSelectedClips(childIds);
-    return true;
-  };
-
-  /** 生成不与现有分组重名的默认分组名（`BAS 导入 n`）。 */
-  const nextBasImportGroupName = () => {
-    const names = new Set<string>();
-    visitTimelineClips(rootTracks.value, (clip) => {
-      if (clip.kind === "group" && clip.name) names.add(clip.name);
-    });
-    let index = 1;
-    while (names.has(i18n.global.t("dialogs.basImport.groupName", { n: index }))) index += 1;
-    return i18n.global.t("dialogs.basImport.groupName", { n: index });
-  };
-
-  /**
-   * 导入 BAS 转换结果：创建资源、片段与关键帧，并解析父子关系。
-   *
-   * 多对象时生成一个分组片段（每个对象一条子轨道），保证「一段 BAS = 一个可
-   * 整体移动/复制的单元」，父子关系也不会跨组丢失。写入前会用
-   * `compileTimelineToBas` 回编译一次，失败则回滚本次新增的轨道/片段/资源，
-   * 避免时间轴留下预览阶段才报错的数据。
-   *
-   * @param objects `convertParsedBas` 的输出
-   * @param options `trackId` 目标轨道、`createTrack` 新建轨道、`startTimeMs` 起点
-   * @returns 落点轨道、新增片段 ID，多对象时附带分组片段 ID
-   */
-  const importBasObjects = (
-    objects: BasImportObject[],
-    options: { trackId?: string | null; createTrack?: boolean; startTimeMs?: number } = {}
-  ) => {
-    if (objects.length === 0) throw new Error(i18n.global.t("dialogs.basImport.errors.empty"));
-
-    const startTimeMs = Math.max(0, Math.round(options.startTimeMs ?? 0));
-    const createTrack = options.createTrack === true;
-    const targetTrack = createTrack
-      ? null
-      : tracks.value.find((track) => track.id === options.trackId) ?? null;
-
-    if (!createTrack && !targetTrack) {
-      throw new Error(i18n.global.t("dialogs.basImport.errors.trackMissing"));
-    }
-    if (targetTrack?.locked) throw new Error(i18n.global.t("dialogs.basImport.errors.trackLocked"));
-    if (targetTrack?.type === "audio") {
-      throw new Error(i18n.global.t("dialogs.basImport.errors.trackType"));
-    }
-
-    const danmuStore = useDanmuStore();
-    const createdResourceIds: string[] = [];
-    /** 回滚时用于还原被 `applyTrackType` 改成弹幕轨道的空轨道。 */
-    const trackTypeBefore = targetTrack?.type;
-    let inserted: { kind: "track"; trackId: string } | { kind: "clip"; trackId: string; clipId: string } | null =
-      null;
-
-    try {
-      const created = objects.map((object) => {
-        const resource = danmuStore.add(object.resource.type, { ...object.resource }, { select: false });
-        createdResourceIds.push(resource.id);
-        return { object, resource };
-      });
-
-      const clips: TimelineResourceClip[] = created.map(({ object, resource }) => ({
-        kind: "resource",
-        id: createTimelineId("clip"),
-        resourceId: resource.id,
-        name: object.name,
-        startTime: 0,
-        duration: object.durationMs,
-        trackId: "",
-        keyframes: object.keyframes.map((keyframe) => ({ ...keyframe, id: createKeyframeId() })),
-      }));
-
-      // 第二遍转换父子关系：clipId 需要等所有片段都创建完才有。
-      const clipIdByName = new Map(created.map(({ object }, index) => [object.name, clips[index]!.id]));
-      created.forEach(({ object }, index) => {
-        if (!object.parentName) return;
-        const parentId = clipIdByName.get(object.parentName);
-        const parent = created.find((item) => item.object.name === object.parentName);
-        if (!parentId || !parent || parent.resource.type !== "text") {
-          throw new Error(
-            i18n.global.t("dialogs.basImport.errors.parent", { object: object.name, parent: object.parentName })
-          );
-        }
-        clips[index]!.parentClipId = parentId;
-      });
-
-      let importedClip: TimelineClip;
-      if (clips.length === 1) {
-        const clip = clips[0]!;
-        clip.startTime = startTimeMs;
-        const trackId = targetTrack?.id ?? addTrack();
-        const track = trackId ? tracks.value.find((item) => item.id === trackId) : null;
-        if (!track || !trackId) throw new Error(i18n.global.t("dialogs.basImport.errors.trackMissing"));
-
-        applyTrackType(track, "danmu");
-        clip.trackId = trackId;
-        track.clips.push(clip);
-        track.clips.sort((left, right) => left.startTime - right.startTime);
-        inserted = targetTrack ? { kind: "clip", trackId, clipId: clip.id } : { kind: "track", trackId };
-        importedClip = clip;
-      } else {
-        const groupName = nextBasImportGroupName();
-        const childTracks: TimelineTrack[] = created.map(({ object }, index) => {
-          const childTrackId = createTimelineId("track");
-          const clip = clips[index]!;
-          clip.trackId = childTrackId;
-          clip.startTime = 0;
-          return {
-            id: childTrackId,
-            name: object.name,
-            type: "danmu",
-            clips: [clip],
-            visible: true,
-            muted: false,
-            locked: false,
-            expanded: false,
-          };
-        });
-        const groupTrackId = createTimelineId("track");
-        const group: TimelineGroupClip = {
-          kind: "group",
-          id: createTimelineId("clip"),
-          trackId: groupTrackId,
-          name: groupName,
-          startTime: startTimeMs,
-          duration: getTimelineDuration(childTracks),
-          tracks: childTracks,
-        };
-
-        if (targetTrack) {
-          applyTrackType(targetTrack, "danmu");
-          targetTrack.clips.push(group);
-          targetTrack.clips.sort((left, right) => left.startTime - right.startTime);
-          inserted = { kind: "clip", trackId: targetTrack.id, clipId: group.id };
-        } else {
-          tracks.value.push({
-            id: groupTrackId,
-            name: groupName,
-            type: "danmu",
-            clips: [group],
-            visible: true,
-            muted: false,
-            locked: false,
-            expanded: false,
-          });
-          inserted = { kind: "track", trackId: groupTrackId };
-        }
-        importedClip = group;
-      }
-
-      recalculateDuration();
-
-      const errors: string[] = [];
-      compileTimelineToBas(rootTracks.value, danmuStore.danmus, {
-        onError: (message) => errors.push(message),
-      });
-      const importedClipIds = clips.map((clip) => clip.id);
-      const failure = errors.find((message) =>
-        importedClipIds.some((clipId) => message.includes(clipId))
-      );
-      if (failure) throw new Error(failure);
-
-      setSelectedClip(importedClip.id);
-      selectedKeyframeId.value = BASE_KEYFRAME_ID;
-      return {
-        trackId: importedClip.trackId,
-        clipIds: importedClipIds,
-        groupClipId: importedClip.kind === "group" ? importedClip.id : null,
-      };
-    } catch (error) {
-      const rollback = inserted;
-      if (rollback?.kind === "track") {
-        const index = tracks.value.findIndex((track) => track.id === rollback.trackId);
-        if (index !== -1) tracks.value.splice(index, 1);
-      } else if (rollback?.kind === "clip") {
-        const track = tracks.value.find((item) => item.id === rollback.trackId);
-        const clipIndex = track ? track.clips.findIndex((clip) => clip.id === rollback.clipId) : -1;
-        if (track && clipIndex !== -1) track.clips.splice(clipIndex, 1);
-      }
-      if (targetTrack && targetTrack.type !== trackTypeBefore && targetTrack.clips.length === 0) {
-        targetTrack.type = trackTypeBefore;
-      }
-      for (const resourceId of createdResourceIds) danmuStore.remove(resourceId);
-      recalculateDuration();
-      throw error;
-    }
   };
 
   const clearEditingState = () => {
@@ -1344,236 +706,41 @@ export const useTimelineStore = defineStore("timeline", () => {
     navigationRevision.value += 1;
   };
 
-  const setSelectedAnimation = (id: string | null) => {
-    selectedAnimationId.value = id;
-    if (id) {
-      selectedKeyframeId.value = null;
-    }
-  }
-
   const setSelectedKeyframe = (id: string | null) => {
     selectedKeyframeId.value = id;
-    if (id) {
-      selectedAnimationId.value = null;
-    }
-  }
+  };
 
   const setAutoKeyframe = (enabled: boolean) => {
     autoKeyframe.value = enabled;
-  }
+  };
 
   const toggleTrackExpand = (trackId: string) => {
     const track = tracks.value.find((t) => t.id === trackId);
     if (track) {
       track.expanded = !track.expanded;
     }
-  }
+  };
 
   const toggleTrackVisibility = (trackId: string) => {
     const track = tracks.value.find((t) => t.id === trackId);
     if (track && track.type !== "audio") {
       track.visible = !track.visible;
     }
-  }
+  };
 
   const toggleTrackMute = (trackId: string) => {
     const track = tracks.value.find((t) => t.id === trackId);
     if (track && track.type === "audio") {
       track.muted = !track.muted;
     }
-  }
-
-  // 动画管理
-  const addClipAnimation = (clipId: string, animation: AnimationSegment) => {
-    for (const track of tracks.value) {
-      const clip = track.clips.find(c => c.id === clipId);
-      if (clip?.kind === "resource" && !track.locked) {
-        if (clip.keyframes?.length) return;
-        if (!clip.animations) clip.animations = [];
-        clip.animations.push(animation);
-        return;
-      }
-    }
-  }
-
-  const insertClipAnimation = (clipId: string, index: number, animation: AnimationSegment) => {
-    for (const track of tracks.value) {
-      const clip = track.clips.find(c => c.id === clipId);
-      if (clip?.kind === "resource" && !track.locked) {
-        if (clip.keyframes?.length) return;
-        if (!clip.animations) clip.animations = [];
-        // Ensure index is valid
-        if (index < 0) index = 0;
-        if (index > clip.animations.length) index = clip.animations.length;
-        
-        clip.animations.splice(index, 0, animation);
-        return;
-      }
-    }
-  }
-
-  const removeClipAnimation = (clipId: string, animationId: string) => {
-    for (const track of tracks.value) {
-      const clip = track.clips.find(c => c.id === clipId);
-      if (clip && clip.animations) {
-        const idx = clip.animations.findIndex(a => a.id === animationId);
-        if (idx !== -1) {
-          clip.animations.splice(idx, 1);
-          if (selectedAnimationId.value === animationId) {
-            selectedAnimationId.value = null;
-          }
-        }
-        return;
-      }
-    }
-  }
-
-  const updateClipAnimation = (clipId: string, animationId: string, updates: Partial<AnimationSegment>) => {
-    for (const track of tracks.value) {
-      const clip = track.clips.find(c => c.id === clipId);
-      if (clip && clip.animations) {
-        const animation = clip.animations.find(a => a.id === animationId);
-        if (animation) {
-          Object.assign(animation, updates);
-        }
-        return;
-      }
-    }
-  }
-
-  const addClipKeyframe = (
-    clipId: string,
-    keyframe: Omit<TimelineKeyframe, "id"> & { id?: string },
-    options: { select?: boolean } = {}
-  ) => {
-    const location = findClipLocation(clipId);
-    if (!location || location.clip.kind !== "resource" || location.track.locked) return null;
-    if (location.clip.animations?.length) return null;
-
-    const nextKeyframe: TimelineKeyframe = {
-      ...keyframe,
-      id: keyframe.id ?? createKeyframeId(),
-      timeMs: clampKeyframeTime(keyframe.timeMs, location.clip.duration),
-      interpolation: keyframe.interpolation ?? "linear",
-      properties: pickKeyframeProperties(keyframe.properties),
-    };
-
-    if (nextKeyframe.timeMs <= 0) {
-      selectedClipId.value = clipId;
-      selectedKeyframeId.value = BASE_KEYFRAME_ID;
-      selectedAnimationId.value = null;
-      return null;
-    }
-
-    if (!location.clip.keyframes) location.clip.keyframes = [];
-    location.clip.keyframes.push(nextKeyframe);
-    location.clip.keyframes = normalizeKeyframes(location.clip.keyframes, location.clip.duration);
-
-    if (options.select !== false) {
-      selectedClipId.value = clipId;
-      selectedKeyframeId.value = nextKeyframe.id;
-      selectedAnimationId.value = null;
-    }
-
-    return nextKeyframe;
-  }
-
-  const upsertClipKeyframeAtTime = (
-    clipId: string,
-    timeMs: number,
-    properties: TimelineKeyframeProperties,
-    options: { select?: boolean; toleranceMs?: number } = {}
-  ) => {
-    const location = findClipLocation(clipId);
-    if (!location || location.clip.kind !== "resource" || location.track.locked) return null;
-    if (location.clip.animations?.length) return null;
-
-    const clampedTime = clampKeyframeTime(timeMs, location.clip.duration);
-    if (clampedTime <= 0) {
-      selectedClipId.value = clipId;
-      selectedKeyframeId.value = BASE_KEYFRAME_ID;
-      selectedAnimationId.value = null;
-      return null;
-    }
-
-    if (!location.clip.keyframes) location.clip.keyframes = [];
-
-    const toleranceMs = options.toleranceMs ?? KEYFRAME_TOLERANCE_MS;
-    const existing = location.clip.keyframes.find((keyframe) => {
-      const existingTime = clampKeyframeTime(keyframe.timeMs, location.clip.duration);
-      return Math.abs(existingTime - clampedTime) <= toleranceMs;
-    });
-
-    if (existing) {
-      existing.timeMs = clampedTime;
-      existing.properties = pickKeyframeProperties({
-        ...existing.properties,
-        ...properties,
-      });
-      location.clip.keyframes = normalizeKeyframes(location.clip.keyframes, location.clip.duration);
-
-      if (options.select !== false) {
-        selectedClipId.value = clipId;
-        selectedKeyframeId.value = existing.id;
-        selectedAnimationId.value = null;
-      }
-
-      return existing;
-    }
-
-    return addClipKeyframe(
-      clipId,
-      {
-        timeMs: clampedTime,
-        properties,
-        interpolation: "linear",
-      },
-      options
-    );
-  }
-
-  const updateClipKeyframe = (
-    clipId: string,
-    keyframeId: string,
-    updates: Partial<TimelineKeyframe>
-  ) => {
-    const location = findClipLocation(clipId);
-    if (!location?.clip.keyframes || keyframeId === BASE_KEYFRAME_ID) return;
-
-    const keyframe = location.clip.keyframes.find((item) => item.id === keyframeId);
-    if (!keyframe) return;
-
-    if (updates.timeMs !== undefined) {
-      const clampedTime = clampKeyframeTime(updates.timeMs, location.clip.duration);
-      keyframe.timeMs = location.clip.duration > 0 ? Math.max(1, clampedTime) : 0;
-    }
-    if (updates.properties !== undefined) {
-      keyframe.properties = pickKeyframeProperties(updates.properties);
-    }
-    if (updates.interpolation !== undefined) {
-      keyframe.interpolation = updates.interpolation;
-    }
-    if (updates.easing !== undefined) {
-      keyframe.easing = updates.easing;
-    }
-
-    location.clip.keyframes = normalizeKeyframes(location.clip.keyframes, location.clip.duration);
-  }
-
-  const removeClipKeyframe = (clipId: string, keyframeId: string) => {
-    const location = findClipLocation(clipId);
-    if (!location?.clip.keyframes || keyframeId === BASE_KEYFRAME_ID) return;
-
-    const index = location.clip.keyframes.findIndex((item) => item.id === keyframeId);
-    if (index === -1) return;
-
-    location.clip.keyframes.splice(index, 1);
-    if (selectedKeyframeId.value === keyframeId) {
-      selectedKeyframeId.value = BASE_KEYFRAME_ID;
-    }
-  }
+  };
 
   return {
+    ...clipboard,
+    ...preview,
+    ...groups,
+    ...basImport,
+    ...keyframes,
     rootTracks,
     rootDuration,
     activeTracks,
@@ -1595,14 +762,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     setSelectedClips,
     toggleClipSelection,
     removeSelectedClips,
-    canCreateGroup,
-    createGroup,
-    canUngroupClip,
-    ungroupClip,
-    importBasObjects,
-    canMoveClipIntoGroup,
-    moveClipIntoGroup,
-    copyClipIntoGroup,
     enterGroup,
     leaveGroup,
     navigateToGroup,
@@ -1615,7 +774,6 @@ export const useTimelineStore = defineStore("timeline", () => {
     duration,
     zoomScale,
     selectedClipId,
-    selectedAnimationId,
     selectedKeyframeId,
     autoKeyframe,
     addTrack,
@@ -1633,35 +791,10 @@ export const useTimelineStore = defineStore("timeline", () => {
     splitClipRight,
     setCurrentTime,
     setSelectedClip,
-    setSelectedAnimation,
     setSelectedKeyframe,
     setAutoKeyframe,
     toggleTrackExpand,
     toggleTrackVisibility,
-    toggleTrackMute,
-    // 预览系统
-    previewOverlay,
-    previewClipParams,
-    commitPreview,
-    discardPreview,
-    getEffectiveParams,
-    getEffectiveVolume,
-    isClipMuted,
-    updateClipVolume,
-    toggleClipMuted,
-    addClipAnimation,
-    insertClipAnimation,
-    removeClipAnimation,
-    updateClipAnimation,
-    addClipKeyframe,
-    upsertClipKeyframeAtTime,
-    updateClipKeyframe,
-    removeClipKeyframe,
-    // 剪贴板
-    clipboardClip,
-    hasClipboardClip,
-    copyClipToClipboard,
-    pasteClipFromClipboard,
-    clearClipboard,
+    toggleTrackMute
   };
 });

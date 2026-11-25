@@ -1,0 +1,12 @@
+{
+  "danmus": [
+    { "id": "t1", "type": "text", "content": "say \"hi\"\\\nnext\tline", "color": "#abc", "bold": false },
+    { "id": "t-2", "type": "text", "content": "special id" }
+  ],
+  "tracks": [
+    { "id": "track_1", "name": "Track 1", "visible": true, "locked": false, "clips": [
+      { "id": "zero", "kind": "resource", "resourceId": "t1", "trackId": "track_1", "startTime": 0, "duration": 0 },
+      { "id": "clip-with-dash", "kind": "resource", "resourceId": "t-2", "trackId": "track_1", "startTime": 0, "duration": 1000 }
+    ] }
+  ]
+}

@@ -33,25 +33,3 @@ test("an asset used inside a nested timeline group cannot be removed silently", 
   assert.throws(() => assets.removeAsset("asset"), /used by the timeline/i);
   assert.equal(assets.assets[0]?.id, "asset");
 });
-
-test("legacy animations and keyframes cannot be mixed by editing actions", () => {
-  setActivePinia(createPinia());
-  const timeline = useTimelineStore();
-  const animation = { id: "animation", type: "then" as const, duration: 500, properties: { x: 100 } };
-  timeline.loadTimeline([{ id: "track", name: "Track", type: "danmu", visible: true, locked: false, clips: [{
-    id: "clip", kind: "resource", resourceId: "asset", trackId: "track", startTime: 0, duration: 1000,
-    animations: [animation]
-  }] }]);
-  assert.equal(timeline.addClipKeyframe("clip", { timeMs: 500, properties: { x: 50 } }), null);
-  assert.equal(timeline.upsertClipKeyframeAtTime("clip", 500, { x: 50 }), null);
-  const clip = timeline.tracks[0]!.clips[0]!;
-  assert.deepEqual(clip.animations, [animation]);
-  assert.equal(clip.keyframes?.length ?? 0, 0);
-
-  timeline.removeClipAnimation("clip", "animation");
-  assert.ok(timeline.addClipKeyframe("clip", { timeMs: 500, properties: { x: 50 } }));
-  timeline.addClipAnimation("clip", animation);
-  timeline.insertClipAnimation("clip", 0, animation);
-  assert.equal(clip.animations?.length ?? 0, 0);
-  assert.equal(clip.keyframes?.length, 1);
-});

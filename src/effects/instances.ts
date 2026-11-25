@@ -1,5 +1,5 @@
 import type { DanmuType } from "@/types/danmu";
-import { createTimelineId } from "@/utils/timelineGroups";
+import { createTimelineId } from "@/core/timelineGroups";
 import type { EffectInstance, EffectParams, EffectPlugin } from "./types";
 import { validateEffectParams, validatePatch } from "./validation";
 

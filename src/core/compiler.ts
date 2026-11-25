@@ -1,117 +1,27 @@
 import { applyOpacityLimits, opacityAt } from "@/effects/opacity";
 import { effectStyleSegments } from "@/effects/style";
-import type { EffectPoint } from "@/effects/types";
+import type { EffectPoint } from "@/types/effects";
 import type {
-  AnimationSegment,
   TimelineClip,
   TimelineResourceClip,
   TimelineKeyframeProperties,
-  TimelineTrack,
+  TimelineTrack
 } from "@/types/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import {
   normalizeKeyframes,
-  pickKeyframePropertiesForResource,
-} from "@/utils/keyframes";
-import { isDanmuFieldBasDefault, resolveDanmuDefaults } from "@/utils/danmuDefaults";
-import { flattenTimelineClips, visitTimelineClips } from "@/utils/timelineGroups";
-
-const PERCENTAGE_VALUE_KEYS = new Set(["x", "y", "fontSize", "width", "height"]);
-
-const NUMERIC_VALUE_KEYS = new Set([
-  "x",
-  "y",
-  "zIndex",
-  "scale",
-  "opacity",
-  "alpha",
-  "anchorX",
-  "anchorY",
-  "fontSize",
-  "bold",
-  "textShadow",
-  "strokeWidth",
-  "rotateX",
-  "rotateY",
-  "rotateZ",
-  "textAlpha",
-  "fillAlpha",
-  "borderWidth",
-  "borderAlpha",
-  "width",
-  "height",
-]);
-
-const COLOR_VALUE_KEYS = new Set([
-  "color",
-  "strokeColor",
-  "textColor",
-  "fillColor",
-  "borderColor",
-]);
-
-const DEFINITION_FIELDS_BY_TYPE: Record<AnyDanmu["type"], readonly string[]> = {
-  text: [
-    "x",
-    "y",
-    "zIndex",
-    "scale",
-    "opacity",
-    "color",
-    "anchorX",
-    "anchorY",
-    "fontSize",
-    "fontFamily",
-    "bold",
-    "textShadow",
-    "strokeWidth",
-    "strokeColor",
-    "rotateX",
-    "rotateY",
-    "rotateZ",
-    "parentId",
-  ],
-  button: [
-    "x",
-    "y",
-    "zIndex",
-    "scale",
-    "fontSize",
-    "textColor",
-    "textAlpha",
-    "fillColor",
-    "fillAlpha",
-    "target",
-    "opacity",
-    "anchorX",
-    "anchorY",
-    "rotateX",
-    "rotateY",
-    "rotateZ",
-    "parentId",
-  ],
-  path: [
-    "x",
-    "y",
-    "zIndex",
-    "scale",
-    "viewBox",
-    "borderWidth",
-    "borderColor",
-    "borderAlpha",
-    "fillColor",
-    "fillAlpha",
-    "width",
-    "height",
-    "opacity",
-    "anchorX",
-    "anchorY",
-    "rotateX",
-    "rotateY",
-    "rotateZ",
-    "parentId",
-  ],
-};
+  pickKeyframePropertiesForResource
+} from "@/core/keyframes";
+import { isDanmuFieldBasDefault, resolveDanmuDefaults } from "@/core/danmuDefaults";
+import {
+  COLOR_PROPERTY_KEYS,
+  DEFINITION_FIELDS_BY_TYPE,
+  NUMERIC_PROPERTY_KEYS,
+  PERCENTAGE_PROPERTY_KEYS,
+  toBasPropertyKey,
+  toEditorPropertyKey
+} from "@/core/danmuProperties";
+import { flattenTimelineClips, visitTimelineClips } from "@/core/timelineGroups";
 
 const formatTargetValue = (value: unknown): string => {
   if (!value || typeof value !== "object") return "";
@@ -139,7 +49,9 @@ const encodeBasString = (key: string, value: string): string => {
   const normalized = value.replace(/\r\n?/g, "\n");
   const unsupported = normalized.match(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/);
   if (unsupported) {
-    throw new Error(`Property ${key} contains unsupported control character U+${unsupported[0]!.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`);
+    throw new Error(
+      `Property ${key} contains unsupported control character U+${unsupported[0]!.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}`
+    );
   }
   return `"${normalized.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n").replace(/\t/g, "\\t")}"`;
 };
@@ -147,9 +59,10 @@ const encodeBasString = (key: string, value: string): string => {
 const formatValue = (key: string, value: unknown): string => {
   if (value === undefined || value === null) return "";
 
-  if (key === "target") return formatTargetValue(value);
+  const normalizedKey = toEditorPropertyKey(key);
+  if (normalizedKey === "target") return formatTargetValue(value);
 
-  if (COLOR_VALUE_KEYS.has(key) && typeof value === "number") {
+  if (COLOR_PROPERTY_KEYS.has(normalizedKey) && typeof value === "number") {
     return "0x" + value.toString(16).padStart(6, "0");
   }
 
@@ -157,7 +70,7 @@ const formatValue = (key: string, value: unknown): string => {
 
   if (typeof value === "string") {
     const trimmed = value.trim();
-    if (COLOR_VALUE_KEYS.has(key)) {
+    if (COLOR_PROPERTY_KEYS.has(normalizedKey)) {
       const shortHex = trimmed.match(/^#([\da-f]{3})$/i)?.[1];
       if (shortHex) {
         return `0x${shortHex
@@ -170,9 +83,9 @@ const formatValue = (key: string, value: unknown): string => {
       if (/^\d+$/.test(trimmed)) return trimmed;
     }
     if (
-      NUMERIC_VALUE_KEYS.has(key) &&
+      NUMERIC_PROPERTY_KEYS.has(normalizedKey) &&
       (/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(trimmed) ||
-        (PERCENTAGE_VALUE_KEYS.has(key) &&
+        (PERCENTAGE_PROPERTY_KEYS.has(normalizedKey) &&
           /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?%$/i.test(trimmed)))
     ) {
       return trimmed;
@@ -186,11 +99,7 @@ const formatValue = (key: string, value: unknown): string => {
 const formatSeconds = (milliseconds: number) =>
   `${Number((Math.max(0, milliseconds) / 1000).toFixed(4))}s`;
 
-const toBasKey = (key: string) => {
-  if (key === "opacity") return "alpha";
-  if (key === "parentId") return "parent";
-  return key;
-};
+const toBasKey = toBasPropertyKey;
 
 const formatInlineProperties = (
   properties: Partial<AnyDanmu> | TimelineKeyframeProperties
@@ -255,7 +164,7 @@ export const compileDanmuDefinition = (
   DEFINITION_FIELDS_BY_TYPE[resource.type].forEach((key) => {
     const value = rawResource[key];
     if (value === undefined || value === null) return;
-    if (startSec > 0 && (key === "alpha" || key === "opacity")) return;
+    if (startSec > 0 && key === "opacity") return;
     if (isDanmuFieldBasDefault(resource, key, value)) return;
 
     const formatted = formatValue(key, value);
@@ -273,7 +182,6 @@ export const compileDanmuDefinition = (
   basCode += "}\n";
   return basCode;
 };
-
 
 type SetProperties = Partial<AnyDanmu> | TimelineKeyframeProperties;
 interface BasUnit {
@@ -328,47 +236,6 @@ const appendKeyframeSets = (clip: TimelineClip, resource: AnyDanmu, write: Write
   });
 };
 
-const appendLegacySets = (clip: TimelineClip, resource: AnyDanmu, write: WriteSet, animations: AnimationSegment[]) => {
-  const targetAlpha = resource.opacity ?? 1;
-  let hasSerialRoot = false;
-
-  if (clip.startTime > 0) {
-    write("set", {}, clip.startTime);
-    write("then set", { opacity: targetAlpha }, 0);
-    hasSerialRoot = true;
-  }
-
-  animations.forEach(animation => {
-    const allowed = new Set([...DEFINITION_FIELDS_BY_TYPE[resource.type], "content", "text", "d"]);
-    const unsupported = Object.keys(animation.properties).filter(key => !allowed.has(key) || key === "parentId");
-    if (unsupported.length) throw new Error(`Unsupported animation properties: ${unsupported.join(", ")}`);
-    const properties = animation.properties;
-    const absoluteDelay = Math.max(0, clip.startTime) + Math.max(0, animation.delay ?? 0);
-
-    if (animation.type === "set" && absoluteDelay > 0) {
-      write("set", {}, absoluteDelay);
-      write("then set", properties, animation.duration);
-      hasSerialRoot = true;
-      return;
-    }
-
-    if (animation.type === "set") {
-      write("set", properties, animation.duration);
-      hasSerialRoot = true;
-      return;
-    }
-
-    const delay = Math.max(0, animation.delay ?? 0);
-    if (delay > 0) {
-      write(hasSerialRoot ? "then set" : "set", {}, delay);
-      hasSerialRoot = true;
-    }
-
-    write(hasSerialRoot ? "then set" : "set", properties, animation.duration);
-    hasSerialRoot = true;
-  });
-};
-
 export const basNameForClip = (id: string) => {
   if (/^[A-Za-z0-9_]+$/.test(id) && !id.startsWith("encoded_")) return `obj_${id}`;
   // 保留编码前缀，避免特殊字符 ID 与普通 ID 生成同名对象。
@@ -378,10 +245,7 @@ export const basNameForClip = (id: string) => {
 function hostSets(clip: TimelineResourceClip, resource: AnyDanmu): BasUnit[] {
   const units: BasUnit[] = [];
   const write: WriteSet = (command, properties, duration) => units.push({ command, properties, duration });
-  if (clip.keyframes?.length && clip.animations?.length)
-    throw new Error(`Clip ${clip.id} mixes keyframes and legacy animations`);
   if (clip.keyframes?.length) appendKeyframeSets(clip, resource, write);
-  else if (clip.animations?.length) appendLegacySets(clip, resource, write, clip.animations);
   else if (clip.startTime > 0) {
     write("set", {}, clip.startTime);
     write("then set", { opacity: resource.opacity ?? 1 }, 0);
@@ -569,18 +433,25 @@ function describeClip(tracks: TimelineTrack[], id: string) {
 export const compileTimelineToBas = (
   tracks: TimelineTrack[],
   resources: AnyDanmu[],
-  options: { audioResourceIds?: Iterable<string>; onError?: (message: string) => void; onRange?: (clipId: string, startLine: number, endLine: number) => void } = {}
+  options: {
+    audioResourceIds?: Iterable<string>;
+    onError?: (message: string) => void;
+    onRange?: (clipId: string, startLine: number, endLine: number) => void;
+  } = {}
 ): string => {
   const audioResourceIds = new Set(options.audioResourceIds);
   const audioIds = new Set<string>();
   const collectAudio = (scope: TimelineTrack[]) => {
-    for (const track of scope) for (const clip of track.clips) {
-      if (clip.kind === "group") collectAudio(clip.tracks);
-      else if (track.type === "audio") audioIds.add(clip.id);
-    }
+    for (const track of scope)
+      for (const clip of track.clips) {
+        if (clip.kind === "group") collectAudio(clip.tracks);
+        else if (track.type === "audio") audioIds.add(clip.id);
+      }
   };
   collectAudio(tracks);
-  const clips = flattenTimelineClips(tracks).filter(clip => !audioIds.has(clip.id) && !audioResourceIds.has(clip.resourceId));
+  const clips = flattenTimelineClips(tracks).filter(
+    clip => !audioIds.has(clip.id) && !audioResourceIds.has(clip.resourceId)
+  );
   const byId = new Map(clips.map(clip => [clip.id, clip]));
   if (byId.size !== clips.length) {
     const message = "Duplicate timeline clip ID";
@@ -594,37 +465,39 @@ export const compileTimelineToBas = (
     if (!resourceById.has(resource.id)) resourceById.set(resource.id, resource);
   }
   let line = 1;
-  return clips.map(clip => {
-    try {
-    const resource = resourceById.get(clip.resourceId);
-    if (!resource) throw new Error(`Missing resource for clip ${clip.id}`);
-    const resolved = { ...resource, ...clip.overrides, id: resource.id, type: resource.type } as AnyDanmu;
-    if (resolved.parentId && !clip.parentClipId) throw new Error(`Unresolved parent for clip ${clip.id}`);
-    let parentId = clip.parentClipId;
-    const seen = new Set([clip.id]);
-    while (parentId) {
-      if (seen.has(parentId)) throw new Error(`Cyclic parent for clip ${clip.id}`);
-      seen.add(parentId);
-      const parent = byId.get(parentId);
-      if (!parent) throw new Error(`Missing or hidden parent clip ${parentId}`);
-      const parentResource = resourceById.get(parent.resourceId);
-      if (!parentResource) throw new Error(`Missing resource for parent clip ${parent.id}`);
-      if (parentResource.type !== "text") throw new Error(`Parent clip ${parent.id} must be text`);
-      parentId = parent.parentClipId;
-    }
-    resolved.parentId = clip.parentClipId ? names.get(clip.parentClipId) : undefined;
-    const code = compileResolvedClip(clip, resolved, names.get(clip.id)!);
-    const lineCount = code.split("\n").length;
-    options.onRange?.(clip.id, line, line + lineCount - 1);
-    line += lineCount;
-    return code;
-    } catch (error) {
-      const message = `Clip ${describeClip(tracks, clip.id)}: ${error instanceof Error ? error.message : String(error)}`;
-      if (!options.onError) throw new Error(message);
-      options.onError(message);
-      return "";
-    }
-  }).join("\n");
+  return clips
+    .map(clip => {
+      try {
+        const resource = resourceById.get(clip.resourceId);
+        if (!resource) throw new Error(`Missing resource for clip ${clip.id}`);
+        const resolved = { ...resource, ...clip.overrides, id: resource.id, type: resource.type } as AnyDanmu;
+        if (resolved.parentId && !clip.parentClipId) throw new Error(`Unresolved parent for clip ${clip.id}`);
+        let parentId = clip.parentClipId;
+        const seen = new Set([clip.id]);
+        while (parentId) {
+          if (seen.has(parentId)) throw new Error(`Cyclic parent for clip ${clip.id}`);
+          seen.add(parentId);
+          const parent = byId.get(parentId);
+          if (!parent) throw new Error(`Missing or hidden parent clip ${parentId}`);
+          const parentResource = resourceById.get(parent.resourceId);
+          if (!parentResource) throw new Error(`Missing resource for parent clip ${parent.id}`);
+          if (parentResource.type !== "text") throw new Error(`Parent clip ${parent.id} must be text`);
+          parentId = parent.parentClipId;
+        }
+        resolved.parentId = clip.parentClipId ? names.get(clip.parentClipId) : undefined;
+        const code = compileResolvedClip(clip, resolved, names.get(clip.id)!);
+        const lineCount = code.split("\n").length;
+        options.onRange?.(clip.id, line, line + lineCount - 1);
+        line += lineCount;
+        return code;
+      } catch (error) {
+        const message = `Clip ${describeClip(tracks, clip.id)}: ${error instanceof Error ? error.message : String(error)}`;
+        if (!options.onError) throw new Error(message);
+        options.onError(message);
+        return "";
+      }
+    })
+    .join("\n");
 };
 
 export const formatBasParseError = (

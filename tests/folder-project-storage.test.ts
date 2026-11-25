@@ -8,7 +8,7 @@ import { writeProjectAudio } from "../src/services/storage/projectAssets";
 import { bundleProject } from "../src/services/storage/projectBundle";
 import { openBrowserProject, restoreBrowserProjectFile } from "../src/services/storage/browserProjectFile";
 import { listBrowserBackups, readBrowserBackup } from "../src/services/storage/browserBackups";
-import { normalizeProjectData, PROJECT_VERSION } from "../src/services/storage/projectSchema";
+import { normalizeProjectData, PROJECT_VERSION } from "../src/core/projectSchema";
 
 function directoryHandle(path: string): FileSystemDirectoryHandle {
   return {

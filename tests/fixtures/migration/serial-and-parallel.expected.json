@@ -1,0 +1,59 @@
+{
+  "keyframes": [
+    {
+      "timeMs": 0,
+      "properties": {
+        "x": 0,
+        "opacity": 1,
+        "scale": 1
+      },
+      "interpolation": "linear"
+    },
+    {
+      "timeMs": 1000,
+      "properties": {
+        "x": 100,
+        "opacity": 1,
+        "scale": 1
+      },
+      "interpolation": "linear"
+    },
+    {
+      "timeMs": 1250,
+      "properties": {
+        "x": 100,
+        "opacity": 1,
+        "scale": 1
+      },
+      "interpolation": "linear"
+    },
+    {
+      "timeMs": 1750,
+      "properties": {
+        "x": 100,
+        "opacity": 0,
+        "scale": 1
+      },
+      "interpolation": "linear"
+    },
+    {
+      "timeMs": 2000,
+      "properties": {
+        "x": 100,
+        "opacity": 0,
+        "scale": 1
+      },
+      "interpolation": "linear"
+    },
+    {
+      "timeMs": 2800,
+      "properties": {
+        "x": 100,
+        "opacity": 0,
+        "scale": 2
+      },
+      "interpolation": "linear"
+    }
+  ],
+  "warnings": []
+}

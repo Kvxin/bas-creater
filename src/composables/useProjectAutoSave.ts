@@ -5,7 +5,7 @@ import { useAudioStore } from "@/stores/audio";
 import { useAssetsStore } from "@/stores/assets";
 import { useProjectHistory } from "@/composables/useProjectHistory";
 import type { AutoSaveStatus, BasProjectData, ProjectAsset, SerializedAudioMetadata } from "@/types/storage";
-import { normalizeProjectData, PROJECT_VERSION } from "@/services/storage/projectSchema";
+import { normalizeProjectData, PROJECT_VERSION } from "@/core/projectSchema";
 import {
   saveProjectDraft,
   loadProjectDraft,
@@ -33,7 +33,6 @@ export function useProjectAutoSave(projectId: string) {
   const createdAt = ref(Date.now());
   const canvas = ref({ width: 800, height: 450 });
   let saveBlocked = false;
-  let knownDanmuIds = new Set<string>();
   let revision = 0;
   let saveChain: Promise<void> = Promise.resolve();
   /**
@@ -74,18 +73,6 @@ export function useProjectAutoSave(projectId: string) {
   };
 
   const syncRuntimeAssets = () => {
-    const currentIds = new Set(danmuStore.danmus.map((item) => item.id));
-    const remaining = assetsStore.assets.filter((asset) =>
-      asset.type === "audio-file" || !knownDanmuIds.has(asset.id) || currentIds.has(asset.id));
-    if (remaining.length !== assetsStore.assets.length) assetsStore.assets = remaining;
-    for (const danmu of danmuStore.danmus) {
-      const old = assetsStore.assets.find((asset) => asset.id === danmu.id);
-      if (old && old.type === "audio-file") throw new Error("Conflicting asset ID");
-      if (!old || old.danmu !== danmu || old.type !== danmu.type) {
-        assetsStore.upsertAsset({ id: danmu.id, type: danmu.type, binId: old?.binId ?? null, danmu });
-      }
-    }
-    knownDanmuIds = currentIds;
     for (const audio of getSerializedAudioMetadata()) {
       const old = assetsStore.assets.find((asset) => asset.id === audio.id);
       if (old && old.type !== "audio-file") throw new Error("Conflicting asset ID");
@@ -102,14 +89,9 @@ export function useProjectAutoSave(projectId: string) {
   };
 
   const getProjectSnapshot = (): BasProjectData => {
-    const currentIds = new Set(danmuStore.danmus.map((item) => item.id));
     const audioMetadata = getSerializedAudioMetadata();
-    const assets: ProjectAsset[] = assetsStore.assets.filter((asset) =>
-      asset.type === "audio-file" || !knownDanmuIds.has(asset.id) || currentIds.has(asset.id)).map((asset) => {
-      if (asset.type !== "audio-file") {
-        const danmu = danmuStore.danmus.find((item) => item.id === asset.id);
-        return danmu ? { ...asset, type: danmu.type, danmu } : asset;
-      }
+    const assets: ProjectAsset[] = assetsStore.assets.map((asset) => {
+      if (asset.type !== "audio-file") return asset;
       const loaded = audioStore.audioResources.find((item) => item.id === asset.id);
       if (!loaded) return asset;
       const audio = audioMetadata.find((item) => item.id === asset.id)!;
@@ -118,17 +100,8 @@ export function useProjectAutoSave(projectId: string) {
       return { ...asset, audio, ...(location ? { location } : {}) };
     });
     const ids = new Set(assets.map((asset) => asset.id));
-    for (const danmu of danmuStore.danmus) {
-      if (assets.some((asset) => asset.id === danmu.id && asset.type === "audio-file")) throw new Error("Conflicting asset ID");
-    }
     for (const audio of audioMetadata) {
       if (assets.some((asset) => asset.id === audio.id && asset.type !== "audio-file")) throw new Error("Conflicting asset ID");
-    }
-    for (const danmu of danmuStore.danmus) {
-      if (!ids.has(danmu.id)) {
-        assets.push({ id: danmu.id, type: danmu.type, binId: null, danmu });
-        ids.add(danmu.id);
-      }
     }
     for (const audio of audioMetadata) {
       if (!ids.has(audio.id)) {
@@ -205,7 +178,6 @@ export function useProjectAutoSave(projectId: string) {
       createdAt.value = project.createdAt;
       canvas.value = project.canvas;
       assetsStore.setProject(project.assets, project.bins);
-      knownDanmuIds = new Set(project.danmus.map((item) => item.id));
       saveBlocked = false;
 
       if (project.name) {
@@ -216,11 +188,8 @@ export function useProjectAutoSave(projectId: string) {
       for (const resource of audioStore.audioResources) URL.revokeObjectURL(resource.url);
       audioStore.audioResources = audioResources;
 
-      // 2. 恢复弹幕列表
-      if (Array.isArray(project.danmus)) {
-        danmuStore.danmus = project.danmus;
-        danmuStore.select(project.danmus[0]?.id ?? null);
-      }
+      // 2. 弹幕数据已随 assets 恢复，这里只恢复选中项
+      danmuStore.select(danmuStore.danmus[0]?.id ?? null);
 
       // 3. 恢复时间轴与轨道
       timelineStore.isPlaying = false;
@@ -252,9 +221,7 @@ export function useProjectAutoSave(projectId: string) {
       await clearProjectDraft(projectId);
       saveBlocked = false;
       assetsStore.setProject([], []);
-      knownDanmuIds.clear();
       canvas.value = { width: 800, height: 450 };
-      danmuStore.danmus = [];
       danmuStore.select(null);
       audioStore.audioResources = [];
       timelineStore.loadTimeline([
@@ -295,15 +262,11 @@ export function useProjectAutoSave(projectId: string) {
       for (const resource of audioStore.audioResources) URL.revokeObjectURL(resource.url);
       audioStore.audioResources = [];
       assetsStore.setProject(data.assets, data.bins);
-      knownDanmuIds = new Set(data.danmus.map((item) => item.id));
       createdAt.value = data.createdAt;
       canvas.value = data.canvas;
       saveBlocked = false;
       projectName.value = data.name;
-      danmuStore.danmus = data.danmus;
-      if (data.danmus.length > 0) {
-        danmuStore.select(data.danmus[0]?.id ?? null);
-      }
+      danmuStore.select(danmuStore.danmus[0]?.id ?? null);
       timelineStore.loadTimeline(data.tracks);
 
       // 导入后立即保存为当前活动草稿
@@ -319,12 +282,6 @@ export function useProjectAutoSave(projectId: string) {
   };
 
   // 监听各个 Store 的变动以触发防抖自动保存
-  watch(
-    () => danmuStore.danmus,
-    () => { if (!isHydrating.value) { syncRuntimeAssets(); queueSave(); } },
-    { deep: true }
-  );
-
   watch(
     () => timelineStore.rootTracks,
     () => queueSave(),

@@ -7,7 +7,10 @@ DanmakuCut 是 Vue 3、TypeScript、Vite、Pinia、Tauri 2 和 Rust 项目，同
 
 ## Repository Rules
 
-- 禁止修改bas.js文件，只允许阅读和分析bas.js。
+- 禁止修改 `public/bas.js` 文件，只允许阅读和分析 `bas.js`。
+- 领域核心（工程 schema 与迁移、编译器、BAS 导入、关键帧、默认值、坐标、时间轴纯函数）放在 `src/core`。`src/core` 只能依赖 `src/core` 与 `src/types`，不得引用 Vue、Pinia、i18n、store、组件、浏览器全局对象或 Tauri；需要本地化的文字由调用方传入。该约束由 `pnpm test:architecture` 校验。
+- 其余共享辅助函数放在 `src/utils`，纯类型放在 `src/types`（`src/types` 只能依赖自身）。
+- 弹幕位置 `x` / `y` 只保存百分比字符串（如 `"12.5%"`），不允许写入像素值；旧工程与 BAS 导入中的数值坐标统一经 `src/core/coordinates.ts` 按画布尺寸换算。
 - 修改前检查 `git status` 和目标文件，保留用户已有修改。不要使用 Git 命令批量丢弃、覆盖或恢复无关内容。
 - 不要修改或提交 `dist/`、`src-tauri/target/`、`node_modules/` 等生成目录，也不要提交用户媒体、临时工程、密钥或签名密码。
 - 项目处于开发阶段，可以按需求破坏性调整代码、工程格式和界面 API。已有工程数据必须明确处理迁移、拒绝或兼容行为，不要静默损坏或丢弃。
@@ -75,12 +78,15 @@ CI 安装依赖使用 `pnpm install --frozen-lockfile`。`pnpm dev:renderer` 用
 按改动范围运行聚焦测试。
 
 ```sh
+pnpm test:architecture
+pnpm test:compiler
 pnpm test:effects
 pnpm test:storage
 pnpm test:updater
 pnpm test:window-controls
 ```
 
+- 编译器与 BAS 导入使用 golden 测试（`pnpm test:compiler`，fixture 位于 `tests/fixtures/`），并用真实 `public/bas.js` 解析器校验编译输出；有意修改输出时用 `UPDATE_GOLDEN=1 pnpm test:compiler` 刷新快照，并在 PR 中审阅 golden diff。
 - 前端改动至少运行 `pnpm type-check`。涉及构建、路由、资源路径、国际化或桌面边界时运行 `pnpm build:renderer`。
 - 修改 Rust 端时，先确保存在前端 `dist/`，再运行：
 

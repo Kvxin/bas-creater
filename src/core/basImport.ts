@@ -1,7 +1,18 @@
-import type { AnyDanmu, ButtonDanmu, DanmuType } from "@/types/danmu";
-import type { BasParseResult } from "@/utils/bas";
+import { DEFAULT_COORDINATE_REFERENCE, isCoordinateField, toPercentCoordinate } from "@/core/coordinates";
+import type { CoordinateReferenceSize } from "@/core/coordinates";
+import type { AnyDanmu, ButtonDanmu } from "@/types/danmu";
 import type { TimelineKeyframe, TimelineKeyframeProperties } from "@/types/timeline";
-import { ANIMATABLE_KEYS_BY_TYPE, createKeyframeId } from "@/utils/keyframes";
+import { BAS_COMMON_DEFAULTS, BAS_TEXT_DEFAULTS } from "@/core/danmuDefaults";
+import {
+  ANIMATABLE_KEYS_BY_TYPE,
+  COLOR_PROPERTY_KEYS,
+  IMPORTABLE_FIELDS_BY_TYPE,
+  INSTANT_PROPERTY_KEYS,
+  PERCENTAGE_PROPERTY_KEYS,
+  STRING_PROPERTY_KEYS,
+  toEditorPropertyKey
+} from "@/core/danmuProperties";
+import { createKeyframeId } from "@/core/keyframes";
 
 /**
  * BAS 导入：把 `parseBasDSL` 的输出转换成时间轴可用的弹幕资源、片段时长与关键帧。
@@ -20,66 +31,25 @@ const BAS_DEFAULT_DURATION_MS = 4000;
 /** 非 linear 缓动的关键帧采样间隔（ms）。 */
 const EASING_SAMPLE_INTERVAL_MS = 100;
 
-/** 在 BAS 中于段开始时突变的属性，编辑器侧只能用 step 关键帧表达。 */
-const INSTANT_KEYS = new Set(["content", "text", "fontSize"]);
-
-const PERCENT_VALUE_KEYS = new Set(["x", "y", "fontSize", "width", "height"]);
-const COLOR_VALUE_KEYS = new Set(["color", "strokeColor", "textColor", "fillColor", "borderColor"]);
-const STRING_VALUE_KEYS = new Set(["content", "text", "fontFamily", "d", "viewBox"]);
-
-/** BAS 属性名到编辑器字段名的映射（与 compiler.ts 的 `toBasKey` 相反）。 */
-const ATTRIBUTE_ALIASES: Record<string, string> = {
-  alpha: "opacity",
-  parent: "parentId"
-};
-
 /** 不参与关键帧合并、需要单独处理的 BAS 属性。 */
 const RESERVED_ATTRIBUTES = new Set(["duration", "parent", "target"]);
 
-const COMMON_FIELDS = [
-  "x",
-  "y",
-  "zIndex",
-  "scale",
-  "rotateX",
-  "rotateY",
-  "rotateZ",
-  "anchorX",
-  "anchorY",
-  "opacity"
-] as const;
-
-/** 已知的编辑器字段，用于忽略 BAS 中存在但编辑器未建模的属性。 */
-const FIELDS_BY_TYPE: Record<DanmuType, readonly string[]> = {
-  text: [...COMMON_FIELDS, "content", "fontSize", "fontFamily", "bold", "textShadow", "color", "strokeWidth", "strokeColor"],
-  button: [...COMMON_FIELDS, "text", "fontSize", "textColor", "textAlpha", "fillColor", "fillAlpha", "target"],
-  path: [
-    ...COMMON_FIELDS,
-    "d",
-    "viewBox",
-    "borderWidth",
-    "borderColor",
-    "borderAlpha",
-    "fillColor",
-    "fillAlpha",
-    "width",
-    "height"
-  ]
-};
-
-/** 资源里缺少某属性时，用于插值起点的兜底值（与 BAS 默认值一致）。 */
+/**
+ * 资源里缺少某属性时，用于插值起点的兜底值（与 BAS 默认值一致）。
+ * `content`/`text` 在导入插值兜底时使用空串，避免未声明文案的对象被补成占位提示语。
+ */
 const FALLBACK_INITIAL_VALUES: Record<string, number | string> = {
-  x: 0,
-  y: 0,
-  zIndex: 0,
-  scale: 1,
-  opacity: 1,
-  rotateX: 0,
-  rotateY: 0,
-  rotateZ: 0,
-  anchorX: 0,
-  anchorY: 0,
-  fontSize: 25,
+  x: BAS_COMMON_DEFAULTS.x,
+  y: BAS_COMMON_DEFAULTS.y,
+  zIndex: BAS_COMMON_DEFAULTS.zIndex,
+  scale: BAS_COMMON_DEFAULTS.scale,
+  opacity: BAS_TEXT_DEFAULTS.opacity,
+  rotateX: BAS_TEXT_DEFAULTS.rotateX,
+  rotateY: BAS_TEXT_DEFAULTS.rotateY,
+  rotateZ: BAS_TEXT_DEFAULTS.rotateZ,
+  anchorX: BAS_TEXT_DEFAULTS.anchorX,
+  anchorY: BAS_TEXT_DEFAULTS.anchorY,
+  fontSize: BAS_TEXT_DEFAULTS.fontSize,
   content: "",
   text: ""
 };
@@ -87,11 +57,16 @@ const FALLBACK_INITIAL_VALUES: Record<string, number | string> = {
 /** 弹幕资源载荷（去掉 id，交给 danmu store 生成）。 */
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
 
+/** bas.js 解析器输出的原始结构。 */
+export type BasParseResult = { defs: any[]; sets: any[] };
+
 export type BasImportResource = DistributiveOmit<AnyDanmu, "id">;
 
 export type BasImportOptions = {
   /** 时间轴上的起点（ms）。关键帧相对片段起点，因此不参与时间平移。 */
   startTimeMs: number;
+  /** 把 BAS 中的数值坐标换算成百分比时使用的根画布尺寸。 */
+  referenceSize?: CoordinateReferenceSize;
 };
 
 export type BasImportWarningCode =
@@ -148,7 +123,7 @@ type RawBasSet = {
   items?: RawBasSet[];
 };
 
-type BasSegment = {
+export type BasSegment = {
   targetName: string;
   startMs: number;
   endMs: number;
@@ -232,7 +207,7 @@ export const decodeBasText = (value: string): string =>
 
 /** 把单个 BAS 属性值转换成编辑器字段值；不支持的形状返回 null。 */
 const convertAttributeValue = (key: string, raw: unknown): unknown => {
-  if (STRING_VALUE_KEYS.has(key)) {
+  if (STRING_PROPERTY_KEYS.has(key)) {
     const text = readBasStringValue(raw);
     return text === null ? null : decodeBasText(text);
   }
@@ -241,12 +216,12 @@ const convertAttributeValue = (key: string, raw: unknown): unknown => {
   if (!numeric) return null;
 
   // 颜色在解析后已是 0xRRGGBB 整数，原样保留。
-  if (COLOR_VALUE_KEYS.has(key)) return numeric.value;
+  if (COLOR_PROPERTY_KEYS.has(key)) return numeric.value;
 
-  return numeric.percent && PERCENT_VALUE_KEYS.has(key) ? `${numeric.value}%` : numeric.value;
+  return numeric.percent && PERCENTAGE_PROPERTY_KEYS.has(key) ? `${numeric.value}%` : numeric.value;
 };
 
-const toObjectKey = (basKey: string) => ATTRIBUTE_ALIASES[basKey] ?? basKey;
+const toObjectKey = toEditorPropertyKey;
 
 /** BAS button 的 target 是平铺结构，编辑器需要 `{ av }` / `{ bangumi }` 包装。 */
 const convertTargetValue = (
@@ -500,23 +475,42 @@ const isStepBoundary = (timeMs: number, segments: ResolvedSegment[]): boolean =>
   );
   if (!instantChange) return false;
 
-  // 同一时刻还有连续动画收尾时保持 linear，否则该动画会在终点突然跳变。
-  const continuousEnd = segments.some(
-    segment => segment.endMs === timeMs && segment.endMs > segment.startMs && !segment.instant
+  // 同一时刻还有连续动画进行中或收尾时保持 linear，否则该动画会被 step 冻结到这一帧再跳变。
+  const continuousActive = segments.some(
+    segment => !segment.instant && segment.startMs < timeMs && segment.endMs >= timeMs
   );
-  return !continuousEnd;
+  return !continuousActive;
 };
 
-type BuildKeyframesParams = {
+/** 把段内属性转成编辑器字段；返回 null 表示该属性不参与关键帧合并，value 为 null 表示值无法识别。 */
+export type SegmentAttributeReader = (attribute: string, raw: unknown) => { key: string; value: unknown } | null;
+
+const readBasAttribute: SegmentAttributeReader = (basKey, raw) => {
+  if (RESERVED_ATTRIBUTES.has(basKey)) return null;
+  const key = toObjectKey(basKey);
+  return { key, value: convertAttributeValue(key, raw) };
+};
+
+export type BuildKeyframesParams = {
   name: string;
   resource: Record<string, unknown>;
   segments: BasSegment[];
   allowedKeys: ReadonlySet<string>;
   warnings: BasImportWarning[];
+  readAttribute?: SegmentAttributeReader;
+  /** 同一属性混用数值和百分比时，是否把整条时间线（含资源初值）统一成百分比。 */
+  unifyPercentUnits?: boolean;
+  /** 超出该时刻的关键帧会被截掉，并在该时刻补一帧采样值。 */
+  untilMs?: number;
 };
 
-const buildKeyframes = (params: BuildKeyframesParams) => {
+/**
+ * 把绝对时间段合并成关键帧：每个段的起止点各生成一帧，帧内存放所有被动画属性在该时刻的值。
+ * 只出现一次且从 0 开始的不可动画属性会并入 `resource`（会修改传入对象）。
+ */
+export const buildKeyframesFromSegments = (params: BuildKeyframesParams) => {
   const { name, resource, segments, allowedKeys, warnings } = params;
+  const readAttribute = params.readAttribute ?? readBasAttribute;
   const ordered = [...segments].sort((left, right) => left.startMs - right.startMs);
   const initialValue = (key: string) => resource[key] ?? FALLBACK_INITIAL_VALUES[key] ?? 0;
 
@@ -524,9 +518,10 @@ const buildKeyframes = (params: BuildKeyframesParams) => {
   const counts = new Map<string, number>();
   const firstStarts = new Map<string, number>();
   for (const segment of ordered) {
-    for (const basKey of Object.keys(segment.attrs)) {
-      if (RESERVED_ATTRIBUTES.has(basKey)) continue;
-      const key = toObjectKey(basKey);
+    for (const [basKey, rawValue] of Object.entries(segment.attrs)) {
+      const attribute = readAttribute(basKey, rawValue);
+      if (!attribute) continue;
+      const { key } = attribute;
       counts.set(key, (counts.get(key) ?? 0) + 1);
       if (!firstStarts.has(key)) firstStarts.set(key, segment.startMs);
     }
@@ -538,10 +533,9 @@ const buildKeyframes = (params: BuildKeyframesParams) => {
 
   for (const segment of ordered) {
     for (const [basKey, rawValue] of Object.entries(segment.attrs)) {
-      if (RESERVED_ATTRIBUTES.has(basKey)) continue;
-      const key = toObjectKey(basKey);
-      const value = convertAttributeValue(key, rawValue);
-      if (value === null) continue;
+      const attribute = readAttribute(basKey, rawValue);
+      if (!attribute || attribute.value === null) continue;
+      const { key, value } = attribute;
 
       if (!allowedKeys.has(key)) {
         if (counts.get(key) === 1 && firstStarts.get(key) === 0) {
@@ -562,7 +556,7 @@ const buildKeyframes = (params: BuildKeyframesParams) => {
         from: resolvePropertyValue(list, key, segment.startMs, initialValue(key)),
         to: value,
         easing: segment.easing,
-        instant: INSTANT_KEYS.has(key)
+        instant: INSTANT_PROPERTY_KEYS.has(key)
       };
       list.push(resolved);
       grouped.set(key, list);
@@ -573,7 +567,7 @@ const buildKeyframes = (params: BuildKeyframesParams) => {
   // 单位归一：同一属性在关键帧间混用 number / percent 时，预览插值需要参考
   // 尺寸才能换算；只要出现过百分比，就把整条时间线（含资源初值）统一成百分比。
   const percentKeys = new Set<string>();
-  for (const [key, list] of grouped) {
+  for (const [key, list] of params.unifyPercentUnits === false ? new Map<string, ResolvedSegment[]>() : grouped) {
     if (
       isPercentValue(initialValue(key)) ||
       list.some(segment => isPercentValue(segment.from) || isPercentValue(segment.to))
@@ -597,7 +591,13 @@ const buildKeyframes = (params: BuildKeyframesParams) => {
     });
   }
 
-  const keyframes: TimelineKeyframe[] = collectKeyframeTimes(flat).map(timeMs => {
+  const allTimes = collectKeyframeTimes(flat);
+  const { untilMs } = params;
+  const sampleTimes =
+    untilMs !== undefined && allTimes.some(time => time > untilMs)
+      ? [...allTimes.filter(time => time < untilMs), untilMs]
+      : allTimes;
+  const keyframes: TimelineKeyframe[] = sampleTimes.map(timeMs => {
     const properties: TimelineKeyframeProperties = {};
     for (const [key, list] of grouped) {
       const value = resolvePropertyValue(list, key, timeMs, initialValue(key));
@@ -627,8 +627,15 @@ const buildKeyframes = (params: BuildKeyframesParams) => {
  */
 export const convertParsedBas = (
   parsed: BasParseResult,
-  _options: BasImportOptions = { startTimeMs: 0 }
+  options: BasImportOptions = { startTimeMs: 0 }
 ): BasImportResult => {
+  const reference = options.referenceSize ?? DEFAULT_COORDINATE_REFERENCE;
+  // 编辑器的 x/y 只保存百分比，数值坐标在合并关键帧前先换算，避免混合单位插值。
+  const readAttribute: SegmentAttributeReader = (basKey, raw) => {
+    const attribute = readBasAttribute(basKey, raw);
+    if (!attribute || attribute.value === null || !isCoordinateField(attribute.key)) return attribute;
+    return { key: attribute.key, value: toPercentCoordinate(attribute.value, attribute.key, reference) ?? null };
+  };
   const warnings: BasImportWarning[] = [];
   const objects: BasImportObject[] = [];
   const segments: BasSegment[] = [];
@@ -645,15 +652,13 @@ export const convertParsedBas = (
 
     const name = typeof def.name === "string" && def.name ? def.name : `${type}_${objects.length + 1}`;
     const attrs = def.attrs ?? {};
-    const fields = FIELDS_BY_TYPE[type];
+    const fields: readonly string[] = IMPORTABLE_FIELDS_BY_TYPE[type];
     const resource: Record<string, unknown> = { type };
 
     for (const [basKey, rawValue] of Object.entries(attrs)) {
-      if (RESERVED_ATTRIBUTES.has(basKey)) continue;
-      const key = toObjectKey(basKey);
-      if (!fields.includes(key)) continue;
-      const value = convertAttributeValue(key, rawValue);
-      if (value !== null) resource[key] = value;
+      const attribute = readAttribute(basKey, rawValue);
+      if (!attribute || !fields.includes(attribute.key)) continue;
+      if (attribute.value !== null) resource[attribute.key] = attribute.value;
     }
 
     if (type === "button") {
@@ -663,12 +668,13 @@ export const convertParsedBas = (
 
     const declaredDuration = readSegmentDuration(attrs.duration);
     const allowedKeys = new Set<string>(ANIMATABLE_KEYS_BY_TYPE[type]);
-    const { keyframes, animatedEndMs } = buildKeyframes({
+    const { keyframes, animatedEndMs } = buildKeyframesFromSegments({
       name,
       resource,
       segments: segments.filter(segment => segment.targetName === name),
       allowedKeys,
-      warnings
+      warnings,
+      readAttribute
     });
 
     const parentName = readBasStringValue(attrs.parent);

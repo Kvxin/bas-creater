@@ -1,12 +1,12 @@
-import { i18n } from "@/i18n";
 import type { AnyDanmu, DanmuType } from "@/types/danmu";
+import { COLOR_PROPERTY_KEYS, toEditorPropertyKey } from "@/core/danmuProperties";
 
 export const BAS_COMMON_DEFAULTS = {
-  x: 0,
-  y: 0,
+  x: "0%",
+  y: "0%",
   zIndex: 0,
   scale: 1,
-  durationMs: undefined,
+  durationMs: undefined
 } as const;
 
 export const BAS_TEXT_DEFAULTS = {
@@ -23,7 +23,7 @@ export const BAS_TEXT_DEFAULTS = {
   rotateX: 0,
   rotateY: 0,
   rotateZ: 0,
-  parentId: undefined,
+  parentId: undefined
 } as const;
 
 export const BAS_BUTTON_DEFAULTS = {
@@ -32,7 +32,7 @@ export const BAS_BUTTON_DEFAULTS = {
   textAlpha: 1,
   fillColor: 0xffffff,
   fillAlpha: 1,
-  target: undefined,
+  target: undefined
 } as const;
 
 export const BAS_PATH_DEFAULTS = {
@@ -42,7 +42,7 @@ export const BAS_PATH_DEFAULTS = {
   borderAlpha: 1,
   borderWidth: 0,
   fillColor: 0xffffff,
-  fillAlpha: 1,
+  fillAlpha: 1
 } as const;
 
 export type BasDanmuDefaults = typeof BAS_COMMON_DEFAULTS &
@@ -51,14 +51,9 @@ export type BasDanmuDefaults = typeof BAS_COMMON_DEFAULTS &
       typeof BAS_BUTTON_DEFAULTS &
       typeof BAS_PATH_DEFAULTS
   > & {
-    /**
-     * Locale dependent placeholder content of a text danmaku. It is resolved on
-     * every call instead of being baked into the constants above, so a resource
-     * created in one language keeps the text it was created with and new
-     * resources follow the active language.
-     */
+    /** BAS 内置文本默认内容（固定为 `BAS_DEFAULT_TEXT`，UI 本地化文案由 store 层传入）。 */
     content?: string;
-    /** Locale dependent placeholder label of a button danmaku. */
+    /** BAS 内置按钮默认文案（固定为 `BAS_DEFAULT_TEXT`，UI 本地化文案由 store 层传入）。 */
     text?: string;
   };
 
@@ -75,27 +70,22 @@ const BAS_DEFAULTS_BY_TYPE: Record<
 > = {
   text: BAS_TEXT_DEFAULTS,
   button: BAS_BUTTON_DEFAULTS,
-  path: BAS_PATH_DEFAULTS,
+  path: BAS_PATH_DEFAULTS
 };
 
-/**
- * Textual BAS defaults, translated with the active locale.
- * The button default deliberately mirrors the text default (both used to be
- * "请输入内容"): BAS only emits a property when it differs from these values, so
- * changing it would alter the generated code for newly created buttons.
- */
-const localizedTextDefaults = (
-  type: DanmuType
-): Partial<Pick<BasDanmuDefaults, "content" | "text">> => {
-  if (type === "text") return { content: i18n.global.t("danmu.defaultText") };
-  if (type === "button") return { text: i18n.global.t("danmu.defaultText") };
+/** bas.js 运行时内置的文字默认值（文本与按钮相同）；编译器省略等于默认值的属性，所以这里不能随界面语言变化。 */
+export const BAS_DEFAULT_TEXT = "请输入内容";
+
+const textIdentityDefaults = (type: DanmuType): Partial<Pick<BasDanmuDefaults, "content" | "text">> => {
+  if (type === "text") return { content: BAS_DEFAULT_TEXT };
+  if (type === "button") return { text: BAS_DEFAULT_TEXT };
   return {};
 };
 
 export const getBasDanmuDefaults = (type: DanmuType): BasDanmuDefaults => ({
   ...BAS_COMMON_DEFAULTS,
   ...BAS_DEFAULTS_BY_TYPE[type],
-  ...localizedTextDefaults(type),
+  ...textIdentityDefaults(type)
 });
 
 export const resolveDanmuDefaults = <T extends AnyDanmu>(
@@ -106,23 +96,9 @@ export const resolveDanmuDefaults = <T extends AnyDanmu>(
   );
   return {
     ...getBasDanmuDefaults(resource.type),
-    ...Object.fromEntries(definedResourceEntries),
+    ...Object.fromEntries(definedResourceEntries)
   } as ResolvedDanmu<T>;
 };
-
-const RAW_KEY_TO_DEFAULT_KEY: Readonly<Record<string, string>> = {
-  alpha: "opacity",
-  duration: "durationMs",
-  parent: "parentId",
-};
-
-const COLOR_KEYS = new Set([
-  "color",
-  "strokeColor",
-  "textColor",
-  "fillColor",
-  "borderColor",
-]);
 
 const normalizeColor = (value: unknown): number | null => {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -174,7 +150,7 @@ const areEquivalentValues = (
   rawValue: unknown,
   defaultValue: unknown
 ) => {
-  if (COLOR_KEYS.has(key)) {
+  if (COLOR_PROPERTY_KEYS.has(key)) {
     const rawColor = normalizeColor(rawValue);
     const defaultColor = normalizeColor(defaultValue);
     if (rawColor !== null && defaultColor !== null) return rawColor === defaultColor;
@@ -198,7 +174,7 @@ export const isDanmuFieldBasDefault = (
   rawKey: string,
   rawValue: unknown = (resource as unknown as Record<string, unknown>)[rawKey]
 ) => {
-  const defaultKey = RAW_KEY_TO_DEFAULT_KEY[rawKey] ?? rawKey;
+  const defaultKey = toEditorPropertyKey(rawKey);
   const defaults = getBasDanmuDefaults(resource.type) as unknown as Record<string, unknown>;
   return areEquivalentValues(defaultKey, rawValue, defaults[defaultKey]);
 };

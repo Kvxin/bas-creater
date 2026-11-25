@@ -3,6 +3,7 @@ import { ref } from "vue";
 import type { ProjectAsset, ProjectBin } from "@/types/storage";
 import { useTimelineStore } from "@/stores/timeline";
 import type { TimelineTrack } from "@/types/timeline";
+import type { AnyDanmu } from "@/types/danmu";
 
 export const useAssetsStore = defineStore("assets", () => {
   const assets = ref<ProjectAsset[]>([]);
@@ -68,6 +69,25 @@ export const useAssetsStore = defineStore("assets", () => {
     if (index < 0) assets.value.push(asset);
     else assets.value[index] = asset;
   }
+  /** 以给定列表替换全部弹幕资源：保留已有资源的位置与 bin，新资源追加到末尾，音频资源不受影响。 */
+  function replaceDanmus(next: AnyDanmu[]) {
+    const nextById = new Map(next.map((danmu) => [danmu.id, danmu]));
+    if (nextById.size !== next.length) throw new Error("Duplicate danmaku ID");
+    const result: ProjectAsset[] = [];
+    for (const asset of assets.value) {
+      if (asset.type === "audio-file") {
+        if (nextById.has(asset.id)) throw new Error("Conflicting asset ID");
+        result.push(asset);
+        continue;
+      }
+      const danmu = nextById.get(asset.id);
+      if (!danmu) continue;
+      result.push(asset.danmu === danmu && asset.type === danmu.type ? asset : { ...asset, type: danmu.type, danmu });
+      nextById.delete(asset.id);
+    }
+    for (const danmu of nextById.values()) result.push({ id: danmu.id, type: danmu.type, binId: null, danmu });
+    assets.value = result;
+  }
   function removeAsset(id: string) {
     const hasReference = (tracks: TimelineTrack[]): boolean => tracks.some((track) => track.clips.some((clip) =>
       clip.kind === "group" ? hasReference(clip.tracks) : clip.resourceId === id));
@@ -76,5 +96,5 @@ export const useAssetsStore = defineStore("assets", () => {
     if (index < 0) throw new Error("Unknown asset");
     assets.value.splice(index, 1);
   }
-  return { assets, bins, setProject, createBin, renameBin, removeBin, moveBin, moveAsset, upsertAsset, removeAsset };
+  return { assets, bins, setProject, createBin, renameBin, removeBin, moveBin, moveAsset, upsertAsset, replaceDanmus, removeAsset };
 });
