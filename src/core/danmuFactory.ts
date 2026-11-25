@@ -4,10 +4,11 @@ import type {
   DanmuBase,
   DanmuType,
   PathDanmu,
-  TextDanmu,
+  TextDanmu
 } from "@/types/danmu";
 import { compileDanmuDefinition } from "@/core/compiler";
 import { BAS_DEFAULT_TEXT } from "@/core/danmuDefaults";
+import { DEFINITION_FIELDS_BY_TYPE } from "@/core/danmuProperties";
 
 function genId(len = 10) {
   const chars =
@@ -36,39 +37,19 @@ const COMMON_OPTIONAL_KEYS = [
   "opacity",
   "anchorX",
   "anchorY",
-  "parentId",
+  "parentId"
 ] as const;
 
-const TEXT_OPTIONAL_KEYS = [
-  "fontSize",
-  "fontFamily",
-  "bold",
-  "textShadow",
-  "color",
-  "strokeWidth",
-  "strokeColor",
-  "textColor",
-] as const;
+const COMMON_OPTIONAL_KEY_SET: ReadonlySet<string> = new Set(COMMON_OPTIONAL_KEYS);
 
-const BUTTON_OPTIONAL_KEYS = [
-  "fontSize",
-  "textColor",
-  "textAlpha",
-  "fillColor",
-  "fillAlpha",
-  "target",
-] as const;
+const typeSpecificKeys = (type: DanmuType, extra: readonly string[] = []) => [
+  ...DEFINITION_FIELDS_BY_TYPE[type].filter((key) => !COMMON_OPTIONAL_KEY_SET.has(key)),
+  ...extra
+];
 
-const PATH_OPTIONAL_KEYS = [
-  "viewBox",
-  "borderWidth",
-  "borderColor",
-  "borderAlpha",
-  "fillColor",
-  "fillAlpha",
-  "width",
-  "height",
-] as const;
+const TEXT_OPTIONAL_KEYS = typeSpecificKeys("text", ["textColor"]);
+const BUTTON_OPTIONAL_KEYS = typeSpecificKeys("button");
+const PATH_OPTIONAL_KEYS = typeSpecificKeys("path");
 
 const pickDefined = (
   source: Record<string, unknown>,

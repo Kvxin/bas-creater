@@ -23,7 +23,7 @@ import {
   type BasImportResult,
   type BasImportWarning
 } from "@/core/basImport";
-import { formatTime } from "@/utils/timeline";
+import { formatTime } from "@/core/timeline";
 
 const { t } = useI18n();
 const store = useBasImportStore();

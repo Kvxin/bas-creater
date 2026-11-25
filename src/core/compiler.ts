@@ -1,112 +1,23 @@
 import type {
   TimelineClip,
   TimelineKeyframeProperties,
-  TimelineTrack,
+  TimelineTrack
 } from "@/types/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import {
   normalizeKeyframes,
-  pickKeyframePropertiesForResource,
+  pickKeyframePropertiesForResource
 } from "@/core/keyframes";
 import { isDanmuFieldBasDefault, resolveDanmuDefaults } from "@/core/danmuDefaults";
+import {
+  COLOR_PROPERTY_KEYS,
+  DEFINITION_FIELDS_BY_TYPE,
+  NUMERIC_PROPERTY_KEYS,
+  PERCENTAGE_PROPERTY_KEYS,
+  toBasPropertyKey,
+  toEditorPropertyKey
+} from "@/core/danmuProperties";
 import { flattenTimelineClips } from "@/core/timelineGroups";
-
-const PERCENTAGE_VALUE_KEYS = new Set(["x", "y", "fontSize", "width", "height"]);
-
-const NUMERIC_VALUE_KEYS = new Set([
-  "x",
-  "y",
-  "zIndex",
-  "scale",
-  "opacity",
-  "alpha",
-  "anchorX",
-  "anchorY",
-  "fontSize",
-  "bold",
-  "textShadow",
-  "strokeWidth",
-  "rotateX",
-  "rotateY",
-  "rotateZ",
-  "textAlpha",
-  "fillAlpha",
-  "borderWidth",
-  "borderAlpha",
-  "width",
-  "height",
-]);
-
-const COLOR_VALUE_KEYS = new Set([
-  "color",
-  "strokeColor",
-  "textColor",
-  "fillColor",
-  "borderColor",
-]);
-
-const DEFINITION_FIELDS_BY_TYPE: Record<AnyDanmu["type"], readonly string[]> = {
-  text: [
-    "x",
-    "y",
-    "zIndex",
-    "scale",
-    "opacity",
-    "color",
-    "anchorX",
-    "anchorY",
-    "fontSize",
-    "fontFamily",
-    "bold",
-    "textShadow",
-    "strokeWidth",
-    "strokeColor",
-    "rotateX",
-    "rotateY",
-    "rotateZ",
-    "parentId",
-  ],
-  button: [
-    "x",
-    "y",
-    "zIndex",
-    "scale",
-    "fontSize",
-    "textColor",
-    "textAlpha",
-    "fillColor",
-    "fillAlpha",
-    "target",
-    "opacity",
-    "anchorX",
-    "anchorY",
-    "rotateX",
-    "rotateY",
-    "rotateZ",
-    "parentId",
-  ],
-  path: [
-    "x",
-    "y",
-    "zIndex",
-    "scale",
-    "viewBox",
-    "borderWidth",
-    "borderColor",
-    "borderAlpha",
-    "fillColor",
-    "fillAlpha",
-    "width",
-    "height",
-    "opacity",
-    "anchorX",
-    "anchorY",
-    "rotateX",
-    "rotateY",
-    "rotateZ",
-    "parentId",
-  ],
-};
 
 const formatTargetValue = (value: unknown): string => {
   if (!value || typeof value !== "object") return "";
@@ -142,9 +53,10 @@ const encodeBasString = (key: string, value: string): string => {
 const formatValue = (key: string, value: unknown): string => {
   if (value === undefined || value === null) return "";
 
-  if (key === "target") return formatTargetValue(value);
+  const normalizedKey = toEditorPropertyKey(key);
+  if (normalizedKey === "target") return formatTargetValue(value);
 
-  if (COLOR_VALUE_KEYS.has(key) && typeof value === "number") {
+  if (COLOR_PROPERTY_KEYS.has(normalizedKey) && typeof value === "number") {
     return "0x" + value.toString(16).padStart(6, "0");
   }
 
@@ -152,7 +64,7 @@ const formatValue = (key: string, value: unknown): string => {
 
   if (typeof value === "string") {
     const trimmed = value.trim();
-    if (COLOR_VALUE_KEYS.has(key)) {
+    if (COLOR_PROPERTY_KEYS.has(normalizedKey)) {
       const shortHex = trimmed.match(/^#([\da-f]{3})$/i)?.[1];
       if (shortHex) {
         return `0x${shortHex
@@ -165,9 +77,9 @@ const formatValue = (key: string, value: unknown): string => {
       if (/^\d+$/.test(trimmed)) return trimmed;
     }
     if (
-      NUMERIC_VALUE_KEYS.has(key) &&
+      NUMERIC_PROPERTY_KEYS.has(normalizedKey) &&
       (/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(trimmed) ||
-        (PERCENTAGE_VALUE_KEYS.has(key) &&
+        (PERCENTAGE_PROPERTY_KEYS.has(normalizedKey) &&
           /^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?%$/i.test(trimmed)))
     ) {
       return trimmed;
@@ -181,11 +93,7 @@ const formatValue = (key: string, value: unknown): string => {
 const formatSeconds = (milliseconds: number) =>
   `${Number((Math.max(0, milliseconds) / 1000).toFixed(4))}s`;
 
-const toBasKey = (key: string) => {
-  if (key === "opacity") return "alpha";
-  if (key === "parentId") return "parent";
-  return key;
-};
+const toBasKey = toBasPropertyKey;
 
 const formatInlineProperties = (
   properties: Partial<AnyDanmu> | TimelineKeyframeProperties
@@ -250,7 +158,7 @@ export const compileDanmuDefinition = (
   DEFINITION_FIELDS_BY_TYPE[resource.type].forEach((key) => {
     const value = rawResource[key];
     if (value === undefined || value === null) return;
-    if (startSec > 0 && (key === "alpha" || key === "opacity")) return;
+    if (startSec > 0 && key === "opacity") return;
     if (isDanmuFieldBasDefault(resource, key, value)) return;
 
     const formatted = formatValue(key, value);
