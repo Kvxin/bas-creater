@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from "vue";
+import { computed, getCurrentScope, onScopeDispose, ref, type Ref } from "vue";
 import { normalizeKeyframes } from "@/core/keyframes";
 import type { TimelineTrack } from "@/types/timeline";
 
@@ -142,11 +142,16 @@ export function useTimelinePlayhead(params: UseTimelinePlayheadParams) {
   };
 
   const stopDragPlayhead = () => {
+    const wasActive = isDraggingPlayhead.value;
     isDraggingPlayhead.value = false;
     playheadSnapKind.value = null;
-    document.body.style.cursor = "";
-    window.removeEventListener("mousemove", onDragPlayhead);
-    window.removeEventListener("mouseup", stopDragPlayhead);
+    if (typeof window !== "undefined") {
+      window.removeEventListener("mousemove", onDragPlayhead);
+      window.removeEventListener("mouseup", stopDragPlayhead);
+    }
+    if (wasActive && typeof document !== "undefined") {
+      document.body.style.cursor = "";
+    }
   };
 
   const startDragPlayhead = (e: MouseEvent) => {
@@ -159,6 +164,10 @@ export function useTimelinePlayhead(params: UseTimelinePlayheadParams) {
     window.addEventListener("mousemove", onDragPlayhead);
     window.addEventListener("mouseup", stopDragPlayhead);
   };
+
+  if (getCurrentScope()) {
+    onScopeDispose(stopDragPlayhead);
+  }
 
   return {
     isDraggingPlayhead,

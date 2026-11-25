@@ -1,4 +1,4 @@
-import { computed, reactive, ref, type Ref } from "vue";
+import { computed, getCurrentScope, onScopeDispose, reactive, ref, type Ref } from "vue";
 import { clampKeyframeTime } from "@/core/keyframes";
 import type { TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
 import type { useTimelineStore } from "@/stores/timeline";
@@ -192,6 +192,24 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     tooltipPosition.y = e.clientY + 15;
   };
 
+  const cancelDragClip = () => {
+    const wasActive = isDraggingClip.value;
+    isDraggingClip.value = false;
+    draggedClipId.value = null;
+    originalClipTrackId.value = null;
+    dragTargetTrackId.value = null;
+    dragTargetGroupId.value = null;
+    draggedClipType.value = null;
+    isAltDragCopy.value = false;
+    if (typeof window !== "undefined") {
+      window.removeEventListener("mousemove", onDragClip);
+      window.removeEventListener("mouseup", stopDragClip);
+    }
+    if (wasActive && typeof document !== "undefined") {
+      document.body.style.cursor = "";
+    }
+  };
+
   const stopDragClip = () => {
     if (isDraggingClip.value && draggedClipId.value) {
       if (dragTargetGroupId.value) {
@@ -234,16 +252,7 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
       }
     }
 
-    isDraggingClip.value = false;
-    draggedClipId.value = null;
-    originalClipTrackId.value = null;
-    dragTargetTrackId.value = null;
-    dragTargetGroupId.value = null;
-    draggedClipType.value = null;
-    isAltDragCopy.value = false;
-    document.body.style.cursor = "";
-    window.removeEventListener("mousemove", onDragClip);
-    window.removeEventListener("mouseup", stopDragClip);
+    cancelDragClip();
   };
 
   const startDragClip = (e: MouseEvent, clip: TimelineClip) => {
@@ -251,7 +260,7 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     if (e.ctrlKey || e.metaKey || e.shiftKey || editingGroupId.value === clip.id) return;
     if (timelineStore.tracks.find(track => track.id === clip.trackId)?.locked) return;
 
-    if ((e.target as HTMLElement).dataset.handle) return;
+    if ((e.target as HTMLElement | null)?.dataset?.handle) return;
 
     e.stopPropagation();
     e.preventDefault();
@@ -319,6 +328,20 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     tooltipPosition.y = e.clientY + 15;
   };
 
+  const cancelResizeClip = () => {
+    const wasActive = isResizingClip.value;
+    isResizingClip.value = false;
+    resizingClipId.value = null;
+    resizingHandle.value = null;
+    if (typeof window !== "undefined") {
+      window.removeEventListener("mousemove", onResizeClip);
+      window.removeEventListener("mouseup", stopResizeClip);
+    }
+    if (wasActive && typeof document !== "undefined") {
+      document.body.style.cursor = "";
+    }
+  };
+
   const stopResizeClip = () => {
     if (isResizingClip.value && resizingClipId.value) {
       const updates = { startTime: tempState.startTime, duration: tempState.duration };
@@ -332,12 +355,7 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
       }
     }
 
-    isResizingClip.value = false;
-    resizingClipId.value = null;
-    resizingHandle.value = null;
-    document.body.style.cursor = "";
-    window.removeEventListener("mousemove", onResizeClip);
-    window.removeEventListener("mouseup", stopResizeClip);
+    cancelResizeClip();
   };
 
   const startResizeClip = (e: MouseEvent, clip: TimelineClip, handle: "left" | "right") => {
@@ -396,6 +414,20 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     tempKeyframeTime.value = clampKeyframeTime(initialKeyframeTime.value + deltaMs, clip.duration);
   };
 
+  const cancelDragKeyframe = () => {
+    const wasActive = isDraggingKeyframe.value;
+    isDraggingKeyframe.value = false;
+    draggedKeyframeId.value = null;
+    draggedKeyframeClipId.value = null;
+    if (typeof window !== "undefined") {
+      window.removeEventListener("mousemove", onDragKeyframe);
+      window.removeEventListener("mouseup", stopDragKeyframe);
+    }
+    if (wasActive && typeof document !== "undefined") {
+      document.body.style.cursor = "";
+    }
+  };
+
   const stopDragKeyframe = () => {
     if (isDraggingKeyframe.value && draggedKeyframeClipId.value && draggedKeyframeId.value) {
       timelineStore.updateClipKeyframe(draggedKeyframeClipId.value, draggedKeyframeId.value, {
@@ -403,12 +435,7 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
       });
     }
 
-    isDraggingKeyframe.value = false;
-    draggedKeyframeId.value = null;
-    draggedKeyframeClipId.value = null;
-    document.body.style.cursor = "";
-    window.removeEventListener("mousemove", onDragKeyframe);
-    window.removeEventListener("mouseup", stopDragKeyframe);
+    cancelDragKeyframe();
   };
 
   const startDragKeyframe = (
@@ -432,6 +459,16 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     window.addEventListener("mousemove", onDragKeyframe);
     window.addEventListener("mouseup", stopDragKeyframe);
   };
+
+  const cancelAllInteractions = () => {
+    cancelDragClip();
+    cancelResizeClip();
+    cancelDragKeyframe();
+  };
+
+  if (getCurrentScope()) {
+    onScopeDispose(cancelAllInteractions);
+  }
 
   return {
     tempState,
@@ -458,11 +495,15 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     getDragGhostClipStyle,
     startDragClip,
     stopDragClip,
+    cancelDragClip,
     startResizeClip,
     stopResizeClip,
+    cancelResizeClip,
     selectKeyframeMarker,
     getKeyframeMarkerStyle,
     startDragKeyframe,
-    stopDragKeyframe
+    stopDragKeyframe,
+    cancelDragKeyframe,
+    cancelAllInteractions
   };
 }

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +16,7 @@ import {
 const props = defineProps<{
   selected: AnyDanmu;
   resolvedSelected: ResolvedDanmu<AnyDanmu> | null;
+  anchorPercentageMode: Record<AnchorAxis, boolean>;
   getPercentageInputValue: (field: PercentageField) => string | number | undefined;
   inert?: boolean;
 }>();
@@ -25,23 +25,22 @@ const emit = defineEmits<{
   (e: "update-field", key: string, value: unknown, asNumber?: boolean): void;
   (e: "update-resource-field", key: string, value: unknown): void;
   (e: "update-percentage-value", field: PercentageField, value: string | number): void;
+  (e: "update-anchor-percentage-mode", axis: AnchorAxis, enabled: boolean): void;
 }>();
 
 const { t } = useI18n();
 
-const anchorPercentageMode = ref<Record<AnchorAxis, boolean>>({ x: true, y: true });
-
 const getAnchorValue = (axis: AnchorAxis) => {
   const key = axis === "x" ? "anchorX" : "anchorY";
   const value = props.resolvedSelected?.[key] ?? 0;
-  return anchorPercentageMode.value[axis] ? value * 100 : value;
+  return props.anchorPercentageMode[axis] ? value * 100 : value;
 };
 
 const updateAnchorValue = (axis: AnchorAxis, value: string | number) => {
   const numericValue = Number(value);
   if (!Number.isFinite(numericValue)) return;
 
-  const normalizedValue = anchorPercentageMode.value[axis] ? numericValue / 100 : numericValue;
+  const normalizedValue = props.anchorPercentageMode[axis] ? numericValue / 100 : numericValue;
   const key = axis === "x" ? "anchorX" : "anchorY";
   emit("update-resource-field", key, Math.min(1, Math.max(0, normalizedValue)));
 };
@@ -112,7 +111,7 @@ const updateAnchorValue = (axis: AnchorAxis, value: string | number) => {
           <div class="flex gap-2">
             <Input
               type="number"
-              :step="anchorPercentageMode.x ? 1 : 0.01"
+              :step="props.anchorPercentageMode.x ? 1 : 0.01"
               :model-value="getAnchorValue('x')"
               @update:model-value="v => updateAnchorValue('x', v)"
               class="h-7 min-w-0 flex-1 text-xs font-mono"
@@ -120,7 +119,10 @@ const updateAnchorValue = (axis: AnchorAxis, value: string | number) => {
             <label
               class="flex items-center gap-1 text-xs text-muted-foreground"
               :title="t('properties.transform.anchorHint')"
-              ><Switch v-model="anchorPercentageMode.x" />%</label
+              ><Switch
+                :model-value="props.anchorPercentageMode.x"
+                @update:model-value="emit('update-anchor-percentage-mode', 'x', $event)"
+              />%</label
             >
           </div>
         </div>
@@ -129,7 +131,7 @@ const updateAnchorValue = (axis: AnchorAxis, value: string | number) => {
           <div class="flex gap-2">
             <Input
               type="number"
-              :step="anchorPercentageMode.y ? 1 : 0.01"
+              :step="props.anchorPercentageMode.y ? 1 : 0.01"
               :model-value="getAnchorValue('y')"
               @update:model-value="v => updateAnchorValue('y', v)"
               class="h-7 min-w-0 flex-1 text-xs font-mono"
@@ -137,7 +139,10 @@ const updateAnchorValue = (axis: AnchorAxis, value: string | number) => {
             <label
               class="flex items-center gap-1 text-xs text-muted-foreground"
               :title="t('properties.transform.anchorHint')"
-              ><Switch v-model="anchorPercentageMode.y" />%</label
+              ><Switch
+                :model-value="props.anchorPercentageMode.y"
+                @update:model-value="emit('update-anchor-percentage-mode', 'y', $event)"
+              />%</label
             >
           </div>
         </div>

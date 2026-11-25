@@ -112,13 +112,11 @@ const {
   getClipStyle,
   getDragGhostClipStyle,
   startDragClip,
-  stopDragClip,
   startResizeClip,
-  stopResizeClip,
   selectKeyframeMarker,
   getKeyframeMarkerStyle,
   startDragKeyframe,
-  stopDragKeyframe
+  cancelAllInteractions
 } = useTimelineInteractions({
   timelineStore,
   danmuStore,
@@ -358,12 +356,7 @@ watch(
   async () => {
     contextMenu.hide();
     editingGroupId.value = null;
-    isDraggingClip.value = false;
-    isResizingClip.value = false;
-    isDraggingKeyframe.value = false;
-    stopDragClip();
-    stopResizeClip();
-    stopDragKeyframe();
+    cancelAllInteractions();
     stopDragPlayhead();
     await nextTick();
     if (timelineContentRef.value) {

@@ -27,6 +27,7 @@ import PropertiesTransformTab from "./properties/PropertiesTransformTab.vue";
 import {
   convertPercentagePropertyValue,
   isUnsetPropertyValue,
+  type AnchorAxis,
   type PercentageField
 } from "./properties/propertyInputHelpers";
 
@@ -271,6 +272,10 @@ const updateDuration = (value: string | number) => {
   }
 };
 
+const anchorPercentageMode = ref<Record<AnchorAxis, boolean>>({ x: true, y: true });
+const updateAnchorPercentageMode = (axis: AnchorAxis, enabled: boolean) => {
+  anchorPercentageMode.value[axis] = enabled;
+};
 const percentageModeOverrides = ref<Record<string, boolean>>({});
 
 const getPercentageModeKey = (field: PercentageField) => `${selected.value?.id ?? "none"}:${field}`;
@@ -401,11 +406,13 @@ const setPercentageMode = (field: PercentageField, enabled: boolean) => {
           v-show="activeTab === 'transform'"
           :selected="selected"
           :resolved-selected="resolvedSelected"
+          :anchor-percentage-mode="anchorPercentageMode"
           :get-percentage-input-value="getPercentageInputValue"
           :inert="effectiveSelection.error"
           @update-field="updateField"
           @update-resource-field="updateResourceField"
           @update-percentage-value="updatePercentageValue"
+          @update-anchor-percentage-mode="updateAnchorPercentageMode"
         />
 
         <PropertiesStyleTab
