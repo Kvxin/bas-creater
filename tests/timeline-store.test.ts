@@ -221,3 +221,115 @@ test("importBasObjects groups multiple objects, links parents, and rolls back on
   assert.equal(single.groupClipId, null);
   assert.deepEqual([timeline.tracks[0]!.type, timeline.tracks[0]!.clips[0]!.startTime], ["danmu", 250]);
 });
+
+test("disposing timeline drag and playhead scopes cancels active drags without committing on mouseup", async () => {
+  const { computed, effectScope, ref } = await import("vue");
+  const { useTimelineInteractions } = await import("../src/composables/useTimelineInteractions");
+  const { useTimelinePlayhead } = await import("../src/composables/useTimelinePlayhead");
+
+  const listeners = new Map<string, Set<(event: any) => void>>();
+  const stubWindow = {
+    innerWidth: 1200,
+    addEventListener(type: string, fn: (event: any) => void) {
+      const set = listeners.get(type) ?? new Set();
+      set.add(fn);
+      listeners.set(type, set);
+    },
+    removeEventListener(type: string, fn: (event: any) => void) {
+      listeners.get(type)?.delete(fn);
+    }
+  };
+  const stubDocument = {
+    body: { style: { cursor: "" } },
+    elementFromPoint: () => null,
+    elementsFromPoint: () => []
+  };
+  const prevWindow = (globalThis as any).window;
+  const prevDocument = (globalThis as any).document;
+  (globalThis as any).window = stubWindow;
+  (globalThis as any).document = stubDocument;
+
+  const dispatch = (type: string, event: Record<string, unknown> = {}) => {
+    for (const fn of [...(listeners.get(type) ?? [])]) fn(event);
+  };
+
+  try {
+    const { timeline, danmu, audio } = setup();
+    const initialClip: TimelineResourceClip = {
+      ...textClip("c1", "t", 0, 1000),
+      keyframes: [{ id: "kf1", timeMs: 200, interpolation: "linear", properties: { x: "10%" } }]
+    };
+    timeline.loadTimeline([track("t", [initialClip])]);
+
+    const scope = effectScope();
+    const api = scope.run(() => {
+      const pixelsPerSecond = ref(100);
+      const scrollLeft = ref(0);
+      const editingGroupId = ref<string | null>(null);
+      const timelineContentRef = ref<HTMLElement | null>({
+        getBoundingClientRect: () => ({ left: 0, top: 0, width: 1000, height: 300 })
+      } as unknown as HTMLElement);
+
+      const interactions = useTimelineInteractions({
+        timelineStore: timeline,
+        danmuStore: danmu,
+        audioStore: audio,
+        pixelsPerSecond,
+        editingGroupId,
+        getTrackType: (t) => t.type ?? null,
+        getClipTimelineType: () => "danmu"
+      });
+      const playhead = useTimelinePlayhead({
+        tracks: computed(() => timeline.tracks),
+        duration: computed(() => timeline.duration),
+        currentTime: computed(() => timeline.currentTime),
+        pixelsPerSecond,
+        scrollLeft,
+        timelineContentRef,
+        setCurrentTime: (ms) => timeline.setCurrentTime(ms),
+        translate: (k) => k
+      });
+      return { interactions, playhead };
+    })!;
+
+    const clip = timeline.tracks[0]!.clips[0] as TimelineResourceClip;
+    const mouseEvent = (clientX: number) =>
+      ({
+        button: 0,
+        clientX,
+        clientY: 10,
+        target: { dataset: {} },
+        stopPropagation() {},
+        preventDefault() {}
+      }) as unknown as MouseEvent;
+
+    // 启动片段拖拽、拉伸、关键帧拖拽与播放头拖拽
+    api.interactions.startDragClip(mouseEvent(0), clip);
+    dispatch("mousemove", { clientX: 50, clientY: 10, altKey: false });
+    assert.equal(api.interactions.tempState.startTime, 500);
+
+    api.interactions.startResizeClip(mouseEvent(0), clip, "right");
+    dispatch("mousemove", { clientX: 80, clientY: 10 });
+
+    api.interactions.startDragKeyframe(mouseEvent(0), clip, { id: "kf1", timeMs: 200, isBase: false });
+    dispatch("mousemove", { clientX: 40, clientY: 10 });
+
+    api.playhead.startDragPlayhead(mouseEvent(0));
+
+    // 先卸载作用域，再触发 mouseup
+    scope.stop();
+    assert.equal(stubDocument.body.style.cursor, "");
+    assert.equal(listeners.get("mousemove")?.size ?? 0, 0);
+    assert.equal(listeners.get("mouseup")?.size ?? 0, 0);
+
+    dispatch("mouseup", { clientX: 50, clientY: 10 });
+
+    const afterClip = timeline.tracks[0]!.clips[0] as TimelineResourceClip;
+    assert.equal(afterClip.startTime, 0);
+    assert.equal(afterClip.duration, 1000);
+    assert.equal(afterClip.keyframes?.[0]?.timeMs, 200);
+  } finally {
+    (globalThis as any).window = prevWindow;
+    (globalThis as any).document = prevDocument;
+  }
+});
