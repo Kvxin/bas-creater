@@ -23,16 +23,18 @@ export type { AnimatableKey };
 
 export const BASE_KEYFRAME_ID = "__base_keyframe__";
 
-export const KEYFRAME_TOLERANCE_MS = 24;
+export const KEYFRAME_TOLERANCE_MS = 15;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(max, Math.max(min, value));
+
+const roundTenths = (value: number) => Math.round(value * 10) / 10;
 
 export const createKeyframeId = () =>
   `kf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 
 export const clampKeyframeTime = (timeMs: number, clipDuration: number) =>
-  clamp(Math.round(Number.isFinite(timeMs) ? timeMs : 0), 0, Math.max(0, clipDuration));
+  clamp(roundTenths(Number.isFinite(timeMs) ? timeMs : 0), 0, Math.max(0, roundTenths(clipDuration)));
 
 export const normalizeKeyframes = (
   keyframes: TimelineKeyframe[] | undefined,

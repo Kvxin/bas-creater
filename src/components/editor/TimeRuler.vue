@@ -1,51 +1,96 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from "vue";
-import { useMutationObserver } from "@vueuse/core";
-import { getGridPixel, getGridSize, formatTime, getPixelsPerSecond } from "@/core/timeline";
+import { computed, ref, onMounted, onUnmounted, watch } from "vue";
+import { useI18n } from "vue-i18n";
+import { useElementSize, useMutationObserver } from "@vueuse/core";
+import {
+  DEFAULT_TIMELINE_BPM,
+  DEFAULT_TIMELINE_FPS,
+  formatTimelineTime,
+  getGridPixel,
+  getPixelsPerSecond,
+  getRulerTicks,
+  roundTimelineMs
+} from "@/core/timeline";
+import type { TimelineDisplayMode, TimelineMarker } from "@/types/timeline";
 
 type Props = {
-  scale?: number; // 缩放比例 (1-100)
+  scale?: number; // 缩放比例 (10-1200)
   scrollLeft?: number; // 滚动偏移量（像素）
   paddingLeft?: number; // 左侧内边距（像素），用于对齐轨道
+  mode?: TimelineDisplayMode;
+  fps?: number;
+  bpm?: number;
+  beatOffsetMs?: number;
+  markers?: TimelineMarker[];
 };
 
 const props = withDefaults(defineProps<Props>(), {
   scale: 50,
   scrollLeft: 0,
-  paddingLeft: 8 // 对应 p-2 = 8px
+  paddingLeft: 8,
+  mode: "frames",
+  fps: DEFAULT_TIMELINE_FPS,
+  bpm: DEFAULT_TIMELINE_BPM,
+  beatOffsetMs: 0,
+  markers: () => []
 });
 
 const emit = defineEmits<{
-  (e: "click", timeMs: number): void;
+  (e: "click", timeMs: number, shiftKey: boolean): void;
+  (e: "select-marker", timeMs: number): void;
+  (e: "remove-marker", markerId: string): void;
 }>();
 
-// 根据点击位置计算对应的时间（毫秒）
+const { t } = useI18n();
+
+const canvasRef = ref<HTMLCanvasElement | null>(null);
+const containerRef = ref<HTMLDivElement | null>(null);
+const { width: containerWidth } = useElementSize(containerRef);
+let resizeObserver: ResizeObserver | null = null;
+
+// 根据点击位置计算对应的原始时间（毫秒）
 const getTimeFromX = (clientX: number): number => {
   const container = containerRef.value;
   if (!container) return 0;
 
   const rect = container.getBoundingClientRect();
-  // 计算相对于容器的 x 坐标，减去 paddingLeft
   const relativeX = clientX - rect.left - props.paddingLeft + props.scrollLeft;
+  const pps = getPixelsPerSecond(props.scale);
+  if (pps <= 0) return 0;
 
-  // 使用 timeline 工具函数反向计算时间
-  const gridMs = getGridSize(props.scale);
-  const pixelPerGrid = getGridPixel(props.scale, gridMs);
-  const timeMs = Math.max(0, (relativeX / pixelPerGrid) * gridMs);
-
-  return Math.round(timeMs);
+  return roundTimelineMs(Math.max(0, (relativeX / pps) * 1000));
 };
 
-// 处理点击事件
 const handleClick = (event: MouseEvent) => {
   const timeMs = getTimeFromX(event.clientX);
-  console.log(`点击时间: ${timeMs}ms (${formatTime(timeMs).str})`);
-  emit("click", timeMs);
+  emit("click", timeMs, event.shiftKey);
 };
 
-const canvasRef = ref<HTMLCanvasElement | null>(null);
-const containerRef = ref<HTMLDivElement | null>(null);
-let resizeObserver: ResizeObserver | null = null;
+const visibleMarkers = computed(() => {
+  const maxWidth = containerWidth.value || 1600;
+  return props.markers
+    .map(marker => ({
+      marker,
+      x: props.paddingLeft + getGridPixel(props.scale, marker.timeMs) - props.scrollLeft
+    }))
+    .filter(item => item.x >= -16 && item.x <= maxWidth + 16);
+});
+
+const formatMarkerLabel = (timeMs: number) =>
+  formatTimelineTime(timeMs, {
+    mode: props.mode,
+    fps: props.fps,
+    bpm: props.bpm,
+    beatOffsetMs: props.beatOffsetMs
+  });
+
+const handleMarkerClick = (event: MouseEvent, marker: TimelineMarker) => {
+  if (event.altKey) {
+    emit("remove-marker", marker.id);
+    return;
+  }
+  emit("select-marker", marker.timeMs);
+};
 
 // 颜色配置
 const getThemeColors = () => {
@@ -53,53 +98,26 @@ const getThemeColors = () => {
   const styles = getComputedStyle(containerRef.value ?? document.documentElement);
   const foreground = styles.getPropertyValue("--foreground").trim() || "hsl(0 0% 87%)";
   const muted = styles.getPropertyValue("--muted-foreground").trim() || "hsl(0 0% 56%)";
+  const tertiary = styles.getPropertyValue("--tertiary").trim() || muted;
 
   return {
     background: "transparent",
     majorTick: foreground,
     mediumTick: muted,
-    minorTick: `color-mix(in oklab, ${muted} 50%, transparent)`,
-    text: foreground
+    minorTick: `color-mix(in oklab, ${muted} 45%, transparent)`,
+    text: foreground,
+    subText: tertiary
   };
 };
 
-// 刻度高度配置
 const tickHeight = {
-  major: 14,
+  major: 13,
   medium: 8,
   minor: 4
 };
 
-// 文字区域高度
 const textAreaHeight = 14;
 
-// 获取刻度间隔配置 (基于 PPS 像素/秒)
-const getTickIntervals = (scale: number) => {
-  const pps = getPixelsPerSecond(scale);
-
-  // 1. 高倍缩放 (PPS >= 100): 1s >= 100px
-  if (pps >= 100) {
-    // scale=50 (100px/s) -> major=1s, medium=0.5s, minor=0.1s
-    // scale=100 (200px/s) -> major=1s, medium=0.25s, minor=0.05s
-    return {
-      minor: pps >= 200 ? 50 : 100,
-      medium: pps >= 200 ? 250 : 500,
-      major: 1000
-    };
-  }
-
-  // 2. 中等缩放 (PPS >= 40): 1s >= 40px
-  // scale=25 (50px/s)
-  if (pps >= 40) {
-    return { minor: 500, medium: 1000, major: 5000 };
-  }
-
-  // 3. 低倍缩放 (PPS < 40)
-  // scale=10 (20px/s) -> 5s=100px
-  return { minor: 1000, medium: 5000, major: 10000 };
-};
-
-// 绘制时间刻度
 const drawRuler = () => {
   const canvas = canvasRef.value;
   const container = containerRef.value;
@@ -108,7 +126,6 @@ const drawRuler = () => {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  // 设置canvas尺寸（考虑设备像素比）
   const dpr = window.devicePixelRatio || 1;
   const rect = container.getBoundingClientRect();
   canvas.width = rect.width * dpr;
@@ -121,18 +138,11 @@ const drawRuler = () => {
   const height = rect.height;
   const colors = getThemeColors();
 
-  // 清空画布
   ctx.clearRect(0, 0, width, height);
 
-  // 获取刻度间隔
-  const intervals = getTickIntervals(props.scale);
   const pps = getPixelsPerSecond(props.scale);
+  if (pps <= 0) return;
 
-  // 计算可视区域对应的时间范围
-  // x = paddingLeft + (time * pps / 1000) - scrollLeft
-  // => time = (x - paddingLeft + scrollLeft) * 1000 / pps
-
-  // 增加额外的渲染缓冲区域 (左右各 100px)
   const bufferPixel = 100;
   const startPixel = -bufferPixel;
   const endPixel = width + bufferPixel;
@@ -140,39 +150,43 @@ const drawRuler = () => {
   const rawStartTime = ((startPixel - props.paddingLeft + props.scrollLeft) * 1000) / pps;
   const rawEndTime = ((endPixel - props.paddingLeft + props.scrollLeft) * 1000) / pps;
 
-  // 对齐到最小刻度
-  const startTime = Math.max(0, Math.floor(rawStartTime / intervals.minor) * intervals.minor);
-  const endTime = Math.ceil(rawEndTime / intervals.minor) * intervals.minor;
+  const ticks = getRulerTicks({
+    startTimeMs: rawStartTime,
+    endTimeMs: rawEndTime,
+    scale: props.scale,
+    mode: props.mode,
+    fps: props.fps,
+    bpm: props.bpm,
+    beatOffsetMs: props.beatOffsetMs
+  });
 
-  // 绘制刻度
-  for (let time = startTime; time <= endTime; time += intervals.minor) {
-    // 添加 paddingLeft 偏移，使刻度与轨道对齐
-    const x = props.paddingLeft + getGridPixel(props.scale, time) - props.scrollLeft;
-
-    // 再次检查可见性（虽然循环范围已经限制了，但为了保险）
-    if (x < -50 || x > width + 50) continue;
+  for (const tick of ticks) {
+    const x = props.paddingLeft + getGridPixel(props.scale, tick.timeMs) - props.scrollLeft;
+    if (x < -60 || x > width + 60) continue;
 
     let tickH = tickHeight.minor;
     let tickColor = colors.minorTick;
 
-    // 判断刻度类型
-    if (time % intervals.major === 0) {
+    if (tick.kind === "major") {
       tickH = tickHeight.major;
       tickColor = colors.majorTick;
-
-      // 绘制时间文本
-      const formatted = formatTime(time);
-      ctx.fillStyle = colors.text;
-      ctx.font = "11px Segoe UI, system-ui, sans-serif";
-      // 第一个刻度左对齐，其他居中对齐
-      ctx.textAlign = time === 0 ? "left" : "center";
-      ctx.fillText(formatted.str, x, textAreaHeight - 2);
-    } else if (time % intervals.medium === 0) {
+      if (tick.label) {
+        ctx.fillStyle = colors.text;
+        ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+        ctx.textAlign = tick.timeMs <= 0.05 ? "left" : "center";
+        ctx.fillText(tick.label, tick.timeMs <= 0.05 ? x + 2 : x, textAreaHeight - 2);
+      }
+    } else if (tick.kind === "medium") {
       tickH = tickHeight.medium;
       tickColor = colors.mediumTick;
+      if (tick.label) {
+        ctx.fillStyle = colors.subText;
+        ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(tick.label, x, textAreaHeight - 2);
+      }
     }
 
-    // 绘制刻度线（从底部向上绘制）
     ctx.beginPath();
     ctx.strokeStyle = tickColor;
     ctx.lineWidth = 1;
@@ -183,22 +197,19 @@ const drawRuler = () => {
   }
 };
 
-// Canvas 不会随 CSS 主题自动更新，主题 class 改变时需要重新绘制。
 useMutationObserver(() => document.documentElement, drawRuler, {
   attributes: true,
   attributeFilter: ["class"]
 });
 
-// 监听属性变化重新绘制
-watch(() => [props.scale, props.scrollLeft, props.paddingLeft], drawRuler, {
-  immediate: false
-});
+watch(
+  () => [props.scale, props.scrollLeft, props.paddingLeft, props.mode, props.fps, props.bpm, props.beatOffsetMs],
+  drawRuler,
+  { immediate: false }
+);
 
 onMounted(() => {
-  // 初始绘制
   drawRuler();
-
-  // 监听容器大小变化
   if (containerRef.value) {
     resizeObserver = new ResizeObserver(() => {
       drawRuler();
@@ -208,20 +219,51 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  if (resizeObserver) {
-    resizeObserver.disconnect();
-  }
+  resizeObserver?.disconnect();
 });
 </script>
 
 <template>
   <div ref="containerRef" class="time-ruler w-full h-full relative cursor-pointer" @click="handleClick">
     <canvas ref="canvasRef" class="time-ruler-canvas absolute inset-0 pointer-events-none"></canvas>
+    <button
+      v-for="{ marker, x } in visibleMarkers"
+      :key="marker.id"
+      type="button"
+      class="ruler-marker"
+      :style="{ left: `${x}px` }"
+      :title="t('timeline.markers.itemTitle', { time: formatMarkerLabel(marker.timeMs) })"
+      :aria-label="t('timeline.markers.itemTitle', { time: formatMarkerLabel(marker.timeMs) })"
+      data-ui="timeline-ruler-marker"
+      @click.stop="handleMarkerClick($event, marker)"
+      @contextmenu.prevent.stop="emit('remove-marker', marker.id)"
+    ></button>
   </div>
 </template>
 
 <style scoped>
 .time-ruler {
   min-height: 22px;
+}
+
+.ruler-marker {
+  position: absolute;
+  top: 2px;
+  width: 9px;
+  height: 11px;
+  padding: 0;
+  border: none;
+  transform: translateX(-50%);
+  background: var(--caution);
+  clip-path: polygon(0 0, 100% 0, 100% 62%, 50% 100%, 0 62%);
+  z-index: 25;
+  opacity: 0.92;
+  transition: transform var(--motion-fast) ease, filter var(--motion-fast) ease;
+}
+
+.ruler-marker:hover {
+  opacity: 1;
+  filter: brightness(1.12);
+  transform: translateX(-50%) scale(1.12);
 }
 </style>

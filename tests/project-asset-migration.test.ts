@@ -119,3 +119,56 @@ test("legacy animations migrate to keyframes and mixed animation data is rejecte
   assert.throws(() => normalizeProjectData(source), /clip-1.*both keyframes and legacy animations/i);
   assert.equal(JSON.stringify(source), original);
 });
+
+test("project schema preserves valid timeline FPS, BPM, display mode, and cue markers while rejecting invalid metadata", () => {
+  const valid = normalizeProjectData({
+    ...legacy(),
+    timeline: {
+      duration: 0,
+      zoomScale: 240,
+      fps: 60,
+      bpm: 128,
+      beatOffsetMs: 468.75,
+      timeDisplayMode: "beats",
+      snapEnabled: true,
+      markers: [
+        { id: "m-2", timeMs: 937.5, label: "Drop" },
+        { id: "m-1", timeMs: 468.75 }
+      ]
+    }
+  });
+  assert.deepEqual(valid.timeline, {
+    duration: 2200,
+    zoomScale: 240,
+    fps: 60,
+    bpm: 128,
+    beatOffsetMs: 468.8,
+    timeDisplayMode: "beats",
+    snapEnabled: true,
+    markers: [
+      { id: "m-1", timeMs: 468.8 },
+      { id: "m-2", timeMs: 937.5, label: "Drop" }
+    ]
+  });
+
+  assert.throws(() => normalizeProjectData({ ...legacy(), timeline: { duration: 0, fps: 0 } }), /fps/i);
+  assert.throws(() => normalizeProjectData({ ...legacy(), timeline: { duration: 0, bpm: 999 } }), /bpm/i);
+  assert.throws(
+    () => normalizeProjectData({ ...legacy(), timeline: { duration: 0, timeDisplayMode: "smpte" } }),
+    /display mode/i
+  );
+  assert.throws(
+    () =>
+      normalizeProjectData({
+        ...legacy(),
+        timeline: {
+          duration: 0,
+          markers: [
+            { id: "dup", timeMs: 100 },
+            { id: "dup", timeMs: 200 }
+          ]
+        }
+      }),
+    /duplicate/i
+  );
+});

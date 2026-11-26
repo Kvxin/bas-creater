@@ -2,7 +2,17 @@
 import { computed, ref, watch } from "vue";
 import { onClickOutside } from "@vueuse/core";
 import { useI18n } from "vue-i18n";
-import { Check, ChevronDown, Play, Pause, SkipBack, SkipForward, RotateCcw } from "lucide-vue-next";
+import {
+  Check,
+  ChevronDown,
+  Play,
+  Pause,
+  SkipBack,
+  SkipForward,
+  StepBack,
+  StepForward,
+  RotateCcw
+} from "lucide-vue-next";
 import {
   CANVAS_MAX_SIZE,
   CANVAS_MIN_SIZE,
@@ -26,8 +36,11 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "play-from-start"): void;
   (e: "seek-to-start"): void;
+  (e: "step-prev-frame"): void;
   (e: "toggle-play"): void;
+  (e: "step-next-frame"): void;
   (e: "skip-forward"): void;
+  (e: "cycle-time-mode"): void;
   (e: "fit-to-screen"): void;
   (e: "set-viewport-percent", percent: number): void;
   (e: "set-canvas-resolution", width: number, height: number): void;
@@ -87,31 +100,53 @@ const applyCustomResolution = () => {
   >
     <!-- Left: Timecode -->
     <div class="preview-timecode flex min-w-0 items-center gap-1.5 font-mono text-xs tabular-nums select-none">
-      <span class="shrink-0 rounded-sm bg-surface px-1.5 py-1 font-medium text-foreground">{{
-        props.currentTimecode
-      }}</span>
+      <button
+        type="button"
+        @click="emit('cycle-time-mode')"
+        class="shrink-0 rounded-sm border border-transparent bg-surface px-1.5 py-1 font-medium text-foreground transition-colors hover:border-border hover:bg-accent"
+        :title="t('timeline.timebase.triggerTitle')"
+        data-ui="preview-timecode-mode"
+      >
+        {{ props.currentTimecode }}
+      </button>
       <span class="text-muted-foreground/60">/</span>
       <span class="truncate text-muted-foreground" :title="props.durationTimecode">{{ props.durationTimecode }}</span>
     </div>
 
     <!-- Center: Transport -->
-    <div class="preview-transport flex items-center gap-1">
+    <div class="preview-transport flex items-center gap-0.5">
       <button @click="emit('play-from-start')" class="transport-button" :title="t('preview.playback.fromStart')">
         <RotateCcw class="size-3.5" />
       </button>
       <button @click="emit('seek-to-start')" class="transport-button" :title="t('preview.playback.seekToStart')">
-        <SkipBack class="size-4 fill-current" />
+        <SkipBack class="size-3.5 fill-current" />
+      </button>
+      <button
+        @click="emit('step-prev-frame')"
+        class="transport-button"
+        :title="t('preview.playback.prevFrame')"
+        data-ui="preview-prev-frame"
+      >
+        <StepBack class="size-3.5" />
       </button>
       <button
         @click="emit('toggle-play')"
-        class="preview-play-button mx-1 inline-flex h-8 w-10 items-center justify-center rounded-md text-primary-foreground transition-colors"
+        class="preview-play-button mx-1 inline-flex h-7 w-9 items-center justify-center rounded-sm text-primary-foreground transition-colors"
         :title="props.isPlaying ? t('preview.playback.pause') : t('preview.playback.play')"
       >
-        <Pause v-if="props.isPlaying" class="size-4 fill-current" />
-        <Play v-else class="ml-0.5 size-4 fill-current" />
+        <Pause v-if="props.isPlaying" class="size-3.5 fill-current" />
+        <Play v-else class="ml-0.5 size-3.5 fill-current" />
+      </button>
+      <button
+        @click="emit('step-next-frame')"
+        class="transport-button"
+        :title="t('preview.playback.nextFrame')"
+        data-ui="preview-next-frame"
+      >
+        <StepForward class="size-3.5" />
       </button>
       <button @click="emit('skip-forward')" class="transport-button" :title="t('preview.playback.skipForward')">
-        <SkipForward class="size-4 fill-current" />
+        <SkipForward class="size-3.5 fill-current" />
       </button>
     </div>
 

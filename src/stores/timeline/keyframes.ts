@@ -1,16 +1,16 @@
 import type { TimelineKeyframe, TimelineKeyframeProperties } from "@/types/timeline";
 import {
   BASE_KEYFRAME_ID,
-  KEYFRAME_TOLERANCE_MS,
   clampKeyframeTime,
   createKeyframeId,
   normalizeKeyframes,
   pickKeyframeProperties
 } from "@/core/keyframes";
+import { getKeyframeToleranceMs } from "@/core/timeline";
 import type { TimelineStoreContext } from "./context";
 
 export const createTimelineKeyframes = (ctx: TimelineStoreContext) => {
-  const { selectedClipId, selectedKeyframeId, findClipLocation } = ctx;
+  const { fps, selectedClipId, selectedKeyframeId, findClipLocation } = ctx;
 
   const addClipKeyframe = (
     clipId: string,
@@ -64,7 +64,7 @@ export const createTimelineKeyframes = (ctx: TimelineStoreContext) => {
 
     if (!location.clip.keyframes) location.clip.keyframes = [];
 
-    const toleranceMs = options.toleranceMs ?? KEYFRAME_TOLERANCE_MS;
+    const toleranceMs = options.toleranceMs ?? getKeyframeToleranceMs(fps.value);
     const existing = location.clip.keyframes.find((keyframe) => {
       const existingTime = clampKeyframeTime(keyframe.timeMs, location.clip.duration);
       return Math.abs(existingTime - clampedTime) <= toleranceMs;

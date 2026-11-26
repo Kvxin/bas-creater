@@ -1,9 +1,18 @@
 import type { BasProjectData } from "@/types/storage";
 import { MAX_CLIP_EFFECTS, validateInstance } from "@/core/effects";
-import type { TimelineClip, TimelineTrack } from "@/types/timeline";
+import type { TimelineClip, TimelineDisplayMode, TimelineMarker, TimelineTrack } from "@/types/timeline";
 import { updateGroupDurations } from "@/core/timelineGroups";
 import { convertLegacyAnimations } from "@/core/legacyAnimations";
 import { normalizeCoordinates } from "@/core/coordinates";
+import {
+  MAX_TIMELINE_BPM,
+  MAX_TIMELINE_FPS,
+  MAX_TIMELINE_ZOOM,
+  MIN_TIMELINE_BPM,
+  MIN_TIMELINE_FPS,
+  MIN_TIMELINE_ZOOM,
+  roundTimelineMs
+} from "@/core/timeline";
 import type { LegacyAnimationSegment } from "@/core/legacyAnimations";
 
 export const PROJECT_VERSION = 6;
@@ -336,12 +345,80 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
   if (hasLegacyLists) {
     for (const danmu of data.danmus) delete danmu.parentId;
   }
+  if (data.timeline !== undefined && !isRecord(data.timeline)) throw new Error("Invalid timeline metadata");
+  const rawTimeline: Record<string, unknown> = isRecord(data.timeline) ? data.timeline : {};
+  const normalizedTimeline: BasProjectData["timeline"] = { duration: updateGroupDurations(data.tracks) };
+  if (rawTimeline.zoomScale !== undefined) {
+    if (typeof rawTimeline.zoomScale !== "number" || !Number.isFinite(rawTimeline.zoomScale) || rawTimeline.zoomScale <= 0) {
+      throw new Error("Invalid timeline zoomScale");
+    }
+    normalizedTimeline.zoomScale = Math.min(MAX_TIMELINE_ZOOM, Math.max(MIN_TIMELINE_ZOOM, rawTimeline.zoomScale));
+  }
+  if (rawTimeline.fps !== undefined) {
+    if (
+      typeof rawTimeline.fps !== "number" ||
+      !Number.isFinite(rawTimeline.fps) ||
+      rawTimeline.fps < MIN_TIMELINE_FPS ||
+      rawTimeline.fps > MAX_TIMELINE_FPS
+    ) {
+      throw new Error("Invalid timeline FPS");
+    }
+    normalizedTimeline.fps = rawTimeline.fps;
+  }
+  if (rawTimeline.bpm !== undefined) {
+    if (
+      typeof rawTimeline.bpm !== "number" ||
+      !Number.isFinite(rawTimeline.bpm) ||
+      rawTimeline.bpm < MIN_TIMELINE_BPM ||
+      rawTimeline.bpm > MAX_TIMELINE_BPM
+    ) {
+      throw new Error("Invalid timeline BPM");
+    }
+    normalizedTimeline.bpm = rawTimeline.bpm;
+  }
+  if (rawTimeline.beatOffsetMs !== undefined) {
+    if (!isTime(rawTimeline.beatOffsetMs)) throw new Error("Invalid timeline beat offset");
+    normalizedTimeline.beatOffsetMs = roundTimelineMs(rawTimeline.beatOffsetMs);
+  }
+  if (rawTimeline.timeDisplayMode !== undefined) {
+    if (!["frames", "milliseconds", "beats"].includes(String(rawTimeline.timeDisplayMode))) {
+      throw new Error("Invalid timeline display mode");
+    }
+    normalizedTimeline.timeDisplayMode = rawTimeline.timeDisplayMode as TimelineDisplayMode;
+  }
+  if (rawTimeline.snapEnabled !== undefined) {
+    if (typeof rawTimeline.snapEnabled !== "boolean") throw new Error("Invalid timeline snap setting");
+    normalizedTimeline.snapEnabled = rawTimeline.snapEnabled;
+  }
+  if (rawTimeline.markers !== undefined) {
+    if (!Array.isArray(rawTimeline.markers)) throw new Error("Invalid timeline markers");
+    const markers: TimelineMarker[] = rawTimeline.markers.map((marker) => {
+      if (
+        !isRecord(marker) ||
+        typeof marker.id !== "string" ||
+        !marker.id ||
+        !isTime(marker.timeMs) ||
+        (marker.label !== undefined && typeof marker.label !== "string")
+      ) {
+        throw new Error("Invalid timeline marker");
+      }
+      registerId(marker.id, nodeIds);
+      const label = marker.label?.trim();
+      return {
+        id: marker.id,
+        timeMs: roundTimelineMs(marker.timeMs),
+        ...(label ? { label } : {})
+      };
+    });
+    markers.sort((a, b) => a.timeMs - b.timeMs || a.id.localeCompare(b.id));
+    normalizedTimeline.markers = markers;
+  }
   data.version = PROJECT_VERSION;
   data.id = typeof data.id === "string" ? data.id : crypto.randomUUID();
   data.name = typeof data.name === "string" ? data.name : fallbackName;
   data.createdAt = isTime(data.createdAt) ? data.createdAt : Date.now();
   data.updatedAt = isTime(data.updatedAt) ? data.updatedAt : Date.now();
-  data.timeline = { ...data.timeline, duration: updateGroupDurations(data.tracks) };
+  data.timeline = normalizedTimeline;
   return data;
 };
 

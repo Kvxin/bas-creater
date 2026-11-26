@@ -1,6 +1,14 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import type { TimelineTrack, TimelineClip, TimelineTrackType, TimelineGroupClip } from "@/types/timeline";
+import type {
+  TimelineTrack,
+  TimelineClip,
+  TimelineTrackType,
+  TimelineGroupClip,
+  TimelineDisplayMode,
+  TimelineMarker,
+  TimelineSettings
+} from "@/types/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 import {
@@ -21,6 +29,17 @@ import { findEffectTimingConflict } from "@/core/compiler";
 import { splitClipAnimation } from "@/core/splitClip";
 import { getTimelineDuration, updateGroupDurations, visitTimelineClips } from "@/core/timelineGroups";
 import { BASE_KEYFRAME_ID } from "@/core/keyframes";
+import {
+  clampTimelineBpm,
+  clampTimelineFps,
+  DEFAULT_TIMELINE_BPM,
+  DEFAULT_TIMELINE_FPS,
+  getKeyframeToleranceMs,
+  MAX_TIMELINE_ZOOM,
+  MIN_TIMELINE_ZOOM,
+  roundTimelineMs,
+  stepFrameTimeMs
+} from "@/core/timeline";
 import {
   applyClipUpdates,
   applyTrackType,
@@ -61,6 +80,9 @@ export const useTimelineStore = defineStore("timeline", () => {
     }
     return groups;
   });
+  const activeGroupOffsetMs = computed(() =>
+    activeGroups.value.reduce((sum, group) => sum + group.startTime, 0)
+  );
   const activeTracks = computed<TimelineTrack[]>(() => {
     const groups = activeGroups.value;
     return groups[groups.length - 1]?.tracks ?? rootTracks.value;
@@ -75,6 +97,21 @@ export const useTimelineStore = defineStore("timeline", () => {
   const parentReferenceSizes = ref<Record<string, { width: number; height: number }>>({});
   const isPlaying = ref(false);
   const zoomScale = ref(50);
+  const fps = ref(DEFAULT_TIMELINE_FPS);
+  const bpm = ref(DEFAULT_TIMELINE_BPM);
+  const beatOffsetMs = ref(0);
+  const activeBeatOffsetMs = computed(() => beatOffsetMs.value - activeGroupOffsetMs.value);
+  const timeDisplayMode = ref<TimelineDisplayMode>("frames");
+  const snapEnabled = ref(true);
+  const rootMarkers = ref<TimelineMarker[]>([]);
+  const markers = computed<TimelineMarker[]>(() => {
+    if (!activeGroupPath.value.length) return rootMarkers.value;
+    const offset = activeGroupOffsetMs.value;
+    const maxDuration = duration.value;
+    return rootMarkers.value
+      .map((marker) => ({ ...marker, timeMs: roundTimelineMs(marker.timeMs - offset) }))
+      .filter((marker) => marker.timeMs >= 0 && (maxDuration <= 0 || marker.timeMs <= maxDuration));
+  });
   const selectedClipIds = ref<string[]>([]);
   const selectedTrackId = ref<string | null>(null);
   // 时间轴上正在调整区间的特效，只在它所属片段单选时有效。
@@ -103,6 +140,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     rootTracks,
     tracks,
     activeGroupPath,
+    fps,
     selectedClipIds,
     selectedClipId,
     selectedKeyframeId,
@@ -548,9 +586,10 @@ export const useTimelineStore = defineStore("timeline", () => {
     )
       return false;
     const { clip } = location;
-    const offsetMs = Math.round(timeMs - clip.startTime);
+    const offsetMs = roundTimelineMs(timeMs - clip.startTime);
     return (
       Number.isFinite(clip.duration) &&
+      timeMs > clip.startTime &&
       offsetMs > 0 &&
       offsetMs < clip.duration &&
       (useDanmuStore().danmus.some((resource) => resource.id === clip.resourceId) ||
@@ -564,22 +603,23 @@ export const useTimelineStore = defineStore("timeline", () => {
     if (clip.kind !== "resource") return null;
     const resource = useDanmuStore().danmus.find((item) => item.id === clip.resourceId);
     const source: typeof clip = JSON.parse(JSON.stringify(clip));
-    const offsetMs = Math.round(timeMs - clip.startTime);
+    const offsetMs = roundTimelineMs(timeMs - clip.startTime);
     const reference = canvasReferenceSize.value ?? undefined;
     const split = resource ? splitClipAnimation(source, resource, offsetMs, reference) : null;
+    const remainingMs = roundTimelineMs(clip.duration - offsetMs);
 
     const rightClip: TimelineClip = {
       ...source,
       id: `clip_${crypto.randomUUID()}`,
-      startTime: clip.startTime + offsetMs,
-      duration: clip.duration - offsetMs,
-      sourceInMs: resource ? source.sourceInMs : (source.sourceInMs ?? 0) + offsetMs,
+      startTime: roundTimelineMs(clip.startTime + offsetMs),
+      duration: remainingMs,
+      sourceInMs: resource ? source.sourceInMs : roundTimelineMs((source.sourceInMs ?? 0) + offsetMs),
       overrides: split ? { ...source.overrides, ...split.rightProperties } : source.overrides,
       keyframes: split?.rightKeyframes ?? source.keyframes
     };
     if (source.effects?.length) {
       const left = sliceEffects(source.effects, 0, offsetMs);
-      const right = sliceEffects(source.effects, offsetMs, source.duration - offsetMs, true);
+      const right = sliceEffects(source.effects, offsetMs, remainingMs, true);
       if (left.length) clip.effects = left;
       else delete clip.effects;
       if (right.length) rightClip.effects = right;
@@ -706,17 +746,157 @@ export const useTimelineStore = defineStore("timeline", () => {
 
   const leaveGroup = () => navigateToGroup(activeGroupPath.value.length - 1);
 
-  const loadTimeline = (nextTracks: TimelineTrack[]) => {
+  const applyTimelineSettings = (settings?: TimelineSettings & { zoomScale?: number }) => {
+    fps.value = clampTimelineFps(settings?.fps);
+    bpm.value = clampTimelineBpm(settings?.bpm);
+    beatOffsetMs.value =
+      typeof settings?.beatOffsetMs === "number" && Number.isFinite(settings.beatOffsetMs)
+        ? roundTimelineMs(Math.max(0, settings.beatOffsetMs))
+        : 0;
+    timeDisplayMode.value =
+      settings?.timeDisplayMode && ["frames", "milliseconds", "beats"].includes(settings.timeDisplayMode)
+        ? settings.timeDisplayMode
+        : "frames";
+    snapEnabled.value = settings?.snapEnabled ?? true;
+    rootMarkers.value = (settings?.markers ?? [])
+      .filter((marker) => Number.isFinite(marker.timeMs) && marker.timeMs >= 0)
+      .map((marker) => ({
+        id: marker.id || `marker_${crypto.randomUUID()}`,
+        timeMs: roundTimelineMs(marker.timeMs),
+        ...(marker.label?.trim() ? { label: marker.label.trim() } : {})
+      }))
+      .sort((a, b) => a.timeMs - b.timeMs || a.id.localeCompare(b.id));
+    if (typeof settings?.zoomScale === "number" && Number.isFinite(settings.zoomScale) && settings.zoomScale > 0) {
+      zoomScale.value = Math.min(MAX_TIMELINE_ZOOM, Math.max(MIN_TIMELINE_ZOOM, settings.zoomScale));
+    } else {
+      zoomScale.value = 50;
+    }
+  };
+
+  const getTimelineSettings = (): TimelineSettings & { zoomScale: number } => ({
+    zoomScale: zoomScale.value,
+    fps: fps.value,
+    bpm: bpm.value,
+    beatOffsetMs: beatOffsetMs.value,
+    timeDisplayMode: timeDisplayMode.value,
+    snapEnabled: snapEnabled.value,
+    markers: rootMarkers.value.map((marker) => ({ ...marker }))
+  });
+
+  const loadTimeline = (nextTracks: TimelineTrack[], settings?: TimelineSettings & { zoomScale?: number }) => {
     clearEditingState();
     activeGroupPath.value = [];
     rootTracks.value = nextTracks;
     currentTime.value = 0;
-    zoomScale.value = 50;
+    applyTimelineSettings(settings);
     timelineScroll.value = { left: 0, top: 0 };
     viewStates.clear();
     clearClipboard();
     recalculateDuration();
     navigationRevision.value += 1;
+  };
+
+  const setFps = (nextFps: number) => {
+    fps.value = clampTimelineFps(nextFps);
+  };
+
+  const setBpm = (nextBpm: number) => {
+    bpm.value = clampTimelineBpm(nextBpm);
+  };
+
+  const setBeatOffsetMs = (offsetMs: number) => {
+    if (!Number.isFinite(offsetMs)) return;
+    beatOffsetMs.value = roundTimelineMs(Math.max(0, offsetMs));
+  };
+
+  const setBeatOffsetFromPlayhead = () => {
+    setBeatOffsetMs(currentTime.value + activeGroupOffsetMs.value);
+  };
+
+  const setTimeDisplayMode = (mode: TimelineDisplayMode) => {
+    if (["frames", "milliseconds", "beats"].includes(mode)) {
+      timeDisplayMode.value = mode;
+    }
+  };
+
+  const cycleTimeDisplayMode = () => {
+    const order: TimelineDisplayMode[] = ["frames", "milliseconds", "beats"];
+    const nextIndex = (order.indexOf(timeDisplayMode.value) + 1) % order.length;
+    timeDisplayMode.value = order[nextIndex]!;
+  };
+
+  const setSnapEnabled = (enabled: boolean) => {
+    snapEnabled.value = Boolean(enabled);
+  };
+
+  const toggleSnap = () => {
+    snapEnabled.value = !snapEnabled.value;
+  };
+
+  const stepFrames = (deltaFrames: number) => {
+    setCurrentTime(stepFrameTimeMs(currentTime.value, deltaFrames, fps.value, duration.value));
+  };
+
+  const addMarker = (localTimeMs = currentTime.value, label?: string): TimelineMarker => {
+    const rootTimeMs = roundTimelineMs(Math.max(0, localTimeMs) + activeGroupOffsetMs.value);
+    const existing = rootMarkers.value.find((item) => Math.abs(item.timeMs - rootTimeMs) <= 0.5);
+    if (existing) {
+      if (label !== undefined) {
+        const trimmed = label.trim();
+        if (trimmed) existing.label = trimmed;
+        else delete existing.label;
+      }
+      return existing;
+    }
+    const created: TimelineMarker = {
+      id: `marker_${Math.random().toString(36).slice(2, 9)}`,
+      timeMs: rootTimeMs,
+      ...(label?.trim() ? { label: label.trim() } : {})
+    };
+    rootMarkers.value.push(created);
+    rootMarkers.value.sort((a, b) => a.timeMs - b.timeMs || a.id.localeCompare(b.id));
+    return created;
+  };
+
+  const removeMarker = (markerId: string) => {
+    const index = rootMarkers.value.findIndex((item) => item.id === markerId);
+    if (index !== -1) {
+      rootMarkers.value.splice(index, 1);
+    }
+  };
+
+  const toggleMarkerAtCurrentTime = (toleranceMs = getKeyframeToleranceMs(fps.value)) => {
+    const rootTimeMs = roundTimelineMs(Math.max(0, currentTime.value) + activeGroupOffsetMs.value);
+    const existing = rootMarkers.value.find((item) => Math.abs(item.timeMs - rootTimeMs) <= toleranceMs);
+    if (existing) {
+      removeMarker(existing.id);
+      return { action: "removed" as const, marker: existing };
+    }
+    return { action: "added" as const, marker: addMarker(currentTime.value) };
+  };
+
+  const clearMarkers = () => {
+    rootMarkers.value = [];
+  };
+
+  const seekToAdjacentMarker = (direction: -1 | 1): boolean => {
+    const visible = markers.value;
+    if (!visible.length) return false;
+    const epsilon = 0.5;
+    if (direction > 0) {
+      const next = visible.find((item) => item.timeMs > currentTime.value + epsilon);
+      if (!next) return false;
+      setCurrentTime(next.timeMs);
+      return true;
+    }
+    for (let index = visible.length - 1; index >= 0; index -= 1) {
+      const prev = visible[index]!;
+      if (prev.timeMs < currentTime.value - epsilon) {
+        setCurrentTime(prev.timeMs);
+        return true;
+      }
+    }
+    return false;
   };
 
   const setSelectedKeyframe = (id: string | null) => {
@@ -759,6 +939,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     activeTracks,
     activeGroupPath,
     activeGroups,
+    activeGroupOffsetMs,
     navigationRevision,
     timelineScroll,
     selectedClipIds,
@@ -779,6 +960,8 @@ export const useTimelineStore = defineStore("timeline", () => {
     leaveGroup,
     navigateToGroup,
     loadTimeline,
+    applyTimelineSettings,
+    getTimelineSettings,
     tracks,
     currentTime,
     canvasReferenceSize,
@@ -786,6 +969,28 @@ export const useTimelineStore = defineStore("timeline", () => {
     isPlaying,
     duration,
     zoomScale,
+    fps,
+    bpm,
+    beatOffsetMs,
+    activeBeatOffsetMs,
+    timeDisplayMode,
+    snapEnabled,
+    rootMarkers,
+    markers,
+    setFps,
+    setBpm,
+    setBeatOffsetMs,
+    setBeatOffsetFromPlayhead,
+    setTimeDisplayMode,
+    cycleTimeDisplayMode,
+    setSnapEnabled,
+    toggleSnap,
+    stepFrames,
+    addMarker,
+    removeMarker,
+    toggleMarkerAtCurrentTime,
+    clearMarkers,
+    seekToAdjacentMarker,
     selectedClipId,
     selectedKeyframeId,
     autoKeyframe,

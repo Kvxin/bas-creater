@@ -77,9 +77,40 @@ export interface TimelineTrack {
   expanded?: boolean; // 是否展开显示动画详情
 }
 
+export type TimelineDisplayMode = "frames" | "milliseconds" | "beats";
+
+export type TimelineMarker = {
+  id: string;
+  timeMs: number;
+  label?: string;
+};
+
+export type TimelineSettings = {
+  fps?: number;
+  bpm?: number;
+  beatOffsetMs?: number;
+  timeDisplayMode?: TimelineDisplayMode;
+  snapEnabled?: boolean;
+  markers?: TimelineMarker[];
+};
+
+export type TimelineSnapKind =
+  | "playhead"
+  | "marker"
+  | "clipStart"
+  | "clipEnd"
+  | "keyframe"
+  | "frame"
+  | "beat";
+
+export type TimelineSnapCandidate = {
+  timeMs: number;
+  kind: Exclude<TimelineSnapKind, "frame" | "beat">;
+};
+
 export interface TimelineState {
   tracks: TimelineTrack[];
   currentTime: number; // 当前游标位置 (ms)
   isPlaying: boolean;
-  duration: number;    // 总时长 (ms)
+  duration: number; // 总时长 (ms)
 }

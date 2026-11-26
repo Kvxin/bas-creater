@@ -333,3 +333,132 @@ test("disposing timeline drag and playhead scopes cancels active drags without c
     (globalThis as any).document = prevDocument;
   }
 });
+
+test("frame timecode and stepFrameTimeMs round-trip across 30fps and 60fps without truncation drift", async () => {
+  const { formatFrameTimecode, stepFrameTimeMs } = await import("../src/core/timeline");
+
+  for (const fps of [24, 25, 30, 60]) {
+    let timeMs = 0;
+    for (let frame = 0; frame < fps * 2; frame += 1) {
+      const sec = Math.floor(frame / fps);
+      const rem = frame % fps;
+      const expected = `00:${String(sec).padStart(2, "0")}:${String(rem).padStart(2, "0")}`;
+      assert.equal(formatFrameTimecode(timeMs, fps), expected);
+      timeMs = stepFrameTimeMs(timeMs, 1, fps, 10000);
+    }
+  }
+
+  // 从两帧中间位置（112ms @ 30fps，位于第 3 帧 100ms 与第 4 帧 133.3ms 之间）步进先对齐紧邻帧边界
+  assert.equal(stepFrameTimeMs(112, 1, 30, 5000), 133.3);
+  assert.equal(stepFrameTimeMs(112, -1, 30, 5000), 100);
+});
+
+test("128 BPM beat grid, ruler ticks, and clip-end magnetic snapping handle fractional beat intervals", async () => {
+  const {
+    collectTimelineSnapCandidates,
+    formatBeatTimecode,
+    getRulerTicks,
+    resolveTimelineSnap
+  } = await import("../src/core/timeline");
+
+  // 128 BPM: 1 beat = 468.75ms, 1/16th note (1/4 beat) = 117.1875ms -> 117.2ms
+  assert.equal(formatBeatTimecode(0, 128, 0), "01:01.00");
+  assert.equal(formatBeatTimecode(468.8, 128, 0), "01:02.00");
+  assert.equal(formatBeatTimecode(1875, 128, 0), "02:01.00");
+
+  const ticks = getRulerTicks({
+    startTimeMs: 0,
+    endTimeMs: 2000,
+    scale: 100, // 200px/s -> 1/4 beat = 23.4px >= 7px
+    mode: "beats",
+    bpm: 128,
+    beatOffsetMs: 100
+  });
+  const majorTimes = ticks.filter((tick) => tick.kind === "major").map((tick) => tick.timeMs);
+  assert.deepEqual(majorTimes, [100, 1975]);
+
+  // 节拍吸附 & Shift 临时旁路
+  const beatSnap = resolveTimelineSnap(215, {
+    pixelsPerSecond: 200,
+    mode: "beats",
+    bpm: 128,
+    beatOffsetMs: 100,
+    snapEnabled: true
+  });
+  assert.deepEqual(beatSnap, { timeMs: 217.2, kind: "beat" });
+  assert.deepEqual(
+    resolveTimelineSnap(215, {
+      pixelsPerSecond: 200,
+      mode: "beats",
+      bpm: 128,
+      beatOffsetMs: 100,
+      snapEnabled: true,
+      disableSnap: true
+    }),
+    { timeMs: 215, kind: null }
+  );
+
+  // 语义候选（标记点）优先于帧/节拍网格，且支持片段尾部吸附到标记点
+  const candidates = collectTimelineSnapCandidates({
+    tracks: [],
+    markers: [{ id: "m1", timeMs: 1500 }]
+  });
+  const endSnapped = resolveTimelineSnap(985, {
+    candidates,
+    pixelsPerSecond: 200, // threshold 6px = 30ms; 985 + 500 = 1485 is 15ms from 1500
+    mode: "frames",
+    fps: 30,
+    snapEnabled: true,
+    clipDurationMs: 500
+  });
+  assert.deepEqual(endSnapped, { timeMs: 1000, kind: "marker" });
+});
+
+test("60fps consecutive single-frame keyframes, sub-frame splits, and cue markers inside nested groups", async () => {
+  const { compileTimelineToBas } = await import("../src/core/compiler");
+  const { parseBas } = await import("./helpers/basParser");
+  const { timeline, danmu } = setup();
+
+  timeline.loadTimeline([track("t", [textClip("c", "t", 0, { duration: 1000 })])], { fps: 60 });
+  assert.equal(timeline.fps, 60);
+
+  // 60fps 下相邻三帧（16.7ms、33.3ms、50ms）各自独立保存，不会被合并容差吞掉
+  timeline.stepFrames(1);
+  assert.equal(timeline.currentTime, 16.7);
+  const kf1 = timeline.upsertClipKeyframeAtTime("c", timeline.currentTime, { x: "10%" })!;
+  timeline.stepFrames(1);
+  assert.equal(timeline.currentTime, 33.3);
+  const kf2 = timeline.upsertClipKeyframeAtTime("c", timeline.currentTime, { x: "20%" })!;
+  timeline.stepFrames(1);
+  assert.equal(timeline.currentTime, 50);
+  const kf3 = timeline.upsertClipKeyframeAtTime("c", timeline.currentTime, { x: "30%" })!;
+  assert.notEqual(kf1.id, kf2.id);
+  assert.notEqual(kf2.id, kf3.id);
+
+  // 编译为 BAS 并经真实 bas.js 解析器验证
+  const compiled = compileTimelineToBas(timeline.rootTracks, danmu.danmus);
+  const parsed = parseBas(compiled);
+  assert.equal(parsed.defs.length, 1);
+
+  // 在 16.7ms 帧边界分割片段保留 0.1ms 精度
+  const right = timeline.splitClip("c", 16.7)!;
+  const left = timeline.tracks[0]!.clips[0]!;
+  assert.deepEqual([left.duration, right.startTime, right.duration], [16.7, 16.7, 983.3]);
+
+  // 根时间轴标记点在进入嵌套分组后自动映射为局部时间，并支持按局部游标增删与跳转
+  timeline.loadTimeline([track("r", [group("g", "r", 2000, [track("in", [textClip("ic", "in", 0)])])])]);
+  timeline.addMarker(2250, "Beat 1");
+  timeline.addMarker(2750, "Beat 2");
+  timeline.enterGroup("g");
+  assert.deepEqual(
+    timeline.markers.map((marker) => marker.timeMs),
+    [250, 750]
+  );
+  assert.equal(timeline.seekToAdjacentMarker(1), true);
+  assert.equal(timeline.currentTime, 250);
+  assert.equal(timeline.toggleMarkerAtCurrentTime().action, "removed");
+  assert.deepEqual(
+    timeline.rootMarkers.map((marker) => marker.timeMs),
+    [2750]
+  );
+});

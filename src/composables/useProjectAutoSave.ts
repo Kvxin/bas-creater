@@ -113,7 +113,7 @@ export function useProjectAutoSave(projectId: string) {
     return normalizeProjectData({
       version: PROJECT_VERSION, id: projectId, name: projectName.value,
       createdAt: createdAt.value, updatedAt: Date.now(), canvas: canvas.value,
-      timeline: { duration: timelineStore.rootDuration },
+      timeline: { duration: timelineStore.rootDuration, ...timelineStore.getTimelineSettings() },
       tracks: JSON.parse(JSON.stringify(timelineStore.rootTracks)),
       assets, bins: JSON.parse(JSON.stringify(assetsStore.bins)),
     });
@@ -193,7 +193,7 @@ export function useProjectAutoSave(projectId: string) {
 
       // 3. 恢复时间轴与轨道
       timelineStore.isPlaying = false;
-      timelineStore.loadTimeline(project.tracks);
+      timelineStore.loadTimeline(project.tracks, project.timeline);
 
       lastSavedTime.value = new Date(project.updatedAt || Date.now());
       saveStatus.value = "saved";
@@ -267,7 +267,7 @@ export function useProjectAutoSave(projectId: string) {
       saveBlocked = false;
       projectName.value = data.name;
       danmuStore.select(danmuStore.danmus[0]?.id ?? null);
-      timelineStore.loadTimeline(data.tracks);
+      timelineStore.loadTimeline(data.tracks, data.timeline);
 
       // 导入后立即保存为当前活动草稿
       isDirty.value = true;
@@ -283,7 +283,15 @@ export function useProjectAutoSave(projectId: string) {
 
   // 监听各个 Store 的变动以触发防抖自动保存
   watch(
-    () => timelineStore.rootTracks,
+    () => [
+      timelineStore.rootTracks,
+      timelineStore.fps,
+      timelineStore.bpm,
+      timelineStore.beatOffsetMs,
+      timelineStore.timeDisplayMode,
+      timelineStore.snapEnabled,
+      timelineStore.rootMarkers
+    ],
     () => queueSave(),
     { deep: true }
   );
