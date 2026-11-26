@@ -16,8 +16,6 @@ type Snapshot = {
   tracks: TimelineTrack[];
   markers: TimelineMarker[];
   fps: number;
-  bpm: number;
-  beatOffsetMs: number;
   assets: ProjectAsset[];
   bins: ProjectBin[];
   loadedAudioIds: string[];
@@ -53,8 +51,6 @@ export function useProjectHistory(isHydrating: Ref<boolean>, projectId: string) 
     tracks: timeline.rootTracks,
     markers: timeline.rootMarkers,
     fps: timeline.fps,
-    bpm: timeline.bpm,
-    beatOffsetMs: timeline.beatOffsetMs,
     assets: assets.assets.map((asset) => {
       if (asset.type !== "audio-file") return asset;
       const resource = audio.getById(asset.id);
@@ -78,8 +74,6 @@ export function useProjectHistory(isHydrating: Ref<boolean>, projectId: string) 
       state.tracks,
       state.markers,
       state.fps,
-      state.bpm,
-      state.beatOffsetMs,
       state.assets,
       state.bins,
       state.loadedAudioIds
@@ -118,7 +112,7 @@ export function useProjectHistory(isHydrating: Ref<boolean>, projectId: string) 
     scheduleCommit();
   };
 
-  watch(() => [timeline.rootTracks, timeline.rootMarkers, timeline.fps, timeline.bpm, timeline.beatOffsetMs, assets.assets, assets.bins,
+  watch(() => [timeline.rootTracks, timeline.rootMarkers, timeline.fps, assets.assets, assets.bins,
     audio.audioResources.map(({ id, name, duration, coverUrl, sourcePath, relativePath }) =>
       [id, name, duration, coverUrl, sourcePath, relativePath])], markDirty, { deep: true, flush: "sync" });
   watch(isHydrating, (hydrating) => {
@@ -148,8 +142,6 @@ export function useProjectHistory(isHydrating: Ref<boolean>, projectId: string) 
       timeline.rootTracks = state.tracks;
       timeline.rootMarkers = state.markers;
       timeline.setFps(state.fps);
-      timeline.setBpm(state.bpm);
-      timeline.setBeatOffsetMs(state.beatOffsetMs);
       timeline.activeGroupPath = state.activeGroupPath;
       if (state.selectedTrackId && !state.selectedClipIds.length) {
         timeline.selectTrack(state.selectedTrackId);

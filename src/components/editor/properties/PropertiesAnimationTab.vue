@@ -58,9 +58,7 @@ const formatLocalTimeDisplay = (localTimeMs: number) => {
   if (timelineStore.timeDisplayMode === "milliseconds") return formatAnimationSeconds(localTimeMs);
   const code = formatTimelineTime(localTimeMs, {
     mode: timelineStore.timeDisplayMode,
-    fps: timelineStore.fps,
-    bpm: timelineStore.bpm,
-    beatOffsetMs: 0
+    fps: timelineStore.fps
   });
   return `${code} (${formatAnimationSeconds(localTimeMs)})`;
 };

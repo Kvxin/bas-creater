@@ -45,8 +45,6 @@ export interface BasProjectData {
     duration: number;
     zoomScale?: number;
     fps?: number;
-    bpm?: number;
-    beatOffsetMs?: number;
     timeDisplayMode?: TimelineDisplayMode;
     snapEnabled?: boolean;
     markers?: TimelineMarker[];

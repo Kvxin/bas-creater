@@ -5,10 +5,8 @@ import { updateGroupDurations } from "@/core/timelineGroups";
 import { convertLegacyAnimations } from "@/core/legacyAnimations";
 import { normalizeCoordinates } from "@/core/coordinates";
 import {
-  MAX_TIMELINE_BPM,
   MAX_TIMELINE_FPS,
   MAX_TIMELINE_ZOOM,
-  MIN_TIMELINE_BPM,
   MIN_TIMELINE_FPS,
   MIN_TIMELINE_ZOOM,
   roundTimelineMs
@@ -365,23 +363,8 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
     }
     normalizedTimeline.fps = rawTimeline.fps;
   }
-  if (rawTimeline.bpm !== undefined) {
-    if (
-      typeof rawTimeline.bpm !== "number" ||
-      !Number.isFinite(rawTimeline.bpm) ||
-      rawTimeline.bpm < MIN_TIMELINE_BPM ||
-      rawTimeline.bpm > MAX_TIMELINE_BPM
-    ) {
-      throw new Error("Invalid timeline BPM");
-    }
-    normalizedTimeline.bpm = rawTimeline.bpm;
-  }
-  if (rawTimeline.beatOffsetMs !== undefined) {
-    if (!isTime(rawTimeline.beatOffsetMs)) throw new Error("Invalid timeline beat offset");
-    normalizedTimeline.beatOffsetMs = roundTimelineMs(rawTimeline.beatOffsetMs);
-  }
   if (rawTimeline.timeDisplayMode !== undefined) {
-    if (!["frames", "milliseconds", "beats"].includes(String(rawTimeline.timeDisplayMode))) {
+    if (!["frames", "milliseconds"].includes(String(rawTimeline.timeDisplayMode))) {
       throw new Error("Invalid timeline display mode");
     }
     normalizedTimeline.timeDisplayMode = rawTimeline.timeDisplayMode as TimelineDisplayMode;

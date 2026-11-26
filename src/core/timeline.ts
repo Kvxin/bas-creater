@@ -12,10 +12,6 @@ export const TIMELINE_FPS_PRESETS = [24, 25, 30, 60] as const;
 export const MIN_TIMELINE_FPS = 1;
 export const MAX_TIMELINE_FPS = 240;
 
-export const DEFAULT_TIMELINE_BPM = 120;
-export const MIN_TIMELINE_BPM = 20;
-export const MAX_TIMELINE_BPM = 400;
-
 export const MIN_TIMELINE_ZOOM = 10;
 export const MAX_TIMELINE_ZOOM = 1200;
 export const DEFAULT_SNAP_SCREEN_PX = 6;
@@ -33,17 +29,8 @@ export function clampTimelineFps(fps: number | undefined): number {
   return Math.min(MAX_TIMELINE_FPS, Math.max(MIN_TIMELINE_FPS, fps));
 }
 
-export function clampTimelineBpm(bpm: number | undefined): number {
-  if (typeof bpm !== "number" || !Number.isFinite(bpm)) return DEFAULT_TIMELINE_BPM;
-  return Math.min(MAX_TIMELINE_BPM, Math.max(MIN_TIMELINE_BPM, bpm));
-}
-
 export function getFrameDurationMs(fps = DEFAULT_TIMELINE_FPS): number {
   return 1000 / clampTimelineFps(fps);
-}
-
-export function getBeatDurationMs(bpm = DEFAULT_TIMELINE_BPM): number {
-  return 60000 / clampTimelineBpm(bpm);
 }
 
 export function getMinClipDurationMs(fps = DEFAULT_TIMELINE_FPS): number {
@@ -170,46 +157,15 @@ export function formatFrameTimecode(
   return `${prefix}${pad2(m)}:${pad2(s)}:${String(frames).padStart(frameDigits, "0")}`;
 }
 
-/**
- * 格式化音乐节拍时间码：BB:bb.ss（小节:拍.百分拍，默认 4/4 拍）。
- */
-export function formatBeatTimecode(
-  timeMs: number,
-  bpm = DEFAULT_TIMELINE_BPM,
-  beatOffsetMs = 0
-): string {
-  const safeMs = Math.max(0, Number.isFinite(timeMs) ? timeMs : 0);
-  const offset = Number.isFinite(beatOffsetMs) ? beatOffsetMs : 0;
-  const beatMs = getBeatDurationMs(bpm);
-  const deltaMs = safeMs - offset;
-  if (deltaMs < -1e-2) {
-    const preBeats = Math.abs(deltaMs) / beatMs;
-    const bar = Math.floor(preBeats / 4) + 1;
-    const beat = (Math.floor(preBeats) % 4) + 1;
-    const sub = Math.min(99, Math.floor((preBeats - Math.floor(preBeats)) * 100));
-    return `-${String(bar).padStart(2, "0")}:${String(beat).padStart(2, "0")}.${String(sub).padStart(2, "0")}`;
-  }
-  const totalBeats = Math.max(0, deltaMs) / beatMs + 1e-4;
-  const bar = Math.floor(totalBeats / 4) + 1;
-  const beat = (Math.floor(totalBeats) % 4) + 1;
-  const sub = Math.min(99, Math.floor((totalBeats - Math.floor(totalBeats)) * 100));
-  return `${String(bar).padStart(2, "0")}:${String(beat).padStart(2, "0")}.${String(sub).padStart(2, "0")}`;
-}
-
 export function formatTimelineTime(
   timeMs: number,
   options: {
     mode?: TimelineDisplayMode;
     fps?: number;
-    bpm?: number;
-    beatOffsetMs?: number;
     alwaysShowHours?: boolean;
   } = {}
 ): string {
   const mode = options.mode ?? "frames";
-  if (mode === "beats") {
-    return formatBeatTimecode(timeMs, options.bpm, options.beatOffsetMs);
-  }
   if (mode === "milliseconds") {
     const formatted = formatTime(timeMs);
     if (!options.alwaysShowHours || formatted.h > 0) return formatted.str;
@@ -251,7 +207,7 @@ export type RulerTick = {
 };
 
 /**
- * 使用整数步进索引生成可视区标尺刻度，避免非整除帧长（33.33ms）或 BPM 拍长（468.75ms）的浮点取模误差。
+ * 使用整数步进索引生成可视区标尺刻度，避免非整除帧长（如 33.33ms @ 30fps）的浮点取模误差。
  */
 export function getRulerTicks(options: {
   startTimeMs: number;
@@ -259,21 +215,16 @@ export function getRulerTicks(options: {
   scale: number;
   mode?: TimelineDisplayMode;
   fps?: number;
-  bpm?: number;
-  beatOffsetMs?: number;
 }): RulerTick[] {
   const pps = getPixelsPerSecond(options.scale);
   if (pps <= 0 || options.endTimeMs < 0) return [];
   const mode = options.mode ?? "frames";
   const safeFps = clampTimelineFps(options.fps);
-  const safeBpm = clampTimelineBpm(options.bpm);
-  const originMs = mode === "beats" && Number.isFinite(options.beatOffsetMs) ? options.beatOffsetMs! : 0;
 
   let minorMs = 1000;
   let mediumEvery = 5;
   let majorEvery = 10;
   let showMediumFrameLabel = false;
-  let showMediumBeatLabel = false;
 
   if (mode === "frames") {
     const nominalFps = Math.max(1, Math.round(safeFps));
@@ -295,32 +246,6 @@ export function getRulerTicks(options: {
       minorMs = 500;
       mediumEvery = 2;
       majorEvery = 10;
-    }
-  } else if (mode === "beats") {
-    const beatMs = getBeatDurationMs(safeBpm);
-    const pxPerBeat = (beatMs / 1000) * pps;
-    if (pxPerBeat / 4 >= 7) {
-      minorMs = beatMs / 4;
-      mediumEvery = 4;
-      majorEvery = 16;
-      showMediumBeatLabel = pxPerBeat >= 64;
-    } else if (pxPerBeat / 2 >= 7) {
-      minorMs = beatMs / 2;
-      mediumEvery = 2;
-      majorEvery = 8;
-      showMediumBeatLabel = pxPerBeat >= 64;
-    } else if (pxPerBeat >= 8) {
-      minorMs = beatMs;
-      mediumEvery = 2;
-      majorEvery = 4;
-    } else if (pxPerBeat * 4 >= 12) {
-      minorMs = beatMs * 4;
-      mediumEvery = 2;
-      majorEvery = 4;
-    } else {
-      minorMs = beatMs * 16;
-      mediumEvery = 2;
-      majorEvery = 4;
     }
   } else {
     if (pps >= 800) {
@@ -347,12 +272,12 @@ export function getRulerTicks(options: {
   }
 
   const clampedStart = Math.max(0, options.startTimeMs);
-  const minStep = Math.floor((clampedStart - originMs) / minorMs);
-  const maxStep = Math.ceil((options.endTimeMs - originMs) / minorMs);
+  const minStep = Math.floor(clampedStart / minorMs);
+  const maxStep = Math.ceil(options.endTimeMs / minorMs);
   const ticks: RulerTick[] = [];
 
   for (let step = minStep; step <= maxStep; step += 1) {
-    const rawTime = originMs + step * minorMs;
+    const rawTime = step * minorMs;
     if (rawTime < -1e-4) continue;
     const timeMs = Math.max(0, rawTime);
     const modMajor = ((step % majorEvery) + majorEvery) % majorEvery;
@@ -364,9 +289,7 @@ export function getRulerTicks(options: {
         kind: "major",
         label: formatTimelineTime(timeMs, {
           mode,
-          fps: safeFps,
-          bpm: safeBpm,
-          beatOffsetMs: originMs
+          fps: safeFps
         })
       });
     } else if (modMedium === 0) {
@@ -375,8 +298,6 @@ export function getRulerTicks(options: {
         const nominalFps = Math.max(1, Math.round(safeFps));
         const frame = Math.round(step) % nominalFps;
         label = `:${String(frame).padStart(2, "0")}`;
-      } else if (showMediumBeatLabel) {
-        label = formatBeatTimecode(timeMs, safeBpm, originMs).slice(0, 5);
       }
       ticks.push({ timeMs, kind: "medium", ...(label ? { label } : {}) });
     } else {
@@ -460,12 +381,9 @@ export function quantizeTimeToGrid(
   options: {
     mode?: TimelineDisplayMode;
     fps?: number;
-    bpm?: number;
-    beatOffsetMs?: number;
-    pixelsPerSecond?: number;
     maxTimeMs?: number;
   } = {}
-): { timeMs: number; kind: "frame" | "beat" | null } {
+): { timeMs: number; kind: "frame" | null } {
   const maxTime = options.maxTimeMs ?? Number.POSITIVE_INFINITY;
   const clamped = Math.min(Math.max(0, rawTimeMs), maxTime);
   const mode = options.mode ?? "frames";
@@ -476,26 +394,11 @@ export function quantizeTimeToGrid(
     return { timeMs: Math.min(maxTime, snapped), kind: "frame" };
   }
 
-  if (mode === "beats") {
-    const beatMs = getBeatDurationMs(options.bpm);
-    const pps = options.pixelsPerSecond ?? 100;
-    const stepMs =
-      ((beatMs / 4) / 1000) * pps >= 6
-        ? beatMs / 4
-        : ((beatMs / 2) / 1000) * pps >= 6
-          ? beatMs / 2
-          : beatMs;
-    const offset = Number.isFinite(options.beatOffsetMs) ? options.beatOffsetMs! : 0;
-    const steps = Math.round((clamped - offset) / stepMs);
-    const snapped = roundTimelineMs(Math.max(0, offset + steps * stepMs));
-    return { timeMs: Math.min(maxTime, snapped), kind: "beat" };
-  }
-
   return { timeMs: roundTimelineMs(clamped), kind: null };
 }
 
 /**
- * 统一解析时间轴吸附：语义吸附（标记点、播放头、片段首尾、关键帧）优先于当前网格（帧 / BPM 节拍）。
+ * 统一解析时间轴吸附：语义吸附（标记点、播放头、片段首尾、关键帧）优先于帧网格。
  */
 export function resolveTimelineSnap(
   rawTimeMs: number,
@@ -504,8 +407,6 @@ export function resolveTimelineSnap(
     pixelsPerSecond: number;
     mode?: TimelineDisplayMode;
     fps?: number;
-    bpm?: number;
-    beatOffsetMs?: number;
     snapEnabled?: boolean;
     disableSnap?: boolean;
     maxTimeMs?: number;
@@ -545,9 +446,6 @@ export function resolveTimelineSnap(
   return quantizeTimeToGrid(clamped, {
     mode: options.mode,
     fps: options.fps,
-    bpm: options.bpm,
-    beatOffsetMs: options.beatOffsetMs,
-    pixelsPerSecond: options.pixelsPerSecond,
     maxTimeMs: maxTime
   });
 }

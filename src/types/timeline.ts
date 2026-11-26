@@ -77,7 +77,7 @@ export interface TimelineTrack {
   expanded?: boolean; // 是否展开显示动画详情
 }
 
-export type TimelineDisplayMode = "frames" | "milliseconds" | "beats";
+export type TimelineDisplayMode = "frames" | "milliseconds";
 
 export type TimelineMarker = {
   id: string;
@@ -87,8 +87,6 @@ export type TimelineMarker = {
 
 export type TimelineSettings = {
   fps?: number;
-  bpm?: number;
-  beatOffsetMs?: number;
   timeDisplayMode?: TimelineDisplayMode;
   snapEnabled?: boolean;
   markers?: TimelineMarker[];
@@ -100,12 +98,11 @@ export type TimelineSnapKind =
   | "clipStart"
   | "clipEnd"
   | "keyframe"
-  | "frame"
-  | "beat";
+  | "frame";
 
 export type TimelineSnapCandidate = {
   timeMs: number;
-  kind: Exclude<TimelineSnapKind, "frame" | "beat">;
+  kind: Exclude<TimelineSnapKind, "frame">;
 };
 
 export interface TimelineState {

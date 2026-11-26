@@ -10,7 +10,6 @@ import {
   ChevronLast,
   ChevronRight,
   Clock,
-  Crosshair,
   FolderPlus,
   Magnet,
   Scissors,
@@ -22,9 +21,7 @@ import {
 } from "lucide-vue-next";
 import {
   getKeyframeToleranceMs,
-  MAX_TIMELINE_BPM,
   MAX_TIMELINE_FPS,
-  MIN_TIMELINE_BPM,
   MIN_TIMELINE_FPS,
   TIMELINE_FPS_PRESETS
 } from "@/core/timeline";
@@ -50,25 +47,11 @@ const popoverRef = ref<HTMLDivElement | null>(null);
 const popoverPosition = ref({ left: 8, top: 44 });
 
 const customFpsInput = ref<number | string>(timelineStore.fps);
-const bpmInput = ref<number | string>(timelineStore.bpm);
-const beatOffsetInput = ref<number | string>(timelineStore.beatOffsetMs);
 
 watch(
   () => timelineStore.fps,
   value => {
     customFpsInput.value = value;
-  }
-);
-watch(
-  () => timelineStore.bpm,
-  value => {
-    bpmInput.value = value;
-  }
-);
-watch(
-  () => timelineStore.beatOffsetMs,
-  value => {
-    beatOffsetInput.value = value;
   }
 );
 
@@ -77,7 +60,7 @@ const updatePopoverPosition = () => {
   if (!rect) return;
   const width = 280;
   const maxLeft = Math.max(8, window.innerWidth - width - 8);
-  const maxTop = Math.max(8, window.innerHeight - 280);
+  const maxTop = Math.max(8, window.innerHeight - 200);
   popoverPosition.value = {
     left: Math.min(Math.max(8, rect.left), maxLeft),
     top: Math.min(rect.bottom + 4, maxTop)
@@ -111,15 +94,13 @@ onUnmounted(() => {
 });
 
 const modeBadgeText = computed(() => {
-  if (timelineStore.timeDisplayMode === "beats") return `${timelineStore.bpm} BPM`;
   if (timelineStore.timeDisplayMode === "milliseconds") return "ms";
   return `${timelineStore.fps} FPS`;
 });
 
 const modeOptions = computed<Array<{ value: TimelineDisplayMode; label: string }>>(() => [
   { value: "frames", label: t("timeline.timebase.modes.frames") },
-  { value: "milliseconds", label: t("timeline.timebase.modes.milliseconds") },
-  { value: "beats", label: t("timeline.timebase.modes.beats") }
+  { value: "milliseconds", label: t("timeline.timebase.modes.milliseconds") }
 ]);
 
 const hasMarkerAtPlayhead = computed(() => {
@@ -134,22 +115,6 @@ const commitCustomFps = () => {
   }
   customFpsInput.value = timelineStore.fps;
 };
-
-const commitBpm = () => {
-  const parsed = Number(bpmInput.value);
-  if (Number.isFinite(parsed) && parsed > 0) {
-    timelineStore.setBpm(parsed);
-  }
-  bpmInput.value = timelineStore.bpm;
-};
-
-const commitBeatOffset = () => {
-  const parsed = Number(beatOffsetInput.value);
-  if (Number.isFinite(parsed) && parsed >= 0) {
-    timelineStore.setBeatOffsetMs(parsed);
-  }
-  beatOffsetInput.value = timelineStore.beatOffsetMs;
-};
 </script>
 
 <template>
@@ -158,7 +123,7 @@ const commitBeatOffset = () => {
     class="toolbar h-10 bg-panel flex items-center justify-between px-2 py-1 text-xs text-muted-foreground gap-3 shrink-0"
   >
     <div class="flex min-w-0 items-center gap-1">
-      <!-- 时间码与帧率/BPM 基准触发器 -->
+      <!-- 时间码与参考帧率触发器 -->
       <button
         ref="triggerRef"
         type="button"
@@ -177,7 +142,7 @@ const commitBeatOffset = () => {
 
       <div class="mx-0.5 h-4 w-px bg-divider shrink-0"></div>
 
-      <!-- 磁吸开关 & 卡点标记 -->
+      <!-- 磁吸开关 & 时间轴标记 -->
       <button
         type="button"
         class="ui-icon-button border border-transparent"
@@ -368,7 +333,7 @@ const commitBeatOffset = () => {
     </template>
   </nav>
 
-  <!-- VS Code Modern UI 时间基准与节拍网格配置浮层 -->
+  <!-- VS Code Modern UI 时间基准与参考帧率配置浮层 -->
   <Teleport to="body">
     <div
       v-if="isTimebaseOpen"
@@ -382,7 +347,7 @@ const commitBeatOffset = () => {
         <span class="block text-[11px] font-medium text-muted-foreground">{{
           t("timeline.timebase.modeLabel")
         }}</span>
-        <div class="grid grid-cols-3 gap-0.5 rounded-sm border border-border bg-surface p-0.5">
+        <div class="grid grid-cols-2 gap-0.5 rounded-sm border border-border bg-surface p-0.5">
           <button
             v-for="option in modeOptions"
             :key="option.value"
@@ -442,60 +407,6 @@ const commitBeatOffset = () => {
             @keydown.enter.stop="($event.target as HTMLInputElement).blur()"
           />
         </div>
-      </div>
-
-      <div class="my-2.5 h-px bg-divider"></div>
-
-      <!-- 3. 音乐节拍网格 (BPM & Offset) -->
-      <div class="space-y-2">
-        <div class="grid grid-cols-2 gap-2">
-          <label class="space-y-1">
-            <span class="block text-[11px] font-medium text-muted-foreground">{{
-              t("timeline.timebase.bpmLabel")
-            }}</span>
-            <input
-              v-model.number="bpmInput"
-              type="number"
-              :min="MIN_TIMELINE_BPM"
-              :max="MAX_TIMELINE_BPM"
-              step="1"
-              class="vscode-number-input w-full text-left px-2"
-              data-ui="timebase-bpm-input"
-              @change="
-                commitBpm();
-                timelineStore.setTimeDisplayMode('beats');
-              "
-              @keydown.enter.stop="($event.target as HTMLInputElement).blur()"
-            />
-          </label>
-          <label class="space-y-1">
-            <span class="block text-[11px] font-medium text-muted-foreground">{{
-              t("timeline.timebase.beatOffsetLabel")
-            }}</span>
-            <input
-              v-model.number="beatOffsetInput"
-              type="number"
-              min="0"
-              step="10"
-              class="vscode-number-input w-full text-left px-2"
-              data-ui="timebase-beat-offset-input"
-              @change="commitBeatOffset"
-              @keydown.enter.stop="($event.target as HTMLInputElement).blur()"
-            />
-          </label>
-        </div>
-        <button
-          type="button"
-          class="ui-button w-full h-7 text-xs"
-          data-ui="timebase-offset-from-playhead"
-          @click="
-            timelineStore.setBeatOffsetFromPlayhead();
-            timelineStore.setTimeDisplayMode('beats');
-          "
-        >
-          <Crosshair class="size-3.5 text-muted-foreground" />
-          <span>{{ t("timeline.timebase.setOffsetFromPlayhead") }}</span>
-        </button>
       </div>
     </div>
   </Teleport>

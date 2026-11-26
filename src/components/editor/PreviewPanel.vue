@@ -209,22 +209,10 @@ const handleTransformCommit = (updates: Array<{ clipId: string; changes: Partial
 
 const isPlaying = computed(() => timelineStore.isPlaying);
 const currentTimecode = computed(() =>
-  toPreviewTimecode(
-    timelineStore.currentTime,
-    timelineStore.fps,
-    timelineStore.timeDisplayMode,
-    timelineStore.bpm,
-    timelineStore.activeBeatOffsetMs
-  )
+  toPreviewTimecode(timelineStore.currentTime, timelineStore.fps, timelineStore.timeDisplayMode)
 );
 const durationTimecode = computed(() =>
-  toPreviewTimecode(
-    timelineStore.duration,
-    timelineStore.fps,
-    timelineStore.timeDisplayMode,
-    timelineStore.bpm,
-    timelineStore.activeBeatOffsetMs
-  )
+  toPreviewTimecode(timelineStore.duration, timelineStore.fps, timelineStore.timeDisplayMode)
 );
 
 const basInitialized = ref(false);

@@ -30,9 +30,7 @@ import { splitClipAnimation } from "@/core/splitClip";
 import { getTimelineDuration, updateGroupDurations, visitTimelineClips } from "@/core/timelineGroups";
 import { BASE_KEYFRAME_ID } from "@/core/keyframes";
 import {
-  clampTimelineBpm,
   clampTimelineFps,
-  DEFAULT_TIMELINE_BPM,
   DEFAULT_TIMELINE_FPS,
   getKeyframeToleranceMs,
   MAX_TIMELINE_ZOOM,
@@ -98,9 +96,6 @@ export const useTimelineStore = defineStore("timeline", () => {
   const isPlaying = ref(false);
   const zoomScale = ref(50);
   const fps = ref(DEFAULT_TIMELINE_FPS);
-  const bpm = ref(DEFAULT_TIMELINE_BPM);
-  const beatOffsetMs = ref(0);
-  const activeBeatOffsetMs = computed(() => beatOffsetMs.value - activeGroupOffsetMs.value);
   const timeDisplayMode = ref<TimelineDisplayMode>("frames");
   const snapEnabled = ref(true);
   const rootMarkers = ref<TimelineMarker[]>([]);
@@ -748,13 +743,8 @@ export const useTimelineStore = defineStore("timeline", () => {
 
   const applyTimelineSettings = (settings?: TimelineSettings & { zoomScale?: number }) => {
     fps.value = clampTimelineFps(settings?.fps);
-    bpm.value = clampTimelineBpm(settings?.bpm);
-    beatOffsetMs.value =
-      typeof settings?.beatOffsetMs === "number" && Number.isFinite(settings.beatOffsetMs)
-        ? roundTimelineMs(Math.max(0, settings.beatOffsetMs))
-        : 0;
     timeDisplayMode.value =
-      settings?.timeDisplayMode && ["frames", "milliseconds", "beats"].includes(settings.timeDisplayMode)
+      settings?.timeDisplayMode && ["frames", "milliseconds"].includes(settings.timeDisplayMode)
         ? settings.timeDisplayMode
         : "frames";
     snapEnabled.value = settings?.snapEnabled ?? true;
@@ -776,8 +766,6 @@ export const useTimelineStore = defineStore("timeline", () => {
   const getTimelineSettings = (): TimelineSettings & { zoomScale: number } => ({
     zoomScale: zoomScale.value,
     fps: fps.value,
-    bpm: bpm.value,
-    beatOffsetMs: beatOffsetMs.value,
     timeDisplayMode: timeDisplayMode.value,
     snapEnabled: snapEnabled.value,
     markers: rootMarkers.value.map((marker) => ({ ...marker }))
@@ -800,29 +788,14 @@ export const useTimelineStore = defineStore("timeline", () => {
     fps.value = clampTimelineFps(nextFps);
   };
 
-  const setBpm = (nextBpm: number) => {
-    bpm.value = clampTimelineBpm(nextBpm);
-  };
-
-  const setBeatOffsetMs = (offsetMs: number) => {
-    if (!Number.isFinite(offsetMs)) return;
-    beatOffsetMs.value = roundTimelineMs(Math.max(0, offsetMs));
-  };
-
-  const setBeatOffsetFromPlayhead = () => {
-    setBeatOffsetMs(currentTime.value + activeGroupOffsetMs.value);
-  };
-
   const setTimeDisplayMode = (mode: TimelineDisplayMode) => {
-    if (["frames", "milliseconds", "beats"].includes(mode)) {
+    if (["frames", "milliseconds"].includes(mode)) {
       timeDisplayMode.value = mode;
     }
   };
 
   const cycleTimeDisplayMode = () => {
-    const order: TimelineDisplayMode[] = ["frames", "milliseconds", "beats"];
-    const nextIndex = (order.indexOf(timeDisplayMode.value) + 1) % order.length;
-    timeDisplayMode.value = order[nextIndex]!;
+    timeDisplayMode.value = timeDisplayMode.value === "frames" ? "milliseconds" : "frames";
   };
 
   const setSnapEnabled = (enabled: boolean) => {
@@ -970,17 +943,11 @@ export const useTimelineStore = defineStore("timeline", () => {
     duration,
     zoomScale,
     fps,
-    bpm,
-    beatOffsetMs,
-    activeBeatOffsetMs,
     timeDisplayMode,
     snapEnabled,
     rootMarkers,
     markers,
     setFps,
-    setBpm,
-    setBeatOffsetMs,
-    setBeatOffsetFromPlayhead,
     setTimeDisplayMode,
     cycleTimeDisplayMode,
     setSnapEnabled,

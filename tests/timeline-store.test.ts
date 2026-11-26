@@ -353,52 +353,55 @@ test("frame timecode and stepFrameTimeMs round-trip across 30fps and 60fps witho
   assert.equal(stepFrameTimeMs(112, -1, 30, 5000), 100);
 });
 
-test("128 BPM beat grid, ruler ticks, and clip-end magnetic snapping handle fractional beat intervals", async () => {
+test("frame & millisecond ruler ticks, frame grid snapping, Shift bypass, and clip-end magnetic snapping", async () => {
   const {
     collectTimelineSnapCandidates,
-    formatBeatTimecode,
     getRulerTicks,
     resolveTimelineSnap
   } = await import("../src/core/timeline");
 
-  // 128 BPM: 1 beat = 468.75ms, 1/16th note (1/4 beat) = 117.1875ms -> 117.2ms
-  assert.equal(formatBeatTimecode(0, 128, 0), "01:01.00");
-  assert.equal(formatBeatTimecode(468.8, 128, 0), "01:02.00");
-  assert.equal(formatBeatTimecode(1875, 128, 0), "02:01.00");
-
-  const ticks = getRulerTicks({
+  const frameTicks = getRulerTicks({
     startTimeMs: 0,
-    endTimeMs: 2000,
-    scale: 100, // 200px/s -> 1/4 beat = 23.4px >= 7px
-    mode: "beats",
-    bpm: 128,
-    beatOffsetMs: 100
+    endTimeMs: 1000,
+    scale: 120, // 240px/s -> 1 frame @ 30fps = 8px >= 7px
+    mode: "frames",
+    fps: 30
   });
-  const majorTimes = ticks.filter((tick) => tick.kind === "major").map((tick) => tick.timeMs);
-  assert.deepEqual(majorTimes, [100, 1975]);
+  const majorFrameLabels = frameTicks.filter((tick) => tick.kind === "major").map((tick) => tick.label);
+  assert.deepEqual(majorFrameLabels, ["00:00:00", "00:01:00"]);
+  assert.equal(frameTicks.some((tick) => tick.kind === "minor"), true);
 
-  // 节拍吸附 & Shift 临时旁路
-  const beatSnap = resolveTimelineSnap(215, {
+  const msTicks = getRulerTicks({
+    startTimeMs: 0,
+    endTimeMs: 1000,
+    scale: 100,
+    mode: "milliseconds"
+  });
+  assert.deepEqual(
+    msTicks.filter((tick) => tick.kind === "major").map((tick) => tick.label),
+    ["00:00.000", "00:01.000"]
+  );
+
+  // 帧网格吸附 & Shift 临时旁路
+  const frameSnap = resolveTimelineSnap(31, {
     pixelsPerSecond: 200,
-    mode: "beats",
-    bpm: 128,
-    beatOffsetMs: 100,
+    mode: "frames",
+    fps: 30,
     snapEnabled: true
   });
-  assert.deepEqual(beatSnap, { timeMs: 217.2, kind: "beat" });
+  assert.deepEqual(frameSnap, { timeMs: 33.3, kind: "frame" });
   assert.deepEqual(
-    resolveTimelineSnap(215, {
+    resolveTimelineSnap(31, {
       pixelsPerSecond: 200,
-      mode: "beats",
-      bpm: 128,
-      beatOffsetMs: 100,
+      mode: "frames",
+      fps: 30,
       snapEnabled: true,
       disableSnap: true
     }),
-    { timeMs: 215, kind: null }
+    { timeMs: 31, kind: null }
   );
 
-  // 语义候选（标记点）优先于帧/节拍网格，且支持片段尾部吸附到标记点
+  // 语义候选（标记点）优先于帧网格，且支持片段尾部吸附到标记点
   const candidates = collectTimelineSnapCandidates({
     tracks: [],
     markers: [{ id: "m1", timeMs: 1500 }]
@@ -414,7 +417,7 @@ test("128 BPM beat grid, ruler ticks, and clip-end magnetic snapping handle frac
   assert.deepEqual(endSnapped, { timeMs: 1000, kind: "marker" });
 });
 
-test("60fps consecutive single-frame keyframes, sub-frame splits, and cue markers inside nested groups", async () => {
+test("60fps consecutive single-frame keyframes, sub-frame splits, and timeline markers inside nested groups", async () => {
   const { compileTimelineToBas } = await import("../src/core/compiler");
   const { parseBas } = await import("./helpers/basParser");
   const { timeline, danmu } = setup();
@@ -447,8 +450,8 @@ test("60fps consecutive single-frame keyframes, sub-frame splits, and cue marker
 
   // 根时间轴标记点在进入嵌套分组后自动映射为局部时间，并支持按局部游标增删与跳转
   timeline.loadTimeline([track("r", [group("g", "r", 2000, [track("in", [textClip("ic", "in", 0)])])])]);
-  timeline.addMarker(2250, "Beat 1");
-  timeline.addMarker(2750, "Beat 2");
+  timeline.addMarker(2250, "Marker 1");
+  timeline.addMarker(2750, "Marker 2");
   timeline.enterGroup("g");
   assert.deepEqual(
     timeline.markers.map((marker) => marker.timeMs),

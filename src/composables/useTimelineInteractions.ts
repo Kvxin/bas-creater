@@ -93,8 +93,6 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
       pixelsPerSecond: pixelsPerSecond.value,
       mode: timelineStore.timeDisplayMode,
       fps: timelineStore.fps,
-      bpm: timelineStore.bpm,
-      beatOffsetMs: timelineStore.activeBeatOffsetMs,
       snapEnabled: timelineStore.snapEnabled,
       disableSnap,
       clipDurationMs

@@ -99,8 +99,6 @@ const {
   markers: computed(() => timelineStore.markers),
   mode: computed(() => timelineStore.timeDisplayMode),
   fps: computed(() => timelineStore.fps),
-  bpm: computed(() => timelineStore.bpm),
-  beatOffsetMs: computed(() => timelineStore.activeBeatOffsetMs),
   snapEnabled: computed(() => timelineStore.snapEnabled)
 });
 
@@ -249,9 +247,7 @@ const handleTimelineWheel = (event: WheelEvent) => {
 const formatActiveTime = (timeMs: number) =>
   formatTimelineTime(timeMs, {
     mode: timelineStore.timeDisplayMode,
-    fps: timelineStore.fps,
-    bpm: timelineStore.bpm,
-    beatOffsetMs: timelineStore.activeBeatOffsetMs
+    fps: timelineStore.fps
   });
 
 const getSnapKindLabel = (kind: TimelineSnapKind | null) => {
@@ -261,7 +257,6 @@ const getSnapKindLabel = (kind: TimelineSnapKind | null) => {
   if (kind === "clipStart") return t("timeline.snap.clipStart");
   if (kind === "clipEnd") return t("timeline.snap.clipEnd");
   if (kind === "keyframe") return t("timeline.snap.keyframe");
-  if (kind === "beat") return t("timeline.snap.beat");
   return t("timeline.snap.frame");
 };
 
@@ -455,8 +450,6 @@ const handleDrop = (event: DragEvent, trackId: string) => {
         pixelsPerSecond: pixelsPerSecond.value,
         mode: timelineStore.timeDisplayMode,
         fps: timelineStore.fps,
-        bpm: timelineStore.bpm,
-        beatOffsetMs: timelineStore.activeBeatOffsetMs,
         snapEnabled: timelineStore.snapEnabled,
         disableSnap: event.shiftKey
       });
@@ -691,8 +684,6 @@ function handleVolumeSelect(clipId: string) {
           :padding-left="0"
           :mode="timelineStore.timeDisplayMode"
           :fps="timelineStore.fps"
-          :bpm="timelineStore.bpm"
-          :beat-offset-ms="timelineStore.activeBeatOffsetMs"
           :markers="timelineStore.markers"
           @click="handleRulerClick"
           @select-marker="timeMs => timelineStore.setCurrentTime(timeMs)"
@@ -739,7 +730,7 @@ function handleVolumeSelect(clipId: string) {
         @contextmenu="handleContextMenu($event, 'background')"
       >
         <div class="timeline-track-surface relative" :style="{ width: totalWidth + 'px' }">
-          <!-- 卡点标记纵向参考线 -->
+          <!-- 时间轴标记纵向参考线 -->
           <div
             v-for="marker in timelineStore.markers"
             :key="`guide-${marker.id}`"

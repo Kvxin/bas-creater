@@ -24,15 +24,13 @@ export type UseTimelinePlayheadParams = {
   markers?: Ref<TimelineMarker[]>;
   mode?: Ref<TimelineDisplayMode>;
   fps?: Ref<number>;
-  bpm?: Ref<number>;
-  beatOffsetMs?: Ref<number>;
   snapEnabled?: Ref<boolean>;
 };
 
 const isSemanticKind = (kind: string | null): kind is PlayheadSemanticSnapKind =>
   kind === "marker" || kind === "clipStart" || kind === "clipEnd" || kind === "keyframe";
 
-/** 管理时间轴游标的语义吸附、帧/节拍网格对齐、拖拽交互与标尺位置计算。 */
+/** 管理时间轴游标的语义吸附、帧网格对齐、拖拽交互与标尺位置计算。 */
 export function useTimelinePlayhead(params: UseTimelinePlayheadParams) {
   const {
     tracks,
@@ -46,8 +44,6 @@ export function useTimelinePlayhead(params: UseTimelinePlayheadParams) {
     markers,
     mode,
     fps,
-    bpm,
-    beatOffsetMs,
     snapEnabled
   } = params;
 
@@ -81,8 +77,6 @@ export function useTimelinePlayhead(params: UseTimelinePlayheadParams) {
       pixelsPerSecond: pixelsPerSecond.value,
       mode: mode?.value ?? "frames",
       fps: fps?.value,
-      bpm: bpm?.value,
-      beatOffsetMs: beatOffsetMs?.value,
       snapEnabled: snapEnabled?.value ?? true,
       disableSnap,
       maxTimeMs: duration.value,

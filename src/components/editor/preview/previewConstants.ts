@@ -1,5 +1,4 @@
 import {
-  DEFAULT_TIMELINE_BPM,
   DEFAULT_TIMELINE_FPS,
   formatTimelineTime
 } from "@/core/timeline";
@@ -51,18 +50,14 @@ export const clampCanvasDimension = (value: number | string) => {
   return Math.min(CANVAS_MAX_SIZE, Math.max(CANVAS_MIN_SIZE, Math.round(numericValue)));
 };
 
-/** 视频/时间轴时间码显示：默认按参考帧率显示 HH:MM:SS:FF，并支持毫秒与 BPM 节拍模式。 */
+/** 视频/时间轴时间码显示：默认按参考帧率显示 HH:MM:SS:FF，并支持毫秒模式。 */
 export const toPreviewTimecode = (
   timeMs: number,
   fps = DEFAULT_TIMELINE_FPS,
-  mode: TimelineDisplayMode = "frames",
-  bpm = DEFAULT_TIMELINE_BPM,
-  beatOffsetMs = 0
+  mode: TimelineDisplayMode = "frames"
 ) =>
   formatTimelineTime(timeMs, {
     mode,
     fps,
-    bpm,
-    beatOffsetMs,
-    alwaysShowHours: mode !== "beats"
+    alwaysShowHours: true
   });

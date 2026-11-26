@@ -120,16 +120,14 @@ test("legacy animations migrate to keyframes and mixed animation data is rejecte
   assert.equal(JSON.stringify(source), original);
 });
 
-test("project schema preserves valid timeline FPS, BPM, display mode, and cue markers while rejecting invalid metadata", () => {
+test("project schema preserves valid timeline FPS, display mode, and markers while rejecting invalid metadata", () => {
   const valid = normalizeProjectData({
     ...legacy(),
     timeline: {
       duration: 0,
       zoomScale: 240,
       fps: 60,
-      bpm: 128,
-      beatOffsetMs: 468.75,
-      timeDisplayMode: "beats",
+      timeDisplayMode: "frames",
       snapEnabled: true,
       markers: [
         { id: "m-2", timeMs: 937.5, label: "Drop" },
@@ -141,9 +139,7 @@ test("project schema preserves valid timeline FPS, BPM, display mode, and cue ma
     duration: 2200,
     zoomScale: 240,
     fps: 60,
-    bpm: 128,
-    beatOffsetMs: 468.8,
-    timeDisplayMode: "beats",
+    timeDisplayMode: "frames",
     snapEnabled: true,
     markers: [
       { id: "m-1", timeMs: 468.8 },
@@ -152,9 +148,12 @@ test("project schema preserves valid timeline FPS, BPM, display mode, and cue ma
   });
 
   assert.throws(() => normalizeProjectData({ ...legacy(), timeline: { duration: 0, fps: 0 } }), /fps/i);
-  assert.throws(() => normalizeProjectData({ ...legacy(), timeline: { duration: 0, bpm: 999 } }), /bpm/i);
   assert.throws(
     () => normalizeProjectData({ ...legacy(), timeline: { duration: 0, timeDisplayMode: "smpte" } }),
+    /display mode/i
+  );
+  assert.throws(
+    () => normalizeProjectData({ ...legacy(), timeline: { duration: 0, timeDisplayMode: "bars" } }),
     /display mode/i
   );
   assert.throws(

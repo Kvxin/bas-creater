@@ -286,8 +286,6 @@ export function useProjectAutoSave(projectId: string) {
     () => [
       timelineStore.rootTracks,
       timelineStore.fps,
-      timelineStore.bpm,
-      timelineStore.beatOffsetMs,
       timelineStore.timeDisplayMode,
       timelineStore.snapEnabled,
       timelineStore.rootMarkers

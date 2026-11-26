@@ -3,7 +3,6 @@ import { computed, ref, onMounted, onUnmounted, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useElementSize, useMutationObserver } from "@vueuse/core";
 import {
-  DEFAULT_TIMELINE_BPM,
   DEFAULT_TIMELINE_FPS,
   formatTimelineTime,
   getGridPixel,
@@ -19,8 +18,6 @@ type Props = {
   paddingLeft?: number; // 左侧内边距（像素），用于对齐轨道
   mode?: TimelineDisplayMode;
   fps?: number;
-  bpm?: number;
-  beatOffsetMs?: number;
   markers?: TimelineMarker[];
 };
 
@@ -30,8 +27,6 @@ const props = withDefaults(defineProps<Props>(), {
   paddingLeft: 8,
   mode: "frames",
   fps: DEFAULT_TIMELINE_FPS,
-  bpm: DEFAULT_TIMELINE_BPM,
-  beatOffsetMs: 0,
   markers: () => []
 });
 
@@ -79,9 +74,7 @@ const visibleMarkers = computed(() => {
 const formatMarkerLabel = (timeMs: number) =>
   formatTimelineTime(timeMs, {
     mode: props.mode,
-    fps: props.fps,
-    bpm: props.bpm,
-    beatOffsetMs: props.beatOffsetMs
+    fps: props.fps
   });
 
 const handleMarkerClick = (event: MouseEvent, marker: TimelineMarker) => {
@@ -155,9 +148,7 @@ const drawRuler = () => {
     endTimeMs: rawEndTime,
     scale: props.scale,
     mode: props.mode,
-    fps: props.fps,
-    bpm: props.bpm,
-    beatOffsetMs: props.beatOffsetMs
+    fps: props.fps
   });
 
   for (const tick of ticks) {
@@ -203,7 +194,7 @@ useMutationObserver(() => document.documentElement, drawRuler, {
 });
 
 watch(
-  () => [props.scale, props.scrollLeft, props.paddingLeft, props.mode, props.fps, props.bpm, props.beatOffsetMs],
+  () => [props.scale, props.scrollLeft, props.paddingLeft, props.mode, props.fps],
   drawRuler,
   { immediate: false }
 );
