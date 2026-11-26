@@ -1,9 +1,10 @@
-import { defineEffect } from "@/effects/types";
+import { defineEffect } from "@/core/effects";
 
 export default defineEffect({
   id: "core.fade-in",
   apiVersion: 2,
   version: "1.0.0",
+  category: "animation",
   title: { "zh-CN": "淡入", en: "Fade in", ja: "フェードイン" },
   description: { "zh-CN": "让弹幕从透明逐渐显现", en: "Gradually reveal the clip.", ja: "弾幕を徐々に表示します" },
   targets: ["text", "button", "path"],

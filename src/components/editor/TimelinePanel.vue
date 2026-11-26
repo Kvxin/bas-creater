@@ -16,7 +16,7 @@ import { useTimelinePlayhead } from "@/composables/useTimelinePlayhead";
 import { useTimelineInteractions } from "@/composables/useTimelineInteractions";
 import { BASE_KEYFRAME_ID, normalizeKeyframes } from "@/core/keyframes";
 import { draggedEffect, EFFECT_DRAG_TYPE, effectCatalog } from "@/effects/registry";
-import { effectText, matchesEffect, type EffectInstance } from "@/effects/types";
+import { effectText, isDynamicEffect, matchesEffect, type EffectInstance } from "@/core/effects";
 import { runSplitAction } from "@/utils/splitAction";
 import type { TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
 import AudioWaveform from "./audio/AudioWaveform.vue";
@@ -302,6 +302,7 @@ const toggleTrackEffectMenu = (event: MouseEvent, track: TimelineTrack) => {
 const startDragEffect = (e: MouseEvent, clip: TimelineClip, effect: EffectInstance, mode: "move" | "left" | "right") => {
   if (
     clip.kind !== "resource" ||
+    !isDynamicEffect(effect) ||
     timelineStore.tracks.find(track => track.clips.some(item => item.id === clip.id))?.locked
   ) {
     return;

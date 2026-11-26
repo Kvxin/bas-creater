@@ -5,7 +5,7 @@ import { ChevronUp, ChevronDown, Trash2 } from "lucide-vue-next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { effectCatalog } from "@/effects/registry";
-import { effectText, matchesEffect, type EffectInstance, type EffectParams } from "@/effects/types";
+import { effectText, isDynamicEffect, matchesEffect, type EffectInstance, type EffectParams } from "@/core/effects";
 import { useTimelineStore } from "@/stores/timeline";
 
 const props = defineProps<{ clipId: string; effect: EffectInstance; first: boolean; last: boolean; locked: boolean }>();
@@ -13,6 +13,7 @@ const { t, locale } = useI18n();
 const timeline = useTimelineStore();
 const plugin = computed(() => effectCatalog.value?.plugins.find(item => matchesEffect(item, props.effect)));
 const title = computed(() => (plugin.value ? effectText(plugin.value.title, locale.value) : props.effect.pluginId));
+const supportsSpan = computed(() => isDynamicEffect(props.effect));
 const params = ref<EffectParams>({});
 const errorMessage = ref("");
 const spanStart = ref(props.effect.span[0]);
@@ -62,7 +63,7 @@ function apply() {
   <li
     class="space-y-2 py-2"
     :data-effect-instance="effect.id"
-    @click="timeline.setEditingEffect(clipId, effect.id)"
+    @click="supportsSpan && timeline.setEditingEffect(clipId, effect.id)"
   >
     <div class="flex items-center gap-1">
       <span class="min-w-0 flex-1 truncate font-medium" :title="title">{{ title }}</span>
@@ -97,7 +98,7 @@ function apply() {
         <Trash2 />
       </button>
     </div>
-    <form class="space-y-2" @submit.prevent="applySpan">
+    <form v-if="supportsSpan" class="space-y-2" @submit.prevent="applySpan">
       <div class="grid grid-cols-[minmax(0,1fr)_minmax(64px,0.9fr)] items-center gap-2">
         <Label :for="effect.id + '-start'" class="text-xs text-muted-foreground">{{ t("effects.start") }}</Label>
         <Input
@@ -124,6 +125,7 @@ function apply() {
       </div>
       <button type="submit" class="ui-button" :disabled="locked">{{ t("effects.applySpan") }}</button>
     </form>
+    <p v-else class="text-xs text-muted-foreground">{{ t("effects.staticFullClip") }}</p>
     <form v-if="plugin && Object.keys(plugin.params).length" @submit.prevent="apply">
       <fieldset :disabled="locked" class="space-y-2">
         <div

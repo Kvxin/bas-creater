@@ -1,5 +1,8 @@
 const zhCN = {
   title: "特效",
+  categoryAll: "全部",
+  categoryAnimation: "动画",
+  categoryStyle: "样式",
   attach: "将「{name}」应用到选中的弹幕",
   chooseClip: "请选择可编辑且类型兼容的弹幕片段。",
   hint: "选中一条弹幕后点「+」，或将特效拖到时间轴上的弹幕。",
@@ -29,11 +32,15 @@ const zhCN = {
   start: "开始 (ms)",
   duration: "时长 (ms)",
   invalidSpan: "特效区间必须位于片段内，且时长大于 0。",
+  staticFullClip: "该样式在 BAS 中只支持全片段生效，不支持局部时间区间。",
   timingConflict: "片段的关键帧也在修改 {key}，该特效只能覆盖整个片段。"
 };
 
 const en: typeof zhCN = {
   title: "Effects",
+  categoryAll: "All",
+  categoryAnimation: "Animation",
+  categoryStyle: "Style",
   attach: "Apply {name} to the selected clip",
   chooseClip: "Select an editable, compatible danmaku clip.",
   hint: "Select a danmaku clip and press +, or drag an effect onto a clip.",
@@ -63,11 +70,15 @@ const en: typeof zhCN = {
   start: "Start (ms)",
   duration: "Duration (ms)",
   invalidSpan: "The effect span must stay inside the clip and last longer than 0 ms.",
+  staticFullClip: "This style applies to the whole clip in BAS and cannot be limited to a time span.",
   timingConflict: "Keyframes on this clip also change {key}, so this effect must cover the whole clip."
 };
 
 const ja: typeof zhCN = {
   title: "エフェクト",
+  categoryAll: "すべて",
+  categoryAnimation: "アニメーション",
+  categoryStyle: "スタイル",
   attach: "選択した弾幕に「{name}」を適用",
   chooseClip: "編集可能な対応する弾幕クリップを選択してください。",
   hint: "弾幕を選んで「+」を押すか、タイムラインの弾幕にドラッグしてください。",
@@ -97,6 +108,7 @@ const ja: typeof zhCN = {
   start: "開始 (ms)",
   duration: "長さ (ms)",
   invalidSpan: "エフェクトの区間はクリップ内に収め、長さを 0 ms より大きくしてください。",
+  staticFullClip: "このスタイルは BAS の仕様上クリップ全体に適用され、時間区間は指定できません。",
   timingConflict: "このクリップのキーフレームも {key} を変更するため、このエフェクトはクリップ全体に適用する必要があります。"
 };
 

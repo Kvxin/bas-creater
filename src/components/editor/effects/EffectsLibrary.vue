@@ -3,12 +3,23 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Layers2, Plus } from "lucide-vue-next";
 import { draggedEffect, EFFECT_DRAG_TYPE, effectCatalog, loadEffects } from "@/effects/registry";
-import { effectText, type EffectPlugin } from "@/effects/types";
+import { effectText, type EffectCategory, type EffectPlugin } from "@/core/effects";
 import { useTimelineStore } from "@/stores/timeline";
 
 const { t, locale } = useI18n();
 const timeline = useTimelineStore();
 const errorMessage = ref("");
+const activeCategory = ref<"all" | EffectCategory>("all");
+const categories = computed(() => [
+  { id: "all" as const, label: t("effects.categoryAll") },
+  { id: "animation" as const, label: t("effects.categoryAnimation") },
+  { id: "style" as const, label: t("effects.categoryStyle") }
+]);
+const filteredPlugins = computed(() => {
+  const list = effectCatalog.value?.plugins ?? [];
+  if (activeCategory.value === "all") return list;
+  return list.filter(plugin => (plugin.category ?? "animation") === activeCategory.value);
+});
 const target = computed(() =>
   timeline.selectedClipIds.length === 1 ? timeline.getEffectTarget(timeline.selectedClipId) : null
 );
@@ -39,7 +50,28 @@ function drag(event: DragEvent, plugin: EffectPlugin) {
 
 <template>
   <section class="min-w-0 flex-1 flex flex-col bg-background" data-ui="effects-library">
-    <header class="panel-heading flex items-center px-3 font-semibold">{{ t("effects.title") }}</header>
+    <header class="panel-heading flex items-center justify-between gap-2 px-3 font-semibold">
+      <span>{{ t("effects.title") }}</span>
+      <div class="flex items-center gap-1 text-xs font-normal" role="tablist">
+        <button
+          v-for="cat in categories"
+          :key="cat.id"
+          type="button"
+          role="tab"
+          :aria-selected="activeCategory === cat.id"
+          :data-effect-category="cat.id"
+          class="rounded-sm px-1.5 py-0.5 transition-colors"
+          :class="
+            activeCategory === cat.id
+              ? 'bg-primary/15 text-primary font-medium'
+              : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+          "
+          @click="activeCategory = cat.id"
+        >
+          {{ cat.label }}
+        </button>
+      </div>
+    </header>
     <div class="min-h-0 flex-1 overflow-y-auto">
       <p role="status" class="border-b border-divider px-3 py-2 text-xs text-muted-foreground">
         {{
@@ -56,7 +88,7 @@ function drag(event: DragEvent, plugin: EffectPlugin) {
       <template v-else>
         <ul class="divide-y divide-divider">
           <li
-            v-for="plugin in effectCatalog.plugins"
+            v-for="plugin in filteredPlugins"
             :key="plugin.id"
             class="flex items-center gap-2 px-3 py-2 cursor-grab hover:bg-accent"
             draggable="true"
@@ -88,7 +120,7 @@ function drag(event: DragEvent, plugin: EffectPlugin) {
             </button>
           </li>
         </ul>
-        <p v-if="!effectCatalog.plugins.length" class="p-3 text-xs text-muted-foreground">{{ t("effects.empty") }}</p>
+        <p v-if="!filteredPlugins.length" class="p-3 text-xs text-muted-foreground">{{ t("effects.empty") }}</p>
         <p
           v-for="error in effectCatalog.errors"
           :key="error.entry"

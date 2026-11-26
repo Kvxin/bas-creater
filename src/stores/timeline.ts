@@ -3,9 +3,16 @@ import { computed, ref } from "vue";
 import type { TimelineTrack, TimelineClip, TimelineTrackType, TimelineGroupClip } from "@/types/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
-import { defaultEffectParams, matchesEffect, type EffectParams, type EffectPlugin } from "@/effects/types";
-import { buildInstance, sliceEffects } from "@/effects/instances";
-import { MAX_CLIP_EFFECTS } from "@/effects/validation";
+import {
+  buildInstance,
+  defaultEffectParams,
+  isDynamicEffect,
+  matchesEffect,
+  MAX_CLIP_EFFECTS,
+  sliceEffects,
+  type EffectParams,
+  type EffectPlugin
+} from "@/core/effects";
 import { useAudioStore } from "@/stores/audio";
 import { i18n } from "@/i18n";
 import { getItemName } from "@/utils/resourceUtils";
@@ -157,9 +164,13 @@ export const useTimelineStore = defineStore("timeline", () => {
     if (!target || !plugin.targets.includes(target.resource.type)) throw new Error(i18n.global.t("effects.chooseClip"));
     const effects = target.clip.effects ?? [];
     if (effects.length >= MAX_CLIP_EFFECTS) throw new Error(i18n.global.t("effects.limit", { n: MAX_CLIP_EFFECTS }));
-    const effect = buildInstance(plugin, target.resource.type, defaultEffectParams(plugin), {
-      span: [0, target.clip.duration]
-    });
+    const effect = buildInstance(
+      plugin,
+      target.resource.type,
+      defaultEffectParams(plugin),
+      { span: [0, target.clip.duration] },
+      target.clip.duration
+    );
     target.clip.effects = [...effects, effect];
     setSelectedClip(target.clip.id);
     return effect.id;
@@ -170,7 +181,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     const effect = target?.clip.effects?.find((item) => item.id === effectId);
     if (!target || !effect || !matchesEffect(plugin, effect) || !plugin.targets.includes(target.resource.type))
       throw new Error(i18n.global.t("effects.cannotEdit"));
-    const updated = buildInstance(plugin, target.resource.type, params, effect);
+    const updated = buildInstance(plugin, target.resource.type, params, effect, target.clip.duration);
     target.clip.effects = target.clip.effects!.map((item) => (item.id === effectId ? updated : item));
   }
 
@@ -187,6 +198,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     const target = getEffectTarget(clipId);
     const effect = target?.clip.effects?.find((item) => item.id === effectId);
     if (!target || !effect) throw new Error(i18n.global.t("effects.cannotEdit"));
+    if (!isDynamicEffect(effect)) throw new Error(i18n.global.t("effects.staticFullClip"));
     const [start, end] = span;
     const { duration: clipDuration } = target.clip;
     if (
@@ -214,7 +226,7 @@ export const useTimelineStore = defineStore("timeline", () => {
     const location = findClipLocation(selectedClipIds.value[0]!);
     if (location?.clip.kind !== "resource") return null;
     const effect = location.clip.effects?.find((item) => item.id === editingEffectId.value);
-    return effect ? { clip: location.clip, effect } : null;
+    return effect && isDynamicEffect(effect) ? { clip: location.clip, effect } : null;
   });
 
   function setEditingEffect(clipId: string, effectId: string | null) {
@@ -223,7 +235,8 @@ export const useTimelineStore = defineStore("timeline", () => {
       return;
     }
     const target = getEffectTarget(clipId);
-    if (!target?.clip.effects?.some((effect) => effect.id === effectId)) return;
+    const effect = target?.clip.effects?.find((item) => item.id === effectId);
+    if (!target || !effect || !isDynamicEffect(effect)) return;
     if (selectedClipIds.value.join() !== clipId) setSelectedClip(clipId);
     editingEffectId.value = effectId;
   }

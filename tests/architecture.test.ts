@@ -81,10 +81,17 @@ const scanSourceViolations = (
     .filter((specifier) => !isAllowedImport(fromFile, specifier, allowedDirs, forbiddenTargets))
     .map((specifier) => `${relative(fromFile)} -> ${specifier}`);
 
-// core 是纯 TypeScript 领域层：只能依赖 core、types 以及纯 effects 领域模块（不含带 Vue ref 的 registry.ts），不能碰 Vue/Pinia/i18n/store/浏览器或 Tauri。
-test("src/core only depends on src/core, src/types, and pure src/effects modules", () => {
+// core 是纯 TypeScript 领域层：严格只依赖 src/core 与 src/types，不得碰 Vue/Pinia/i18n/store/src/effects/浏览器或 Tauri。
+test("src/core only depends on src/core and src/types", () => {
+  const violations = listFiles(coreDir).flatMap((file) =>
+    scanSourceViolations(file, fs.readFileSync(file, "utf8"), [coreDir, typesDir])
+  );
+  assert.deepEqual(violations, []);
+});
+
+test("pure src/effects modules only depend on src/core, src/types, and pure src/effects", () => {
   const pureEffectFiles = listFiles(effectsDir).filter((file) => file !== effectsRegistryFile);
-  const violations = [...listFiles(coreDir), ...pureEffectFiles].flatMap((file) =>
+  const violations = pureEffectFiles.flatMap((file) =>
     scanSourceViolations(file, fs.readFileSync(file, "utf8"), [coreDir, typesDir, effectsDir], [effectsRegistryFile])
   );
   assert.deepEqual(violations, []);
@@ -112,7 +119,7 @@ test("scanner catches side-effect imports, dynamic imports, and relative imports
   const coreSource = [
     `import "./keyframes";`,
     `import type { AnyDanmu } from "../types/danmu";`,
-    `import { applyOpacityLimits } from "@/effects/opacity";`,
+    `import { applyOpacityLimits } from "@/core/effects";`,
     `import "@/effects/registry";`,
     `import "../stores/danmu";`,
     `import "@/i18n";`,
@@ -122,7 +129,7 @@ test("scanner catches side-effect imports, dynamic imports, and relative imports
   ].join("\n");
 
   assert.deepEqual(
-    scanSourceViolations(sampleCoreFile, coreSource, [coreDir, typesDir, effectsDir], [effectsRegistryFile]),
+    scanSourceViolations(sampleCoreFile, coreSource, [coreDir, typesDir]),
     [
       "core/compiler.ts -> @/effects/registry",
       "core/compiler.ts -> ../stores/danmu",

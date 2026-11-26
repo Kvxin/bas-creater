@@ -1,9 +1,10 @@
-import { defineEffect } from "@/effects/types";
+import { defineEffect } from "@/core/effects";
 
 export default defineEffect({
   id: "core.text-outline",
   apiVersion: 2,
   version: "1.0.0",
+  category: "style",
   title: { "zh-CN": "文字描边", en: "Text outline", ja: "文字の縁取り" },
   description: {
     "zh-CN": "沿文字轮廓添加描边",
@@ -23,6 +24,6 @@ export default defineEffect({
     color: { type: "color", label: { "zh-CN": "描边颜色", en: "Stroke color", ja: "縁の色" }, default: "#334155" }
   },
   build({ params }) {
-    return { style: { strokeWidth: params.width, strokeColor: Number.parseInt(params.color.slice(1), 16) } };
+    return { defStyle: { strokeWidth: params.width, strokeColor: Number.parseInt(params.color.slice(1), 16) } };
   }
 });

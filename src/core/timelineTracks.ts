@@ -1,7 +1,7 @@
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 import type { TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
-import { sliceEffects } from "@/effects/instances";
+import { sliceEffects } from "@/core/effects";
 import { normalizeKeyframes } from "@/core/keyframes";
 import { createTimelineId } from "@/core/timelineGroups";
 

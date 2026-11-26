@@ -6,6 +6,12 @@ import type {
 } from "@/types/timeline";
 import { resolveDanmuDefaults } from "@/core/danmuDefaults";
 import {
+  applyOpacityLimits,
+  opacityAt,
+  resolveEffectColorAtTime,
+  resolveEffectDefStyle
+} from "@/core/effects";
+import {
   ANIMATABLE_KEYS,
   ANIMATABLE_KEYS_BY_TYPE,
   NUMERIC_INTERPOLATION_KEYS
@@ -317,8 +323,30 @@ export const getEffectiveDanmuAtTime = (
 ) => {
   const localTimeMs = clampKeyframeTime(timelineTimeMs - clip.startTime, clip.duration);
   const properties = getEffectiveKeyframePropertiesAtTime(resource, clip, localTimeMs, reference);
-
-  return applyKeyframeProperties(clip.kind === "resource" ? { ...resource, ...clip.overrides } as AnyDanmu : resource, properties);
+  const baseResource =
+    clip.kind === "resource"
+      ? ({ ...resource, ...clip.overrides, ...resolveEffectDefStyle(clip.effects) } as AnyDanmu)
+      : resource;
+  const resolved = applyKeyframeProperties(baseResource, properties);
+  if (clip.kind === "resource" && clip.effects?.length) {
+    const effectColor = resolveEffectColorAtTime(clip.effects, localTimeMs, clip.duration);
+    if (effectColor !== undefined && resolved.type === "text") {
+      resolved.color = effectColor;
+    }
+    if (clip.effects.some(effect => effect.patch.opacityLimit)) {
+      const baseOpacity = typeof resolved.opacity === "number" ? resolved.opacity : (baseResource.opacity ?? 1);
+      const limited = applyOpacityLimits(
+        [
+          { at: 0, value: baseOpacity },
+          ...(clip.duration > 0 ? [{ at: clip.duration, value: baseOpacity }] : [])
+        ],
+        clip.effects,
+        clip.duration
+      );
+      resolved.opacity = opacityAt(limited, localTimeMs);
+    }
+  }
+  return resolved;
 };
 
 export const createKeyframeSnapshot = (

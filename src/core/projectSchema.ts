@@ -1,5 +1,5 @@
 import type { BasProjectData } from "@/types/storage";
-import { MAX_CLIP_EFFECTS, validateInstance } from "@/effects/validation";
+import { MAX_CLIP_EFFECTS, validateInstance } from "@/core/effects";
 import type { TimelineClip, TimelineTrack } from "@/types/timeline";
 import { updateGroupDurations } from "@/core/timelineGroups";
 import { convertLegacyAnimations } from "@/core/legacyAnimations";

@@ -1,6 +1,7 @@
 import type { DanmuType } from "@/types/danmu";
 
 export type EffectText = string | { "zh-CN": string; en?: string; ja?: string };
+export type EffectCategory = "animation" | "style";
 export type EffectParam =
   | { type: "string" | "color"; label: EffectText; default: string }
   | { type: "number"; label: EffectText; default: number; min: number; max: number; step: number };
@@ -12,9 +13,15 @@ export interface EffectPoint {
   value: number;
 }
 
-// 时间和透明度均归一化，分割后两个片段可以各自采样原曲线的一段。
+/**
+ * 特效产出的中间表示（与 BAS 引擎能力严格对齐）：
+ * - `defStyle`: BAS 仅在 `def` 初始化 DOM 时读取一次、不支持 `set` 动态变化的静态样式属性（全片段生效）；
+ * - `color`: BAS 支持在 `set` 中通过 CSS `@keyframes` 动态切换/渐变的文字颜色；
+ * - `opacityLimit`: 时间与透明度均归一化的上限曲线，分割后两个片段可以各自采样原曲线的一段。
+ */
 export interface EffectPatch {
-  style?: Partial<Record<"color" | "strokeWidth" | "strokeColor" | "fillColor" | "textColor" | "borderColor", number>>;
+  defStyle?: Partial<Record<"strokeWidth" | "strokeColor" | "fillColor" | "textColor" | "borderColor", number>>;
+  color?: number;
   opacityLimit?: EffectPoint[];
 }
 
@@ -22,6 +29,7 @@ export interface EffectPlugin<S extends EffectSchema = EffectSchema> {
   id: string;
   apiVersion: 2;
   version: string;
+  category?: EffectCategory;
   title: EffectText;
   description?: EffectText;
   targets: DanmuType[];

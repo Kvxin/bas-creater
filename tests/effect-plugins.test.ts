@@ -8,6 +8,7 @@ import outline from "../src/effects/plugins/text-outline";
 import { discoverEffects } from "../src/effects/registry";
 import { matchesEffect, type EffectInstance } from "../src/effects/types";
 import { basNameForClip, compileClipToBas, compileTimelineToBas } from "../src/core/compiler";
+import { getEffectiveDanmuAtTime } from "../src/core/keyframes";
 import { normalizeProjectData, PROJECT_VERSION, serializeProjectData } from "../src/core/projectSchema";
 import { useDanmuStore } from "../src/stores/danmu";
 import { useTimelineStore } from "../src/stores/timeline";
@@ -430,21 +431,29 @@ test("v4 independent effect groups migrate as ordinary editable groups with iden
   assert.throws(() => normalizeProjectData({ ...input, version: 5 }));
 });
 
-test("effects only act within their span of the host clip", async () => {
+test("dynamic effects (opacityLimit and color) act within their span while static defStyle applies to the whole clip", async () => {
   const { timeline, get, compile } = setup([track([instance("a", { startTime: 1000 })])]);
+  const tint = { ...outline, id: "test.tint", params: {}, build: () => ({ color: 0x00ff00 }) };
   const fadeId = timeline.attachEffect("a", fade);
   timeline.updateEffect("a", fadeId, fade, { percent: 100 });
+  const tintId = timeline.attachEffect("a", tint);
   const outlineId = timeline.attachEffect("a", outline);
   timeline.updateEffectSpan("a", fadeId, [500, 1500]);
-  timeline.updateEffectSpan("a", outlineId, [1000, 1500]);
+  timeline.updateEffectSpan("a", tintId, [1000, 1500]);
+  // 纯静态 defStyle（如文字描边 strokeWidth/strokeColor）在 BAS 中仅支持 def 初始化，不能缩小为局部时间段。
+  assert.throws(() => timeline.updateEffectSpan("a", outlineId, [1000, 1500]));
   assert.deepEqual(
     get("a").effects!.map(effect => effect.span),
     [
       [500, 1500],
-      [1000, 1500]
+      [1000, 1500],
+      [0, 2000]
     ]
   );
-  const graph = await render(compile());
+  const script = compile();
+  assert.match(script, /strokeWidth = 2/);
+  assert.doesNotMatch(script, /set obj_a \{[^}]*strokeWidth/);
+  const graph = await render(script);
   for (const [time, expected] of [
     [0.9, 0],
     [1.25, 1],
@@ -455,17 +464,16 @@ test("effects only act within their span of the host clip", async () => {
     [2.75, 1]
   ])
     close(sample(graph, "obj_a", time!), expected!);
-  for (const [time, width, color] of [
-    [1.5, 0, 0xffffff],
-    [2.25, 2, 0x334155],
-    [2.75, 0, 0xffffff]
+  for (const [time, color] of [
+    [1.5, 0xffffff],
+    [2.25, 0x00ff00],
+    [2.75, 0xffffff]
   ]) {
-    assert.equal(valueAt(graph, "obj_a", "strokeWidth", time!), width);
-    assert.equal(valueAt(graph, "obj_a", "strokeColor", time!), color);
+    assert.equal(valueAt(graph, "obj_a", "color", time!), color);
   }
-  timeline.updateEffectSpan("a", outlineId, [0, 2000]);
-  assert.match(compile(), /strokeWidth = 2/);
-  assert.doesNotMatch(compile(), /set obj_a \{ strokeWidth/);
+  timeline.updateEffectSpan("a", tintId, [0, 2000]);
+  assert.match(compile(), /color = 0x00ff00/);
+  assert.doesNotMatch(compile(), /set obj_a \{[^}]*color/);
 });
 
 test("clip edits keep effect durations and drop effects outside the remaining clip", () => {
@@ -530,11 +538,11 @@ test("editing effect state follows the selected clip and rejects stale effect id
   assert.equal(timeline.editingEffect, null);
 });
 
-test("effect spans are validated and cannot fight host keyframes over a style", () => {
+test("effect spans are validated and cannot fight host keyframes over animated color, while static defStyle coexists", () => {
   const { timeline, get, compile } = setup([
     track([instance("a", { keyframes: [{ id: "k", timeMs: 1000, properties: { color: 0xff0000 } }] })])
   ]);
-  const tint = { ...outline, id: "test.tint", params: {}, build: () => ({ style: { color: 0x00ff00 } }) };
+  const tint = { ...outline, id: "test.tint", params: {}, build: () => ({ color: 0x00ff00 }) };
   const id = timeline.attachEffect("a", tint);
   assert.doesNotThrow(compile);
   for (const span of [
@@ -547,7 +555,7 @@ test("effect spans are validated and cannot fight host keyframes over a style", 
   assert.throws(() => timeline.updateEffectSpan("a", id, [0, 1000]), /color/);
   assert.deepEqual(get("a").effects![0]!.span, [0, 2000]);
   const outlineId = timeline.attachEffect("a", outline);
-  timeline.updateEffectSpan("a", outlineId, [0, 1000]);
+  assert.throws(() => timeline.updateEffectSpan("a", outlineId, [0, 1000]));
   assert.doesNotThrow(compile);
 });
 
@@ -584,4 +592,31 @@ test("catalog discovery isolates broken and duplicate plugins", async () => {
     catalog.errors.map(error => error.entry),
     ["bad", "first", "missing", "second"]
   );
+});
+
+test("getEffectiveDanmuAtTime reflects attached clip effects (defStyle, color, and opacityLimit)", () => {
+  const { timeline, get } = setup([track([instance("a", { startTime: 1000, duration: 2000 })])]);
+  const fadeId = timeline.attachEffect("a", fade);
+  timeline.updateEffect("a", fadeId, fade, { percent: 100 });
+  timeline.updateEffectSpan("a", fadeId, [0, 1000]);
+  timeline.attachEffect("a", outline);
+  const tint = { ...outline, id: "test.tint", params: {}, build: () => ({ color: 0x00ff00 }) };
+  const tintId = timeline.attachEffect("a", tint);
+  timeline.updateEffectSpan("a", tintId, [500, 1500]);
+
+  const clip = get("a");
+  const at1250 = getEffectiveDanmuAtTime(resource, clip, 1250);
+  assert.equal(at1250.type, "text");
+  if (at1250.type === "text") {
+    close(at1250.opacity ?? 1, 0.25);
+    assert.equal(at1250.strokeWidth, 2);
+    assert.equal(at1250.strokeColor, 0x334155);
+    assert.equal(at1250.color, 0xffffff);
+  }
+  const at1750 = getEffectiveDanmuAtTime(resource, clip, 1750);
+  if (at1750.type === "text") {
+    close(at1750.opacity ?? 1, 0.75);
+    assert.equal(at1750.color, 0x00ff00);
+    assert.equal(at1750.strokeWidth, 2);
+  }
 });
