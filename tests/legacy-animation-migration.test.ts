@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { normalizeProjectData } from "../src/core/projectSchema";
+import { normalizeProjectData, PROJECT_VERSION } from "../src/core/projectSchema";
 import { compileTimelineToBas } from "../src/core/compiler";
 import { parseBas } from "./helpers/basParser";
 import { isCoordinateField, toPercentCoordinate } from "../src/core/coordinates";
@@ -76,7 +76,7 @@ for (const name of fixtures) {
     const expected = JSON.parse(fs.readFileSync(path.join(fixtureDir, `${name}.expected.json`), "utf8"));
     const project = normalizeProjectData(toV3Project(fixture));
     const clip = project.tracks[0]!.clips[0]!;
-    assert.equal(project.version, 4);
+    assert.equal(project.version, PROJECT_VERSION);
     assert.ok(clip.kind === "resource");
     assert.equal("animations" in clip, false);
     assertKeyframesClose(

@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
+import ColorPicker from "@/components/ui/color-picker/ColorPicker.vue";
 import type { AnyDanmu } from "@/types/danmu";
 import type { ResolvedDanmu } from "@/core/danmuDefaults";
 import type { TimelineClip } from "@/types/timeline";
@@ -122,11 +123,10 @@ const updateBoolean = (key: string, value: boolean) => {
           <div class="space-y-1">
             <span class="text-xs text-muted-foreground">{{ t("properties.style.textColor") }}</span>
             <div class="flex gap-2">
-              <Input
-                type="color"
+              <ColorPicker
                 :model-value="toHtmlColor((props.resolvedSelected as any)?.color)"
-                @input="(e: Event) => updateColor('color', (e.target as HTMLInputElement).value, false)"
-                class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                aria-label="Text color"
+                @update:model-value="value => updateColor('color', value, false)"
               />
               <Input
                 :model-value="(props.resolvedSelected as any)?.color"
@@ -178,11 +178,10 @@ const updateBoolean = (key: string, value: boolean) => {
           <div class="space-y-1">
             <span class="text-xs text-muted-foreground">{{ t("properties.style.strokeColor") }}</span>
             <div class="flex gap-2">
-              <Input
-                type="color"
+              <ColorPicker
                 :model-value="toHtmlColor((props.resolvedSelected as any)?.strokeColor)"
-                @input="(e: Event) => updateColor('strokeColor', (e.target as HTMLInputElement).value, false)"
-                class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                aria-label="Stroke color"
+                @update:model-value="value => updateColor('strokeColor', value, false)"
               />
               <Input
                 :model-value="(props.resolvedSelected as any)?.strokeColor"
@@ -232,11 +231,10 @@ const updateBoolean = (key: string, value: boolean) => {
           <div class="space-y-1">
             <span class="text-xs text-muted-foreground">{{ t("properties.style.textColor") }}</span>
             <div class="flex items-center gap-2">
-              <Input
-                type="color"
+              <ColorPicker
                 :model-value="toHtmlColor((props.resolvedSelected as any)?.textColor)"
-                @input="(e: Event) => updateColor('textColor', (e.target as HTMLInputElement).value, true)"
-                class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                aria-label="Button text color"
+                @update:model-value="value => updateColor('textColor', value, true)"
               />
               <span class="text-xs font-mono uppercase">{{
                 toHtmlColor((props.resolvedSelected as any)?.textColor)
@@ -246,11 +244,10 @@ const updateBoolean = (key: string, value: boolean) => {
           <div class="space-y-1">
             <span class="text-xs text-muted-foreground">{{ t("properties.style.fillColor") }}</span>
             <div class="flex items-center gap-2">
-              <Input
-                type="color"
+              <ColorPicker
                 :model-value="toHtmlColor((props.resolvedSelected as any)?.fillColor)"
-                @input="(e: Event) => updateColor('fillColor', (e.target as HTMLInputElement).value, true)"
-                class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                aria-label="Fill color"
+                @update:model-value="value => updateColor('fillColor', value, true)"
               />
               <span class="text-xs font-mono uppercase">{{
                 toHtmlColor((props.resolvedSelected as any)?.fillColor)
@@ -336,11 +333,10 @@ const updateBoolean = (key: string, value: boolean) => {
           <div class="space-y-1">
             <span class="text-xs text-muted-foreground">{{ t("properties.style.fillColor") }}</span>
             <div class="flex items-center gap-2">
-              <Input
-                type="color"
+              <ColorPicker
                 :model-value="toHtmlColor((props.resolvedSelected as any)?.fillColor)"
-                @input="(e: Event) => updateColor('fillColor', (e.target as HTMLInputElement).value, true)"
-                class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                aria-label="Fill color"
+                @update:model-value="value => updateColor('fillColor', value, true)"
               />
               <span class="text-xs font-mono uppercase">{{
                 toHtmlColor((props.resolvedSelected as any)?.fillColor)
@@ -362,11 +358,10 @@ const updateBoolean = (key: string, value: boolean) => {
           <div class="space-y-1">
             <span class="text-xs text-muted-foreground">{{ t("properties.style.strokeColor") }}</span>
             <div class="flex items-center gap-2">
-              <Input
-                type="color"
+              <ColorPicker
                 :model-value="toHtmlColor((props.resolvedSelected as any)?.borderColor)"
-                @input="(e: Event) => updateColor('borderColor', (e.target as HTMLInputElement).value, true)"
-                class="h-7 w-8 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+                aria-label="Border color"
+                @update:model-value="value => updateColor('borderColor', value, true)"
               />
               <span class="text-xs font-mono uppercase">{{
                 toHtmlColor((props.resolvedSelected as any)?.borderColor)

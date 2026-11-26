@@ -351,7 +351,7 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
           sourceInMs: initialResizeSourceInMs.value + tempState.startTime - initialResizeStartTime.value
         });
       } else {
-        timelineStore.updateClip(resizingClipId.value, updates);
+        timelineStore.trimClip(resizingClipId.value, updates.startTime, updates.duration);
       }
     }
 

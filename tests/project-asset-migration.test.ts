@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeProjectData } from "../src/core/projectSchema";
+import { normalizeProjectData, PROJECT_VERSION } from "../src/core/projectSchema";
+import { compileTimelineToBas } from "../src/core/compiler";
 
 const legacy = () => ({
   version: 2,
@@ -20,7 +21,7 @@ const legacy = () => ({
 
 test("legacy assets and repeated timeline references migrate without losing appearance or offline audio", () => {
   const project = normalizeProjectData(legacy());
-  assert.equal(project.version, 4);
+  assert.equal(project.version, PROJECT_VERSION);
   const text = project.assets.find(asset => asset.id === "text-1");
   assert.equal(text?.type, "text");
   if (text?.type === "text") assert.equal(text.danmu.content, "Hello");
@@ -32,6 +33,62 @@ test("legacy assets and repeated timeline references migrate without losing appe
   assert.equal(clips[1]?.resourceId, "text-1");
   assert.equal(clips[0]?.kind === "resource" && clips[0].overrides?.content, "Hello");
   assert.equal(clips[1]?.kind === "resource" && clips[1].overrides?.x, "5.25%");
+});
+
+test("v3 files with only assets preserve bins, clip overrides, nested timing and offline audio", () => {
+  const text = { id: "text-1", type: "text", content: "Source" };
+  const audio = { id: "audio-1", name: "offline.wav", sourcePath: "C:/offline.wav", duration: 5000 };
+  const bins = [{ id: "bin", name: "Captions", parentId: null }];
+  const location = { kind: "external", path: audio.sourcePath };
+  const danmuTrack = { type: "danmu", visible: true, locked: false };
+  const project = normalizeProjectData({
+    version: 3,
+    bins,
+    assets: [
+      { id: text.id, type: "text", binId: "bin", danmu: text },
+      { id: audio.id, type: "audio-file", binId: null, audio, location }
+    ],
+    tracks: [
+      {
+        ...danmuTrack, id: "root", name: "Root", clips: [{
+          kind: "group", id: "group", trackId: "root", startTime: 750, duration: 850,
+          tracks: [{
+            ...danmuTrack, id: "nested", name: "Nested", clips: [{
+              kind: "resource", id: "caption", resourceId: text.id, trackId: "nested", startTime: 250,
+              duration: 600, overrides: { content: "Instance" }
+            }]
+          }]
+        }]
+      },
+      {
+        id: "sound", name: "Sound", type: "audio", visible: true, locked: false, clips: [{
+          kind: "resource", id: "audio-clip", resourceId: audio.id, trackId: "sound", startTime: 0,
+          duration: 1200, sourceInMs: 450
+        }]
+      }
+    ]
+  });
+  assert.equal(project.version, PROJECT_VERSION);
+  assert.deepEqual(project.bins, bins);
+  assert.deepEqual(project.danmus, [text]);
+  assert.equal(project.assets[0]?.binId, "bin");
+  assert.deepEqual(project.audioMeta, [audio]);
+  assert.deepEqual(project.assets[1]?.type === "audio-file" && project.assets[1].location, location);
+  const group = project.tracks[0]?.clips[0];
+  assert.ok(group?.kind === "group");
+  assert.equal(group.startTime, 750);
+  const caption = group.tracks[0]?.clips[0];
+  assert.ok(caption?.kind === "resource");
+  assert.equal(caption.startTime, 250);
+  assert.deepEqual(caption.overrides, { content: "Instance" });
+  assert.equal(project.tracks[1]?.clips[0]?.sourceInMs, 450);
+  assert.equal(project.timeline.duration, 1600);
+  const script = compileTimelineToBas(project.tracks, project.danmus, {
+    audioResourceIds: project.audioMeta.map(item => item.id)
+  });
+  assert.match(script, /set obj_caption \{\} 1s/);
+  assert.match(script, /content = "Instance"/);
+  assert.doesNotMatch(script, /offline|audio|Source/);
 });
 
 test("future projects cannot be silently opened and rewritten by an older version", () => {

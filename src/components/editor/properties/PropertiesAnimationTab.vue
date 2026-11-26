@@ -5,6 +5,7 @@ import { Plus, Trash2 } from "lucide-vue-next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import ColorPicker from "@/components/ui/color-picker/ColorPicker.vue";
 import { isCoordinateField, type CoordinateReferenceSize } from "@/core/coordinates";
 import {
   BASE_KEYFRAME_ID,
@@ -454,11 +455,10 @@ const setKeyframePercentageMode = (field: KeyframePercentageField, enabled: bool
         <div v-if="props.selected.type === 'text'" class="space-y-1">
           <Label class="text-xs text-muted-foreground">{{ t("properties.animation.textColor") }}</Label>
           <div class="flex items-center gap-2">
-            <Input
-              type="color"
+            <ColorPicker
               :model-value="toHtmlColor(activeKeyframeProperties.color)"
-              @input="(e: Event) => updateKeyframeColor('color', (e.target as HTMLInputElement).value)"
-              class="h-8 w-9 p-0 border-0 overflow-hidden cursor-pointer shrink-0"
+              aria-label="Keyframe text color"
+              @update:model-value="value => updateKeyframeColor('color', value)"
             />
             <Input
               :model-value="activeKeyframeProperties.color"

@@ -30,12 +30,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const props = defineProps<{ projectId: string; offlineAudio?: SerializedAudioMetadata[] }>();
-
+import EffectsLibrary from "./effects/EffectsLibrary.vue";
 import ResourcesSidebar from "./resources/ResourcesSidebar.vue";
 import ResourcesHeader from "./resources/ResourcesHeader.vue";
 import ResourcesList from "./resources/ResourcesList.vue";
 import { useContextMenuStore } from "@/stores/contextMenu";
+
+const props = defineProps<{ projectId: string; offlineAudio?: SerializedAudioMetadata[] }>();
 
 const danmuStore = useDanmuStore();
 const timelineStore = useTimelineStore();
@@ -438,8 +439,9 @@ const toggleResourceLayout = () => {
     <!-- Vertical Tabs -->
     <ResourcesSidebar v-model="activeTab" />
 
+    <EffectsLibrary v-if="activeTab === 'effects'" />
     <!-- List Content -->
-    <div class="relative flex-1 flex flex-col min-w-0 bg-background overflow-hidden">
+    <div v-else class="relative flex-1 flex flex-col min-w-0 bg-background overflow-hidden">
       <div
         v-if="isAudioFileDrag"
         class="absolute inset-1 z-10 flex items-center justify-center border border-dashed border-primary bg-primary/10 text-primary pointer-events-none"

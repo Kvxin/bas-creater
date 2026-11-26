@@ -15,6 +15,8 @@ import { useContextMenuStore } from "@/stores/contextMenu";
 import { useTimelinePlayhead } from "@/composables/useTimelinePlayhead";
 import { useTimelineInteractions } from "@/composables/useTimelineInteractions";
 import { BASE_KEYFRAME_ID, normalizeKeyframes } from "@/core/keyframes";
+import { draggedEffect, EFFECT_DRAG_TYPE, effectCatalog } from "@/effects/registry";
+import { effectText, isDynamicEffect, matchesEffect, type EffectInstance } from "@/core/effects";
 import { runSplitAction } from "@/utils/splitAction";
 import type { TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
 import AudioWaveform from "./audio/AudioWaveform.vue";
@@ -23,7 +25,7 @@ import { dBToLinear } from "@/utils/audio/audio-math";
 import { Input } from "@/components/ui/input";
 import { WAVEFORM_GAIN_SAMPLE_COUNT } from "@/utils/audio/constants";
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const timelineStore = useTimelineStore();
 const danmuStore = useDanmuStore();
@@ -188,6 +190,7 @@ const handleScroll = (e: Event) => {
   scrollLeft.value = target.scrollLeft;
   timelineStore.timelineScroll = { left: target.scrollLeft, top: target.scrollTop };
   trackHeadersRef.value?.setScrollTop(target.scrollTop);
+  effectTrackMenu.value = null;
 };
 
 // 缩放控制：缩放前后保持 Playhead 在视口中的横向位置不变。
@@ -227,6 +230,177 @@ const currentTimeDisplay = computed(() => {
     "0"
   )}:${String(s).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
 });
+
+const effectHoverId = ref<string | null>(null);
+const effectDropError = ref("");
+const effectTrackMenu = ref<{ trackId: string; x: number; y: number } | null>(null);
+const effectDragMode = ref<"move" | "left" | "right" | null>(null);
+const effectDragClipId = ref<string | null>(null);
+const effectDragId = ref<string | null>(null);
+const effectDragStartX = ref(0);
+const effectDragInitialSpan = ref<[number, number]>([0, 0]);
+const effectDragSpan = ref<[number, number]>([0, 0]);
+
+const getEffectTitle = (effect: EffectInstance) => {
+  const plugin = effectCatalog.value?.plugins.find(item => matchesEffect(item, effect));
+  return plugin ? effectText(plugin.title, locale.value) : effect.pluginId;
+};
+
+const getEffectSpan = (effect: EffectInstance): [number, number] =>
+  effectDragId.value === effect.id ? effectDragSpan.value : effect.span;
+
+const getEffectSpanStyle = (clip: TimelineClip, effect: EffectInstance) => {
+  const [start, end] = getEffectSpan(effect);
+  return {
+    left: `${(start / Math.max(1, clip.duration)) * 100}%`,
+    width: `${((end - start) / Math.max(1, clip.duration)) * 100}%`,
+    minWidth: "10px"
+  };
+};
+
+/** 只在区间足够宽时显示名称，避免短特效里挤出一两个字。 */
+const getEffectSpanLabel = (clip: TimelineClip, effect: EffectInstance) => {
+  const [start, end] = getEffectSpan(effect);
+  const widthPx = ((end - start) / Math.max(1, clip.duration)) * (clip.duration / 1000) * pixelsPerSecond.value;
+  return widthPx >= 44 ? getEffectTitle(effect) : "";
+};
+
+const isEditingEffect = (clip: TimelineClip, effect: EffectInstance) =>
+  timelineStore.editingEffect?.clip.id === clip.id && timelineStore.editingEffect.effect.id === effect.id;
+
+const selectEffect = (clip: TimelineClip, effect: EffectInstance) => {
+  timelineStore.setSelectedClip(clip.id);
+  timelineStore.setEditingEffect(clip.id, effect.id);
+  effectTrackMenu.value = null;
+};
+
+/** 轨道内带有特效的资源片段，用于轨道头的 FX 列表。 */
+const getTrackEffectClips = (track: TimelineTrack) =>
+  track.clips.filter(clip => clip.kind === "resource" && clip.effects?.length);
+
+const getTrackEffectCount = (track: TimelineTrack) =>
+  getTrackEffectClips(track).reduce((count, clip) => count + (clip.effects?.length ?? 0), 0);
+
+const trackEffectMenuTrack = computed(
+  () => timelineStore.tracks.find(track => track.id === effectTrackMenu.value?.trackId) ?? null
+);
+
+const toggleTrackEffectMenu = (event: MouseEvent, track: TimelineTrack) => {
+  if (getTrackEffectCount(track) === 0) return;
+  if (effectTrackMenu.value?.trackId === track.id) {
+    effectTrackMenu.value = null;
+    return;
+  }
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  effectTrackMenu.value = {
+    trackId: track.id,
+    x: rect.right + 8,
+    y: Math.max(8, Math.min(rect.top - 4, window.innerHeight - 260))
+  };
+};
+
+const startDragEffect = (e: MouseEvent, clip: TimelineClip, effect: EffectInstance, mode: "move" | "left" | "right") => {
+  if (
+    clip.kind !== "resource" ||
+    !isDynamicEffect(effect) ||
+    timelineStore.tracks.find(track => track.clips.some(item => item.id === clip.id))?.locked
+  ) {
+    return;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  selectEffect(clip, effect);
+  effectDragMode.value = mode;
+  effectDragClipId.value = clip.id;
+  effectDragId.value = effect.id;
+  effectDragStartX.value = e.clientX;
+  effectDragInitialSpan.value = [...effect.span];
+  effectDragSpan.value = [...effect.span];
+  document.body.style.cursor = mode === "move" ? "grabbing" : mode === "left" ? "w-resize" : "e-resize";
+  window.addEventListener("mousemove", onDragEffect);
+  window.addEventListener("mouseup", stopDragEffect);
+};
+
+const onDragEffect = (e: MouseEvent) => {
+  if (!effectDragMode.value || !effectDragClipId.value || !effectDragId.value) return;
+  const clip = timelineStore.tracks.flatMap(track => track.clips).find(item => item.id === effectDragClipId.value);
+  if (!clip || clip.kind !== "resource") return;
+  const deltaMs = ((e.clientX - effectDragStartX.value) / pixelsPerSecond.value) * 1000;
+  const [initialStart, initialEnd] = effectDragInitialSpan.value;
+  const minDuration = Math.min(100, clip.duration);
+  let start = initialStart;
+  let end = initialEnd;
+  if (effectDragMode.value === "move") {
+    const duration = initialEnd - initialStart;
+    start = Math.max(0, Math.min(clip.duration - duration, initialStart + deltaMs));
+    end = start + duration;
+  } else if (effectDragMode.value === "left") {
+    start = Math.max(0, Math.min(initialEnd - minDuration, initialStart + deltaMs));
+  } else {
+    end = Math.min(clip.duration, Math.max(initialStart + minDuration, initialEnd + deltaMs));
+  }
+  effectDragSpan.value = [Math.round(start), Math.round(end)];
+};
+
+const stopDragEffect = () => {
+  if (effectDragClipId.value && effectDragId.value) {
+    try {
+      timelineStore.updateEffectSpan(effectDragClipId.value, effectDragId.value, effectDragSpan.value);
+    } catch (error) {
+      effectDropError.value = error instanceof Error ? error.message : String(error);
+    }
+  }
+  effectDragMode.value = null;
+  effectDragClipId.value = null;
+  effectDragId.value = null;
+  document.body.style.cursor = "";
+  window.removeEventListener("mousemove", onDragEffect);
+  window.removeEventListener("mouseup", stopDragEffect);
+};
+
+const handleDocumentMouseDown = (e: MouseEvent) => {
+  if (!(e.target as HTMLElement).closest("[data-effect-menu]")) effectTrackMenu.value = null;
+};
+
+watch(draggedEffect, plugin => {
+  effectHoverId.value = null;
+  if (plugin) effectDropError.value = "";
+});
+
+const isEffectDrag = (event: DragEvent) => event.dataTransfer?.types.includes(EFFECT_DRAG_TYPE);
+
+function trackDragOver(event: DragEvent) {
+  event.preventDefault();
+  if (isEffectDrag(event) && event.dataTransfer) {
+    effectHoverId.value = null;
+    event.dataTransfer.dropEffect = "none";
+  }
+}
+
+function clipDragOver(event: DragEvent, id: string) {
+  if (!isEffectDrag(event) || !event.dataTransfer) return;
+  event.stopPropagation();
+  event.preventDefault();
+  const target = timelineStore.getEffectTarget(id);
+  const compatible = target && draggedEffect.value?.targets.includes(target.resource.type);
+  effectHoverId.value = compatible ? id : null;
+  event.dataTransfer.dropEffect = compatible ? "copy" : "none";
+}
+
+function dropEffect(event: DragEvent, id: string) {
+  if (!isEffectDrag(event)) return;
+  event.preventDefault();
+  event.stopPropagation();
+  effectHoverId.value = null;
+  const pluginId = event.dataTransfer?.getData(EFFECT_DRAG_TYPE);
+  const plugin = effectCatalog.value?.plugins.find(item => item.id === pluginId);
+  if (!plugin) return;
+  try {
+    timelineStore.attachEffect(id, plugin);
+  } catch (error) {
+    effectDropError.value = error instanceof Error ? error.message : String(error);
+  }
+}
 
 const handleDrop = (event: DragEvent, trackId: string) => {
   const data = event.dataTransfer?.getData("application/json");
@@ -345,10 +519,13 @@ const handleKeyDown = (e: KeyboardEvent) => {
 
 onMounted(() => {
   window.addEventListener("keydown", handleKeyDown);
+  window.addEventListener("mousedown", handleDocumentMouseDown);
 });
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleKeyDown);
+  window.removeEventListener("mousedown", handleDocumentMouseDown);
+  stopDragEffect();
 });
 
 watch(
@@ -358,6 +535,7 @@ watch(
     editingGroupId.value = null;
     cancelAllInteractions();
     stopDragPlayhead();
+    stopDragEffect();
     await nextTick();
     if (timelineContentRef.value) {
       timelineContentRef.value.scrollLeft = timelineStore.timelineScroll.left;
@@ -427,6 +605,7 @@ function handleVolumeSelect(clipId: string) {
 
 <template>
   <div class="panel workbench-panel h-full w-full overflow-hidden flex flex-col select-none" data-ui="timeline-panel">
+    <p v-if="effectDropError" role="alert" class="px-3 py-1 text-xs text-destructive">{{ effectDropError }}</p>
     <TimelineToolbar :current-time-display="currentTimeDisplay" @zoom-in="zoomIn" @zoom-out="zoomOut" />
 
     <!-- 头部区域 (Header Row) -->
@@ -462,7 +641,12 @@ function handleVolumeSelect(clipId: string) {
       <TimelineTrackHeaders
         ref="trackHeadersRef"
         :tracks="timelineStore.tracks"
+        :selected-track-id="timelineStore.selectedTrackId"
+        :effect-menu-track-id="effectTrackMenu?.trackId ?? null"
         :get-track-type="getTrackType"
+        :get-track-effect-count="getTrackEffectCount"
+        @select-track="timelineStore.selectTrack"
+        @toggle-track-effect-menu="toggleTrackEffectMenu"
         @toggle-expand="timelineStore.toggleTrackExpand"
         @toggle-visibility="timelineStore.toggleTrackVisibility"
         @toggle-mute="timelineStore.toggleTrackMute"
@@ -471,45 +655,43 @@ function handleVolumeSelect(clipId: string) {
         @track-contextmenu="(event, trackId) => handleContextMenu(event, 'track', trackId)"
       />
 
-      <!-- 右侧：时间轴内容 (主滚动容器) -->
+      <!-- 右侧：时间轴内容区 (主滚动区域) -->
       <div
-        class="flex-1 min-h-0 min-w-0 flex flex-col overflow-auto scrollbar-thin relative bg-timeline"
+        class="flex-1 overflow-auto relative bg-timeline"
         ref="timelineContentRef"
-        data-ui="timeline-content"
+        data-ui="timeline-tracks"
         @scroll="handleScroll"
+        @click="handleTimelineClick"
+        @contextmenu="handleContextMenu($event, 'background')"
       >
-        <!-- Tracks Container -->
-        <div
-          class="timeline-track-surface relative shrink-0"
-          :style="{ width: totalWidth + 'px' }"
-          @mousedown.self="handleTimelineClick"
-          @contextmenu.prevent="handleContextMenu($event, 'background')"
-        >
-          <!-- 轨道行 -->
+        <div class="timeline-track-surface relative" :style="{ width: totalWidth + 'px' }">
+          <!-- 轨道列表 -->
           <template v-for="track in timelineStore.tracks" :key="track.id">
+            <!-- Main Track Row -->
             <div
-              class="h-10 relative group border-b border-divider hover:bg-accent/35 transition-colors"
+              class="h-10 relative transition-colors border-b border-divider"
               :class="{
-                'opacity-55': !track.visible,
-                'bg-primary/10 ring-1 ring-inset ring-primary/30':
+                'opacity-45 saturate-50': !track.visible,
+                'bg-primary/10 ring-1 ring-inset ring-primary/35':
                   isDragTargetTrack(track) && canDropDraggedClipOnTrack(track),
                 'bg-destructive/10 ring-1 ring-inset ring-destructive/30': isInvalidDragTargetTrack(track)
               }"
               :data-timeline-track-id="track.id"
-              @dragover.prevent
+              @dragover="trackDragOver"
               @drop="handleDrop($event, track.id)"
             >
               <!-- Clips -->
               <div
                 v-for="clip in track.clips"
                 :key="clip.id"
-                class="absolute top-1 bottom-1 rounded-sm border text-xs flex items-center px-2 text-white overflow-hidden cursor-move select-none transition-[filter,outline-color] hover:brightness-110 group/audio"
+                class="absolute top-1 bottom-1 rounded-sm border text-xs flex items-center px-2 text-white overflow-visible cursor-move select-none transition-[filter,outline-color] hover:brightness-110 group/audio"
                 :class="{
                   'outline outline-1 outline-primary outline-offset-0 z-10': timelineStore.selectedClipIds.includes(
                     clip.id
                   ),
                   'outline outline-2 outline-primary z-20':
-                    dragTargetGroupId === clip.id && canDropDraggedClipIntoGroup(clip.id),
+                    effectHoverId === clip.id ||
+                    (dragTargetGroupId === clip.id && canDropDraggedClipIntoGroup(clip.id)),
                   'outline outline-2 outline-destructive z-20':
                     dragTargetGroupId === clip.id && !canDropDraggedClipIntoGroup(clip.id),
                   'opacity-35': isDraggedClipLeavingTrack(clip)
@@ -520,6 +702,9 @@ function handleVolumeSelect(clipId: string) {
                 :title="
                   clip.kind === 'group' && dragTargetGroupId === clip.id ? t('groups.dropIntoHint') : getClipName(clip)
                 "
+                @dragover="clipDragOver($event, clip.id)"
+                @dragleave="effectHoverId === clip.id && (effectHoverId = null)"
+                @drop="dropEffect($event, clip.id)"
                 @click.stop="handleClipClick(clip, $event)"
                 @dblclick.stop="clip.kind === 'group' && timelineStore.enterGroup(clip.id)"
                 @mousedown.stop="startDragClip($event, clip)"
@@ -554,6 +739,58 @@ function handleVolumeSelect(clipId: string) {
                 />
 
                 <FolderOpen v-if="clip.kind === 'group'" class="size-3 shrink-0 mr-1" />
+                <div
+                  v-if="clip.kind === 'resource' && clip.effects?.length"
+                  class="pointer-events-none absolute inset-x-0 bottom-[3px] z-30 h-2.5"
+                  data-effect-rail
+                >
+                  <div class="absolute inset-x-0 bottom-0 h-px rounded-full bg-white/15"></div>
+                  <div
+                    v-for="effect in clip.effects"
+                    :key="`span-${effect.id}`"
+                    class="pointer-events-auto absolute rounded-[2px] border transition-colors duration-150"
+                    :class="
+                      isEditingEffect(clip, effect)
+                        ? 'inset-y-0 z-10 flex items-center border-primary/80 bg-primary/70'
+                        : 'bottom-[3px] top-[3px] z-0 border-transparent bg-white/30 hover:bg-white/55'
+                    "
+                    :style="getEffectSpanStyle(clip, effect)"
+                    :data-effect-span="effect.id"
+                    :title="
+                      isEditingEffect(clip, effect)
+                        ? t('effects.editSpan', { name: getEffectTitle(effect) })
+                        : t('effects.spanLabel', { name: getEffectTitle(effect) })
+                    "
+                    @mousedown.stop.prevent="
+                      isEditingEffect(clip, effect)
+                        ? startDragEffect($event, clip, effect, 'move')
+                        : selectEffect(clip, effect)
+                    "
+                  >
+                    <template v-if="isEditingEffect(clip, effect)">
+                      <span
+                        v-if="getEffectSpanLabel(clip, effect)"
+                        class="pointer-events-none min-w-0 truncate px-1 text-[9px] font-medium leading-none text-white/90"
+                      >
+                        {{ getEffectSpanLabel(clip, effect) }}
+                      </span>
+                      <span
+                        class="absolute -inset-y-1 left-0 w-2 cursor-w-resize"
+                        :aria-label="t('effects.editSpan', { name: getEffectTitle(effect) })"
+                        @mousedown.stop.prevent="startDragEffect($event, clip, effect, 'left')"
+                      >
+                        <span class="absolute inset-y-1.5 left-0 w-0.5 rounded-full bg-white/85"></span>
+                      </span>
+                      <span
+                        class="absolute -inset-y-1 right-0 w-2 cursor-e-resize"
+                        :aria-label="t('effects.editSpan', { name: getEffectTitle(effect) })"
+                        @mousedown.stop.prevent="startDragEffect($event, clip, effect, 'right')"
+                      >
+                        <span class="absolute inset-y-1.5 right-0 w-0.5 rounded-full bg-white/85"></span>
+                      </span>
+                    </template>
+                  </div>
+                </div>
                 <Input
                   v-if="editingGroupId === clip.id"
                   v-model="editingGroupName"
@@ -738,6 +975,44 @@ function handleVolumeSelect(clipId: string) {
         }}
       </div>
     </div>
+
+    <!-- 轨道特效列表：固定定位，避免被轨道头容器的 overflow 裁剪 -->
+    <Teleport to="body">
+      <div
+        v-if="effectTrackMenu && trackEffectMenuTrack && getTrackEffectCount(trackEffectMenuTrack) > 0"
+        class="fixed z-50 max-h-72 w-60 overflow-y-auto rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md"
+        :style="{ left: effectTrackMenu.x + 'px', top: effectTrackMenu.y + 'px' }"
+        data-effect-menu
+        @mousedown.stop
+      >
+        <p class="px-2 pb-1 pt-1 text-[10px] uppercase tracking-[0.08em] text-tertiary">
+          {{ t("effects.applied") }}
+        </p>
+        <template v-for="clip in getTrackEffectClips(trackEffectMenuTrack)" :key="clip.id">
+          <p class="flex items-baseline gap-2 px-2 pb-1 pt-2 text-[10px] text-tertiary">
+            <span class="min-w-0 flex-1 truncate font-medium text-muted-foreground">{{ getClipName(clip) }}</span>
+            <span class="shrink-0 font-mono tabular-nums">{{ formatTime(clip.startTime).str }}</span>
+          </p>
+          <button
+            v-for="effect in clip.effects ?? []"
+            :key="effect.id"
+            type="button"
+            class="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+            :class="{ 'bg-accent text-accent-foreground': isEditingEffect(clip, effect) }"
+            @click.stop="selectEffect(clip, effect)"
+          >
+            <span
+              class="size-1.5 shrink-0 rounded-full"
+              :class="isEditingEffect(clip, effect) ? 'bg-primary' : 'bg-tertiary/60'"
+            ></span>
+            <span class="min-w-0 flex-1 truncate">{{ getEffectTitle(effect) }}</span>
+            <span class="shrink-0 font-mono text-[10px] tabular-nums text-tertiary">
+              {{ formatTime(effect.span[1] - effect.span[0]).str }}
+            </span>
+          </button>
+        </template>
+      </div>
+    </Teleport>
   </div>
 </template>
 

@@ -2,10 +2,12 @@
 import { isCoordinateField } from "@/core/coordinates";
 import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { Settings, FileText, Move, Palette, Sparkles } from "lucide-vue-next";
+import { Settings, FileText, Move, Palette, Sparkles, Layers2 } from "lucide-vue-next";
 import { useDanmuStore } from "@/stores/danmu";
 import { useTimelineStore } from "@/stores/timeline";
 import { useAudioStore } from "@/stores/audio";
+import EffectProperties from "./effects/EffectProperties.vue";
+import { loadEffects } from "@/effects/registry";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AnyDanmu } from "@/types/danmu";
@@ -156,7 +158,7 @@ const updateGroupStart = (value: string | number) => {
   }
 };
 
-type PropertyTabId = "identity" | "transform" | "style" | "animation";
+type PropertyTabId = "identity" | "transform" | "style" | "animation" | "effects";
 
 const activeTab = ref<PropertyTabId>("identity");
 
@@ -181,9 +183,24 @@ const propertyTabs = computed(
         label: t("properties.tabs.animation.label"),
         title: t("properties.tabs.animation.title"),
         icon: Sparkles
-      }
+      },
+      ...(selectedClip.value?.kind === "resource"
+        ? ([{ id: "effects", label: t("effects.title"), title: t("effects.applied"), icon: Layers2 }] as const)
+        : [])
     ] as const
 );
+
+watch(
+  () => selectedClip.value?.effects?.map(effect => effect.id) ?? [],
+  (ids, previous) => {
+    if (ids.some(id => !previous.includes(id))) activeTab.value = "effects";
+    if (activeTab.value === "effects" && selectedClip.value?.kind !== "resource") activeTab.value = "identity";
+  }
+);
+
+watch(activeTab, tab => {
+  if (tab === "effects") void loadEffects();
+});
 
 watch(selectedClip, clip => {
   if (clip && activeTab.value === "animation" && !timelineStore.selectedKeyframeId) {
@@ -386,6 +403,28 @@ const setPercentageMode = (field: PercentageField, enabled: boolean) => {
     <!-- 常规弹幕资源编辑模式 -->
     <div v-else-if="selected" class="flex-1 min-h-0 flex overflow-hidden">
       <div class="min-w-0 flex-1 overflow-y-auto overflow-x-hidden scrollbar-hidden p-3">
+        <section
+          v-if="activeTab === 'effects' && selectedClip?.kind === 'resource'"
+          id="properties-tab-effects"
+          role="tabpanel"
+        >
+          <h3 class="text-xs font-semibold text-foreground">{{ t("effects.applied") }}</h3>
+          <p v-if="!selectedClip.effects?.length" class="mt-2 text-xs text-muted-foreground">
+            {{ t("effects.noEffects") }}
+          </p>
+          <ol v-else class="divide-y divide-divider">
+            <EffectProperties
+              v-for="(effect, index) in selectedClip.effects"
+              :key="effect.id"
+              :clip-id="selectedClip.id"
+              :effect="effect"
+              :first="index === 0"
+              :last="index === selectedClip.effects.length - 1"
+              :locked="!timelineStore.getEffectTarget(selectedClip.id)"
+            />
+          </ol>
+        </section>
+
         <p v-if="effectiveSelection.error" role="alert" class="mb-3 text-xs text-destructive">
           无法获取混合单位的参照尺寸，当前值不可编辑。
         </p>

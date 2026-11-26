@@ -16,6 +16,7 @@
     "build-only": "vite build",
     "preview": "vite preview",
     "type-check": "vue-tsc --build",
+    "test:effects": "node --import tsx --test tests/effect-plugins.test.ts",
     "test:updater": "node --import tsx --test tests/updater-manifest.test.mjs tests/app-update.test.ts",
     "test:window-controls": "node --import tsx --test tests/window-preferences.test.ts",
     "test:compiler": "node --import tsx --test tests/danmu-properties.test.ts tests/compiler-golden.test.ts tests/bas-import-golden.test.ts tests/bas-import.test.ts tests/legacy-animation-migration.test.ts",

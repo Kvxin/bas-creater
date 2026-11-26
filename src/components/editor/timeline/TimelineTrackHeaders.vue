@@ -18,10 +18,15 @@ import type { TimelineTrack, TimelineTrackType } from "@/types/timeline";
 
 const props = defineProps<{
   tracks: TimelineTrack[];
+  selectedTrackId: string | null;
+  effectMenuTrackId: string | null;
   getTrackType: (track: TimelineTrack) => TimelineTrackType | null;
+  getTrackEffectCount: (track: TimelineTrack) => number;
 }>();
 
 const emit = defineEmits<{
+  (e: "select-track", trackId: string): void;
+  (e: "toggle-track-effect-menu", event: MouseEvent, track: TimelineTrack): void;
   (e: "toggle-expand", trackId: string): void;
   (e: "toggle-visibility", trackId: string): void;
   (e: "toggle-mute", trackId: string): void;
@@ -88,8 +93,11 @@ const toggleTrackPrimaryAction = (track: TimelineTrack) => {
     <!-- 轨道头列表 -->
     <template v-for="track in props.tracks" :key="track.id">
       <div
-        class="h-10 grid grid-cols-[1rem_minmax(0,1fr)_1.25rem_1.25rem_1.25rem_1.25rem] items-center gap-1 px-2 text-xs group border-b border-divider hover:bg-accent/50 transition-colors shrink-0"
-        :class="{ 'text-muted-foreground/55': !track.visible }"
+        class="h-10 grid grid-cols-[1rem_minmax(0,1fr)_1.25rem_1.25rem_1.25rem_1.25rem_1.25rem] items-center gap-0.5 px-2 text-xs group border-b border-divider hover:bg-accent/50 transition-colors shrink-0"
+        :class="{
+          'text-muted-foreground/55': !track.visible,
+          'bg-secondary': props.selectedTrackId === track.id
+        }"
         :data-track-header-id="track.id"
         @contextmenu="emit('track-contextmenu', $event, track.id)"
       >
@@ -101,12 +109,16 @@ const toggleTrackPrimaryAction = (track: TimelineTrack) => {
           <component :is="track.expanded ? ChevronDown : ChevronRight" class="size-3 text-muted-foreground" />
         </button>
 
-        <div
-          class="min-w-0 truncate text-left font-medium text-muted-foreground group-hover:text-foreground"
+        <button
+          type="button"
+          class="min-w-0 truncate text-left font-medium text-muted-foreground hover:text-foreground"
+          :aria-label="t('effects.selectTrack', { name: track.name })"
+          :aria-pressed="props.selectedTrackId === track.id"
           :title="track.name"
+          @click="emit('select-track', track.id)"
         >
           {{ track.name }}
-        </div>
+        </button>
         <button
           class="size-5 inline-flex items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
           :class="{ 'text-primary bg-primary/10': isTrackPrimaryActive(track) }"
@@ -115,6 +127,27 @@ const toggleTrackPrimaryAction = (track: TimelineTrack) => {
           @click.stop="toggleTrackPrimaryAction(track)"
         >
           <component :is="getTrackPrimaryIcon(track)" class="size-3" />
+        </button>
+        <button
+          type="button"
+          class="size-5 inline-flex items-center justify-center gap-px rounded-sm border text-[9px] font-semibold tracking-tight transition-colors"
+          :class="
+            props.getTrackEffectCount(track) > 0
+              ? 'border-border/80 bg-background/60 text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground'
+              : 'border-border/40 bg-transparent text-muted-foreground/30'
+          "
+          :disabled="props.getTrackEffectCount(track) === 0"
+          :title="t('effects.trackMenu', { n: props.getTrackEffectCount(track) })"
+          :aria-label="t('effects.trackMenu', { n: props.getTrackEffectCount(track) })"
+          :aria-expanded="props.effectMenuTrackId === track.id"
+          data-effect-menu
+          @mousedown.stop
+          @click.stop="emit('toggle-track-effect-menu', $event, track)"
+        >
+          <span aria-hidden="true">FX</span>
+          <span v-if="props.getTrackEffectCount(track)" class="tabular-nums">{{
+            props.getTrackEffectCount(track)
+          }}</span>
         </button>
         <span
           class="size-5 inline-flex items-center justify-center rounded-sm border border-border/70 bg-background/80 text-muted-foreground"

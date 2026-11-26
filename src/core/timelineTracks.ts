@@ -1,6 +1,7 @@
 import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 import type { TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
+import { sliceEffects } from "@/core/effects";
 import { normalizeKeyframes } from "@/core/keyframes";
 import { createTimelineId } from "@/core/timelineGroups";
 
@@ -72,7 +73,10 @@ export const applyClipUpdates = (clip: TimelineClip, updates: Partial<TimelineCl
   if (clipDuration !== undefined) {
     clip.duration = Math.max(0, clipDuration);
     clip.keyframes = normalizeKeyframes(clip.keyframes, clip.duration);
+    // 特效保持自身时长，只截掉超出新终点的部分；左侧裁剪由 trimClip 传入已平移的 effects。
+    if (clip.effects && !("effects" in updates)) clip.effects = sliceEffects(clip.effects, 0, clip.duration);
   }
+  if (clip.effects && !clip.effects.length) delete clip.effects;
 };
 
 export const cloneClip = (source: TimelineClip, trackId: string): TimelineClip => {
@@ -89,6 +93,7 @@ export const cloneClip = (source: TimelineClip, trackId: string): TimelineClip =
         for (const child of track.clips) regenerate(child, track.id);
       }
     } else {
+      for (const effect of clip.effects ?? []) effect.id = createTimelineId("fx");
       for (const keyframe of clip.keyframes ?? []) keyframe.id = createTimelineId("kf");
     }
   };

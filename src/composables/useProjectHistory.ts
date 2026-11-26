@@ -18,6 +18,7 @@ type Snapshot = {
   bins: ProjectBin[];
   loadedAudioIds: string[];
   selectedDanmuId: string | null;
+  selectedTrackId: string | null;
   selectedClipIds: string[];
   selectedClipId: string | null;
   selectedKeyframeId: string | null;
@@ -55,6 +56,7 @@ export function useProjectHistory(isHydrating: Ref<boolean>, projectId: string) 
     bins: assets.bins,
     loadedAudioIds: audio.audioResources.map((resource) => resource.id),
     selectedDanmuId: danmu.selectedId,
+    selectedTrackId: timeline.selectedTrackId,
     selectedClipIds: timeline.selectedClipIds,
     selectedClipId: timeline.selectedClipId,
     selectedKeyframeId: timeline.selectedKeyframeId,
@@ -128,7 +130,11 @@ export function useProjectHistory(isHydrating: Ref<boolean>, projectId: string) 
       }
       timeline.rootTracks = state.tracks;
       timeline.activeGroupPath = state.activeGroupPath;
-      timeline.setSelectedClips(state.selectedClipIds, state.selectedClipId);
+      if (state.selectedTrackId && !state.selectedClipIds.length) {
+        timeline.selectTrack(state.selectedTrackId);
+      } else {
+        timeline.setSelectedClips(state.selectedClipIds, state.selectedClipId);
+      }
       const keep = new Set(resources);
       for (const resource of audio.audioResources) if (!keep.has(resource)) URL.revokeObjectURL(resource.url);
       audio.audioResources = resources;

@@ -7,6 +7,8 @@ import ts from "typescript";
 const srcDir = path.join(import.meta.dirname, "../src");
 const coreDir = path.join(srcDir, "core");
 const typesDir = path.join(srcDir, "types");
+const effectsDir = path.join(srcDir, "effects");
+const effectsRegistryFile = path.join(effectsDir, "registry.ts");
 
 const listFiles = (dir: string): string[] =>
   fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -43,8 +45,6 @@ const importsOfSource = (sourceText: string, fileName = "module.ts"): string[] =
   return specifiers;
 };
 
-const importsOf = (file: string): string[] => importsOfSource(fs.readFileSync(file, "utf8"), file);
-
 const relative = (file: string) => path.relative(srcDir, file).split(path.sep).join("/");
 
 const isWithinDir = (target: string, dir: string): boolean => {
@@ -52,24 +52,36 @@ const isWithinDir = (target: string, dir: string): boolean => {
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 };
 
-const isAllowedImport = (fromFile: string, specifier: string, allowedDirs: readonly string[]): boolean => {
-  if (specifier.startsWith("@/")) {
-    const resolved = path.resolve(srcDir, specifier.slice(2));
-    return allowedDirs.some((dir) => isWithinDir(resolved, dir));
-  }
-  if (specifier.startsWith(".")) {
-    const resolved = path.resolve(path.dirname(fromFile), specifier);
-    return allowedDirs.some((dir) => isWithinDir(resolved, dir));
-  }
-  return false;
+const resolveImportTarget = (fromFile: string, specifier: string): string | null => {
+  if (specifier.startsWith("@/")) return path.resolve(srcDir, specifier.slice(2));
+  if (specifier.startsWith(".")) return path.resolve(path.dirname(fromFile), specifier);
+  return null;
 };
 
-const scanSourceViolations = (fromFile: string, sourceText: string, allowedDirs: readonly string[]): string[] =>
+const isAllowedImport = (
+  fromFile: string,
+  specifier: string,
+  allowedDirs: readonly string[],
+  forbiddenTargets: readonly string[] = []
+): boolean => {
+  const resolved = resolveImportTarget(fromFile, specifier);
+  if (!resolved) return false;
+  const normalized = resolved.replace(/\.ts$/, "");
+  if (forbiddenTargets.some((target) => target.replace(/\.ts$/, "") === normalized)) return false;
+  return allowedDirs.some((dir) => isWithinDir(resolved, dir));
+};
+
+const scanSourceViolations = (
+  fromFile: string,
+  sourceText: string,
+  allowedDirs: readonly string[],
+  forbiddenTargets: readonly string[] = []
+): string[] =>
   importsOfSource(sourceText, fromFile)
-    .filter((specifier) => !isAllowedImport(fromFile, specifier, allowedDirs))
+    .filter((specifier) => !isAllowedImport(fromFile, specifier, allowedDirs, forbiddenTargets))
     .map((specifier) => `${relative(fromFile)} -> ${specifier}`);
 
-// core 是纯 TypeScript 领域层：只能依赖 core 自身和纯类型目录，不能碰 Vue/Pinia/i18n/store/浏览器或 Tauri。
+// core 是纯 TypeScript 领域层：严格只依赖 src/core 与 src/types，不得碰 Vue/Pinia/i18n/store/src/effects/浏览器或 Tauri。
 test("src/core only depends on src/core and src/types", () => {
   const violations = listFiles(coreDir).flatMap((file) =>
     scanSourceViolations(file, fs.readFileSync(file, "utf8"), [coreDir, typesDir])
@@ -77,8 +89,17 @@ test("src/core only depends on src/core and src/types", () => {
   assert.deepEqual(violations, []);
 });
 
-test("src/core does not touch browser globals", () => {
-  const violations = listFiles(coreDir).filter((file) =>
+test("pure src/effects modules only depend on src/core, src/types, and pure src/effects", () => {
+  const pureEffectFiles = listFiles(effectsDir).filter((file) => file !== effectsRegistryFile);
+  const violations = pureEffectFiles.flatMap((file) =>
+    scanSourceViolations(file, fs.readFileSync(file, "utf8"), [coreDir, typesDir, effectsDir], [effectsRegistryFile])
+  );
+  assert.deepEqual(violations, []);
+});
+
+test("src/core and pure src/effects do not touch browser globals", () => {
+  const pureEffectFiles = listFiles(effectsDir).filter((file) => file !== effectsRegistryFile);
+  const violations = [...listFiles(coreDir), ...pureEffectFiles].filter((file) =>
     /\b(window|document|localStorage|navigator)\./.test(fs.readFileSync(file, "utf8"))
   );
   assert.deepEqual(violations.map(relative), []);
@@ -98,6 +119,8 @@ test("scanner catches side-effect imports, dynamic imports, and relative imports
   const coreSource = [
     `import "./keyframes";`,
     `import type { AnyDanmu } from "../types/danmu";`,
+    `import { applyOpacityLimits } from "@/core/effects";`,
+    `import "@/effects/registry";`,
     `import "../stores/danmu";`,
     `import "@/i18n";`,
     `export * from "../utils/bas";`,
@@ -105,13 +128,17 @@ test("scanner catches side-effect imports, dynamic imports, and relative imports
     `type External = import("vue").Ref<number>;`
   ].join("\n");
 
-  assert.deepEqual(scanSourceViolations(sampleCoreFile, coreSource, [coreDir, typesDir]), [
-    "core/compiler.ts -> ../stores/danmu",
-    "core/compiler.ts -> @/i18n",
-    "core/compiler.ts -> ../utils/bas",
-    "core/compiler.ts -> ../stores/timeline",
-    "core/compiler.ts -> vue"
-  ]);
+  assert.deepEqual(
+    scanSourceViolations(sampleCoreFile, coreSource, [coreDir, typesDir]),
+    [
+      "core/compiler.ts -> @/effects/registry",
+      "core/compiler.ts -> ../stores/danmu",
+      "core/compiler.ts -> @/i18n",
+      "core/compiler.ts -> ../utils/bas",
+      "core/compiler.ts -> ../stores/timeline",
+      "core/compiler.ts -> vue"
+    ]
+  );
 
   const typesSource = [`import type { TimelineTrack } from "./timeline";`, `import "../core/compiler";`].join("\n");
   assert.deepEqual(scanSourceViolations(sampleTypesFile, typesSource, [typesDir]), [

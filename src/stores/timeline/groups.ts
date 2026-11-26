@@ -101,6 +101,8 @@ export const createTimelineGroups = (ctx: TimelineStoreContext) => {
 
     const group = target.clip;
     const absoluteStart = source.clip.startTime;
+    const childTrackId = createTimelineId("track");
+    const copiedClip = cloneClip(source.clip, childTrackId);
     if (absoluteStart < group.startTime) {
       const shift = group.startTime - absoluteStart;
       for (const childTrack of group.tracks) {
@@ -109,8 +111,6 @@ export const createTimelineGroups = (ctx: TimelineStoreContext) => {
       group.startTime = absoluteStart;
     }
 
-    const childTrackId = createTimelineId("track");
-    const copiedClip = cloneClip(source.clip, childTrackId);
     copiedClip.startTime = Math.max(0, absoluteStart - group.startTime);
     group.tracks.push({
       id: childTrackId,

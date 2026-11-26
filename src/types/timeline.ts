@@ -1,6 +1,7 @@
-import type { AnyDanmu } from './danmu';
+import type { AnyDanmu } from "./danmu";
+import type { EffectInstance } from "./effects";
 
-export type KeyframeInterpolation = 'linear' | 'step';
+export type KeyframeInterpolation = "linear" | "step";
 
 export interface TimelineKeyframeProperties {
   x?: number | string;
@@ -39,17 +40,19 @@ export interface TimelineClipBase {
 }
 
 export interface TimelineResourceClip extends TimelineClipBase {
-  kind: 'resource';
+  kind: "resource";
   resourceId: string;
   params?: TimelineClipParams; // 音频/视频参数（音量、静音等）
   overrides?: Partial<AnyDanmu>;
   parentClipId?: string;
   sourceInMs?: number;
+  effects?: EffectInstance[];
   keyframes?: TimelineKeyframe[]; // AE/视频编辑器式关键帧
 }
 
 export interface TimelineGroupClip extends TimelineClipBase {
-  kind: 'group';
+  kind: "group";
+  effects?: never;
   tracks: TimelineTrack[];
   resourceId?: never;
   params?: never;
@@ -61,7 +64,7 @@ export interface TimelineGroupClip extends TimelineClipBase {
 
 export type TimelineClip = TimelineResourceClip | TimelineGroupClip;
 
-export type TimelineTrackType = 'danmu' | 'audio';
+export type TimelineTrackType = "danmu" | "audio";
 
 export interface TimelineTrack {
   id: string;

@@ -80,7 +80,7 @@ const exportTimelineAsTxt = async () => {
       try {
         await parseBasDSL(content);
       } catch (error) {
-        throw new Error(formatBasParseError(error, content, ranges));
+        throw new Error(formatBasParseError(error, content, ranges, timelineStore.rootTracks));
       }
     }
     const safeName = exportFileName.value.trim().replace(/[\\/:*?"<>|]/g, "_") || "bas-creater-timeline";
