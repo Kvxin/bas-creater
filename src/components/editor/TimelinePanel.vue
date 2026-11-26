@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { useI18n } from "vue-i18n";
 import { useElementSize } from "@vueuse/core";
 import { FolderOpen } from "lucide-vue-next";
 import TimeRuler from "./TimeRuler.vue";
 import TimelineToolbar from "./timeline/TimelineToolbar.vue";
 import TimelineTrackHeaders from "./timeline/TimelineTrackHeaders.vue";
+import TimelineTrackResizeHandle, { DEFAULT_TRACK_HEIGHT } from "./timeline/TimelineTrackResizeHandle.vue";
 import { formatTime } from "@/core/timeline";
 import { getItemName } from "@/utils/resourceUtils";
 import { useTimelineStore } from "@/stores/timeline";
@@ -37,6 +38,14 @@ const editingGroupName = ref("");
 const timelineContentRef = ref<HTMLElement | null>(null);
 const trackHeadersRef = ref<InstanceType<typeof TimelineTrackHeaders> | null>(null);
 const scrollLeft = ref(0);
+const trackHeights = reactive(new Map<string, number>());
+
+const getTrackHeight = (trackId: string) => trackHeights.get(trackId) ?? DEFAULT_TRACK_HEIGHT;
+
+const resizeTrack = (trackId: string, height: number) => {
+  if (height === DEFAULT_TRACK_HEIGHT) trackHeights.delete(trackId);
+  else trackHeights.set(trackId, height);
+};
 
 const TIMELINE_END_PADDING_MS = 10000;
 const MAX_TIMELINE_ZOOM = 500;
@@ -191,6 +200,14 @@ const handleScroll = (e: Event) => {
   timelineStore.timelineScroll = { left: target.scrollLeft, top: target.scrollTop };
   trackHeadersRef.value?.setScrollTop(target.scrollTop);
   effectTrackMenu.value = null;
+};
+
+// Keyboard focus can scroll the header list independently of the timeline.
+const handleTrackHeaderScroll = (scrollTop: number) => {
+  const content = timelineContentRef.value;
+  if (!content || content.scrollTop === scrollTop) return;
+  content.scrollTop = scrollTop;
+  trackHeadersRef.value?.setScrollTop(content.scrollTop);
 };
 
 // 缩放控制：缩放前后保持 Playhead 在视口中的横向位置不变。
@@ -645,6 +662,7 @@ function handleVolumeSelect(clipId: string) {
         :effect-menu-track-id="effectTrackMenu?.trackId ?? null"
         :get-track-type="getTrackType"
         :get-track-effect-count="getTrackEffectCount"
+        :get-track-height="getTrackHeight"
         @select-track="timelineStore.selectTrack"
         @toggle-track-effect-menu="toggleTrackEffectMenu"
         @toggle-expand="timelineStore.toggleTrackExpand"
@@ -653,11 +671,13 @@ function handleVolumeSelect(clipId: string) {
         @remove-track="timelineStore.removeTrack"
         @add-track="timelineStore.addTrack"
         @track-contextmenu="(event, trackId) => handleContextMenu(event, 'track', trackId)"
+        @resize-track="resizeTrack"
+        @scroll-tracks="handleTrackHeaderScroll"
       />
 
       <!-- 右侧：时间轴内容区 (主滚动区域) -->
       <div
-        class="flex-1 overflow-auto relative bg-timeline"
+        class="flex-1 overflow-auto relative bg-timeline [overflow-anchor:none]"
         ref="timelineContentRef"
         data-ui="timeline-tracks"
         @scroll="handleScroll"
@@ -669,14 +689,16 @@ function handleVolumeSelect(clipId: string) {
           <template v-for="track in timelineStore.tracks" :key="track.id">
             <!-- Main Track Row -->
             <div
-              class="h-10 relative transition-colors border-b border-divider"
+              class="relative transition-colors border-b border-divider"
               :class="{
                 'opacity-45 saturate-50': !track.visible,
                 'bg-primary/10 ring-1 ring-inset ring-primary/35':
                   isDragTargetTrack(track) && canDropDraggedClipOnTrack(track),
                 'bg-destructive/10 ring-1 ring-inset ring-destructive/30': isInvalidDragTargetTrack(track)
               }"
+              :id="`timeline-track-row-${track.id}`"
               :data-timeline-track-id="track.id"
+              :style="{ height: `${getTrackHeight(track.id)}px` }"
               @dragover="trackDragOver"
               @drop="handleDrop($event, track.id)"
             >
@@ -880,6 +902,11 @@ function handleVolumeSelect(clipId: string) {
                   >+</span
                 >
               </div>
+              <TimelineTrackResizeHandle
+                :height="getTrackHeight(track.id)"
+                :track-name="track.name"
+                @resize="resizeTrack(track.id, $event)"
+              />
             </div>
 
             <!-- Expanded Animation Row -->

@@ -15,6 +15,7 @@ import {
   Video
 } from "lucide-vue-next";
 import type { TimelineTrack, TimelineTrackType } from "@/types/timeline";
+import TimelineTrackResizeHandle from "./TimelineTrackResizeHandle.vue";
 
 const props = defineProps<{
   tracks: TimelineTrack[];
@@ -22,6 +23,7 @@ const props = defineProps<{
   effectMenuTrackId: string | null;
   getTrackType: (track: TimelineTrack) => TimelineTrackType | null;
   getTrackEffectCount: (track: TimelineTrack) => number;
+  getTrackHeight: (trackId: string) => number;
 }>();
 
 const emit = defineEmits<{
@@ -33,15 +35,25 @@ const emit = defineEmits<{
   (e: "remove-track", trackId: string): void;
   (e: "add-track"): void;
   (e: "track-contextmenu", event: MouseEvent, trackId: string): void;
+  (e: "resize-track", trackId: string, height: number): void;
+  (e: "scroll-tracks", scrollTop: number): void;
 }>();
 
 const { t } = useI18n();
 const trackListRef = ref<HTMLElement | null>(null);
+let syncedScrollTop = 0;
 
 const setScrollTop = (scrollTop: number) => {
-  if (trackListRef.value) {
-    trackListRef.value.scrollTop = scrollTop;
-  }
+  const list = trackListRef.value;
+  if (!list) return;
+  list.scrollTop = scrollTop;
+  syncedScrollTop = list.scrollTop;
+};
+
+const handleScroll = () => {
+  const list = trackListRef.value;
+  // Ignore delayed scroll events for positions already copied from the timeline.
+  if (list && list.scrollTop !== syncedScrollTop) emit("scroll-tracks", list.scrollTop);
 };
 
 defineExpose({ setScrollTop });
@@ -86,19 +98,22 @@ const toggleTrackPrimaryAction = (track: TimelineTrack) => {
 
 <template>
   <div
-    class="w-56 border-r border-divider bg-track-header flex flex-col shrink-0 overflow-hidden"
+    class="w-56 border-r border-divider bg-track-header flex flex-col shrink-0 overflow-hidden [overflow-anchor:none]"
     ref="trackListRef"
     data-ui="track-headers"
+    @scroll="handleScroll"
   >
     <!-- 轨道头列表 -->
     <template v-for="track in props.tracks" :key="track.id">
       <div
-        class="h-10 grid grid-cols-[1rem_minmax(0,1fr)_1.25rem_1.25rem_1.25rem_1.25rem_1.25rem] items-center gap-0.5 px-2 text-xs group border-b border-divider hover:bg-accent/50 transition-colors shrink-0"
+        class="relative grid grid-cols-[1rem_minmax(0,1fr)_1.25rem_1.25rem_1.25rem_1.25rem_1.25rem] items-center gap-0.5 px-2 text-xs group border-b border-divider hover:bg-accent/50 transition-colors shrink-0"
         :class="{
           'text-muted-foreground/55': !track.visible,
           'bg-secondary': props.selectedTrackId === track.id
         }"
+        :id="`timeline-track-header-${track.id}`"
         :data-track-header-id="track.id"
+        :style="{ height: `${getTrackHeight(track.id)}px` }"
         @contextmenu="emit('track-contextmenu', $event, track.id)"
       >
         <button
@@ -171,6 +186,12 @@ const toggleTrackPrimaryAction = (track: TimelineTrack) => {
         >
           <Trash2 class="size-3" />
         </button>
+        <TimelineTrackResizeHandle
+          :height="getTrackHeight(track.id)"
+          :track-name="track.name"
+          :controls="`timeline-track-header-${track.id} timeline-track-row-${track.id}`"
+          @resize="emit('resize-track', track.id, $event)"
+        />
       </div>
 
       <!-- Expanded Panel Header -->
