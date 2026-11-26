@@ -16,6 +16,8 @@ import {
   pickKeyframePropertiesForResource,
   resolveKeyframeProperties
 } from "@/core/keyframes";
+import { formatTimelineTime, getFrameDurationMs, roundTimelineMs } from "@/core/timeline";
+import { useTimelineStore } from "@/stores/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import type { ResolvedDanmu } from "@/core/danmuDefaults";
 import type { TimelineClip, TimelineKeyframeProperties } from "@/types/timeline";
@@ -50,6 +52,20 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
+const timelineStore = useTimelineStore();
+
+const formatLocalTimeDisplay = (localTimeMs: number) => {
+  if (timelineStore.timeDisplayMode === "milliseconds") return formatAnimationSeconds(localTimeMs);
+  const code = formatTimelineTime(localTimeMs, {
+    mode: timelineStore.timeDisplayMode,
+    fps: timelineStore.fps
+  });
+  return `${code} (${formatAnimationSeconds(localTimeMs)})`;
+};
+
+const keyframeTimeStep = computed(() =>
+  timelineStore.timeDisplayMode === "frames" ? roundTimelineMs(getFrameDurationMs(timelineStore.fps)) : 10
+);
 
 const keyframePercentageModeOverrides = ref<Record<string, boolean>>({});
 
@@ -237,8 +253,8 @@ const setKeyframePercentageMode = (field: KeyframePercentageField, enabled: bool
       <div class="grid grid-cols-[1fr_auto] gap-2">
         <div class="rounded-sm border border-border bg-accent/40 px-2.5 py-2">
           <div class="text-xs text-muted-foreground">{{ t("properties.animation.localTime") }}</div>
-          <div class="mt-1 font-mono text-xs text-foreground">
-            {{ formatAnimationSeconds(currentClipLocalTime) }}
+          <div class="mt-1 font-mono text-xs tabular-nums text-foreground">
+            {{ formatLocalTimeDisplay(currentClipLocalTime) }}
           </div>
         </div>
         <button
@@ -279,8 +295,8 @@ const setKeyframePercentageMode = (field: KeyframePercentageField, enabled: bool
                 {{ keyframe.label }}
               </span>
             </div>
-            <span class="shrink-0 text-xs font-mono text-muted-foreground">
-              {{ formatAnimationSeconds(keyframe.timeMs) }}
+            <span class="shrink-0 text-xs font-mono tabular-nums text-muted-foreground">
+              {{ formatLocalTimeDisplay(keyframe.timeMs) }}
             </span>
           </div>
           <div class="mt-1 truncate text-xs text-muted-foreground">
@@ -313,7 +329,7 @@ const setKeyframePercentageMode = (field: KeyframePercentageField, enabled: bool
             <Label class="text-xs text-muted-foreground">{{ t("properties.animation.timeMs") }}</Label>
             <Input
               type="number"
-              step="100"
+              :step="keyframeTimeStep"
               :disabled="activeKeyframeId === BASE_KEYFRAME_ID"
               :model-value="
                 activeKeyframeId === BASE_KEYFRAME_ID

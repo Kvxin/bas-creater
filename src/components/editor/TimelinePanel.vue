@@ -6,7 +6,16 @@ import { FolderOpen } from "lucide-vue-next";
 import TimeRuler from "./TimeRuler.vue";
 import TimelineToolbar from "./timeline/TimelineToolbar.vue";
 import TimelineTrackHeaders from "./timeline/TimelineTrackHeaders.vue";
-import { formatTime } from "@/core/timeline";
+import {
+  collectTimelineSnapCandidates,
+  formatTime,
+  formatTimelineTime,
+  getMinClipDurationMs,
+  MAX_TIMELINE_ZOOM,
+  MIN_TIMELINE_ZOOM,
+  resolveTimelineSnap,
+  roundTimelineMs
+} from "@/core/timeline";
 import { getItemName } from "@/utils/resourceUtils";
 import { useTimelineStore } from "@/stores/timeline";
 import { useDanmuStore } from "@/stores/danmu";
@@ -18,7 +27,7 @@ import { BASE_KEYFRAME_ID, normalizeKeyframes } from "@/core/keyframes";
 import { draggedEffect, EFFECT_DRAG_TYPE, effectCatalog } from "@/effects/registry";
 import { effectText, isDynamicEffect, matchesEffect, type EffectInstance } from "@/core/effects";
 import { runSplitAction } from "@/utils/splitAction";
-import type { TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
+import type { TimelineClip, TimelineSnapKind, TimelineTrack, TimelineTrackType } from "@/types/timeline";
 import AudioWaveform from "./audio/AudioWaveform.vue";
 import AudioVolumeLine from "./audio/AudioVolumeLine.vue";
 import { dBToLinear } from "@/utils/audio/audio-math";
@@ -39,7 +48,6 @@ const trackHeadersRef = ref<InstanceType<typeof TimelineTrackHeaders> | null>(nu
 const scrollLeft = ref(0);
 
 const TIMELINE_END_PADDING_MS = 10000;
-const MAX_TIMELINE_ZOOM = 500;
 
 const pixelsPerSecond = computed(() => timelineStore.zoomScale * 2);
 const { width: timelineViewportWidth } = useElementSize(timelineContentRef);
@@ -87,12 +95,17 @@ const {
   scrollLeft,
   timelineContentRef,
   setCurrentTime: timeMs => timelineStore.setCurrentTime(timeMs),
-  translate: key => t(key)
+  translate: key => t(key),
+  markers: computed(() => timelineStore.markers),
+  mode: computed(() => timelineStore.timeDisplayMode),
+  fps: computed(() => timelineStore.fps),
+  snapEnabled: computed(() => timelineStore.snapEnabled)
 });
 
 const {
   tempState,
   tooltipPosition,
+  interactionSnapKind,
   isDraggingClip,
   draggedClipId,
   originalClipTrackId,
@@ -199,7 +212,7 @@ const setTimelineZoom = async (nextZoom: number) => {
   const previousPixelsPerSecond = pixelsPerSecond.value;
   const currentScrollLeft = container?.scrollLeft ?? scrollLeft.value;
   const playheadOffset = (timelineStore.currentTime / 1000) * previousPixelsPerSecond - currentScrollLeft;
-  const clampedZoom = Math.max(10, Math.min(MAX_TIMELINE_ZOOM, nextZoom));
+  const clampedZoom = Math.max(MIN_TIMELINE_ZOOM, Math.min(MAX_TIMELINE_ZOOM, Math.round(nextZoom)));
 
   if (clampedZoom === timelineStore.zoomScale) return;
 
@@ -214,22 +227,40 @@ const setTimelineZoom = async (nextZoom: number) => {
   scrollLeft.value = container.scrollLeft;
 };
 
+const getZoomStep = (currentZoom: number) => (currentZoom >= 200 ? 40 : currentZoom >= 100 ? 20 : 10);
+
 const zoomIn = () => {
-  void setTimelineZoom(timelineStore.zoomScale + 10);
+  void setTimelineZoom(timelineStore.zoomScale + getZoomStep(timelineStore.zoomScale));
 };
 
 const zoomOut = () => {
-  void setTimelineZoom(timelineStore.zoomScale - 10);
+  void setTimelineZoom(timelineStore.zoomScale - getZoomStep(timelineStore.zoomScale));
 };
 
-const currentTimeDisplay = computed(() => {
-  const { h, m, s, ms } = formatTime(timelineStore.currentTime);
-  const frames = Math.floor((ms / 1000) * 30);
-  return `${h > 0 ? String(h).padStart(2, "0") + ":" : ""}${String(m).padStart(
-    2,
-    "0"
-  )}:${String(s).padStart(2, "0")}:${String(frames).padStart(2, "0")}`;
-});
+const handleTimelineWheel = (event: WheelEvent) => {
+  if (!event.ctrlKey && !event.metaKey) return;
+  event.preventDefault();
+  const direction = event.deltaY < 0 ? 1 : -1;
+  void setTimelineZoom(timelineStore.zoomScale + direction * getZoomStep(timelineStore.zoomScale));
+};
+
+const formatActiveTime = (timeMs: number) =>
+  formatTimelineTime(timeMs, {
+    mode: timelineStore.timeDisplayMode,
+    fps: timelineStore.fps
+  });
+
+const getSnapKindLabel = (kind: TimelineSnapKind | null) => {
+  if (!kind) return "";
+  if (kind === "playhead") return t("timeline.snap.playhead");
+  if (kind === "marker") return t("timeline.snap.marker");
+  if (kind === "clipStart") return t("timeline.snap.clipStart");
+  if (kind === "clipEnd") return t("timeline.snap.clipEnd");
+  if (kind === "keyframe") return t("timeline.snap.keyframe");
+  return t("timeline.snap.frame");
+};
+
+const currentTimeDisplay = computed(() => formatActiveTime(timelineStore.currentTime));
 
 const effectHoverId = ref<string | null>(null);
 const effectDropError = ref("");
@@ -327,7 +358,7 @@ const onDragEffect = (e: MouseEvent) => {
   if (!clip || clip.kind !== "resource") return;
   const deltaMs = ((e.clientX - effectDragStartX.value) / pixelsPerSecond.value) * 1000;
   const [initialStart, initialEnd] = effectDragInitialSpan.value;
-  const minDuration = Math.min(100, clip.duration);
+  const minDuration = Math.min(getMinClipDurationMs(timelineStore.fps), clip.duration);
   let start = initialStart;
   let end = initialEnd;
   if (effectDragMode.value === "move") {
@@ -339,7 +370,7 @@ const onDragEffect = (e: MouseEvent) => {
   } else {
     end = Math.min(clip.duration, Math.max(initialStart + minDuration, initialEnd + deltaMs));
   }
-  effectDragSpan.value = [Math.round(start), Math.round(end)];
+  effectDragSpan.value = [roundTimelineMs(start), roundTimelineMs(end)];
 };
 
 const stopDragEffect = () => {
@@ -409,8 +440,20 @@ const handleDrop = (event: DragEvent, trackId: string) => {
       const item = JSON.parse(data);
       const rect = timelineContentRef.value.getBoundingClientRect();
       const relativeX = event.clientX - rect.left + scrollLeft.value;
-      const timeMs = Math.max(0, Math.floor((relativeX / pixelsPerSecond.value) * 1000));
-      timelineStore.addClip(item, trackId, timeMs);
+      const rawTimeMs = Math.max(0, (relativeX / pixelsPerSecond.value) * 1000);
+      const snapped = resolveTimelineSnap(rawTimeMs, {
+        candidates: collectTimelineSnapCandidates({
+          tracks: timelineStore.tracks,
+          markers: timelineStore.markers,
+          playheadTimeMs: timelineStore.currentTime
+        }),
+        pixelsPerSecond: pixelsPerSecond.value,
+        mode: timelineStore.timeDisplayMode,
+        fps: timelineStore.fps,
+        snapEnabled: timelineStore.snapEnabled,
+        disableSnap: event.shiftKey
+      });
+      timelineStore.addClip(item, trackId, snapped.timeMs);
     } catch (e) {
       console.error("解析拖拽数据失败", e);
     }
@@ -452,8 +495,8 @@ const handleKeyframeDblClick = (clip: TimelineClip, marker: { timeMs: number }) 
   timelineStore.setCurrentTime(absoluteTime);
 };
 
-const handleRulerClick = (timeMs: number) => {
-  updateTime(timeMs);
+const handleRulerClick = (timeMs: number, shiftKey = false) => {
+  updateTime(timeMs, shiftKey);
 };
 
 const handleTimelineClick = (e: MouseEvent) => {
@@ -463,7 +506,7 @@ const handleTimelineClick = (e: MouseEvent) => {
   const clickX = e.clientX - rect.left + scrollLeft.value;
   const time = Math.max(0, (clickX / pixelsPerSecond.value) * 1000);
 
-  updateTime(time);
+  updateTime(time, e.shiftKey);
 
   timelineStore.setSelectedClip(null);
   danmuStore.select(null);
@@ -478,6 +521,7 @@ const handleClipClick = (clip: TimelineClip, e: MouseEvent) => {
 };
 
 const handleKeyDown = (e: KeyboardEvent) => {
+  if (e.isComposing || document.querySelector("[role='dialog']")) return;
   const activeElement = document.activeElement as HTMLElement | null;
   if (activeElement?.matches("input, textarea, select") || activeElement?.isContentEditable) return;
   if ((e.ctrlKey || e.metaKey) && e.code === "KeyG" && !e.altKey) {
@@ -486,6 +530,21 @@ const handleKeyDown = (e: KeyboardEvent) => {
       if (e.shiftKey) timelineStore.ungroupClip();
       else timelineStore.createGroup();
     }
+    return;
+  }
+  if (e.code === "KeyM" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !e.repeat) {
+    e.preventDefault();
+    timelineStore.toggleMarkerAtCurrentTime();
+    return;
+  }
+  if (e.code === "BracketLeft" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+    e.preventDefault();
+    timelineStore.seekToAdjacentMarker(-1);
+    return;
+  }
+  if (e.code === "BracketRight" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+    e.preventDefault();
+    timelineStore.seekToAdjacentMarker(1);
     return;
   }
   if (e.code === "KeyS" && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && !e.repeat) {
@@ -623,7 +682,12 @@ function handleVolumeSelect(clipId: string) {
           :scale="timelineStore.zoomScale"
           :scroll-left="scrollLeft"
           :padding-left="0"
+          :mode="timelineStore.timeDisplayMode"
+          :fps="timelineStore.fps"
+          :markers="timelineStore.markers"
           @click="handleRulerClick"
+          @select-marker="timeMs => timelineStore.setCurrentTime(timeMs)"
+          @remove-marker="markerId => timelineStore.removeMarker(markerId)"
         />
         <!-- 标尺上的游标指示器 -->
         <div
@@ -661,10 +725,19 @@ function handleVolumeSelect(clipId: string) {
         ref="timelineContentRef"
         data-ui="timeline-tracks"
         @scroll="handleScroll"
+        @wheel="handleTimelineWheel"
         @click="handleTimelineClick"
         @contextmenu="handleContextMenu($event, 'background')"
       >
         <div class="timeline-track-surface relative" :style="{ width: totalWidth + 'px' }">
+          <!-- 时间轴标记纵向参考线 -->
+          <div
+            v-for="marker in timelineStore.markers"
+            :key="`guide-${marker.id}`"
+            class="timeline-marker-guide absolute top-0 bottom-0 w-px z-20 pointer-events-none"
+            :style="{ left: `${(marker.timeMs / 1000) * pixelsPerSecond}px` }"
+          ></div>
+
           <!-- 轨道列表 -->
           <template v-for="track in timelineStore.tracks" :key="track.id">
             <!-- Main Track Row -->
@@ -811,7 +884,7 @@ function handleVolumeSelect(clipId: string) {
                   v-if="clip.kind === 'group' && editingGroupId !== clip.id"
                   class="ml-2 shrink-0 text-[11px] text-white/75 pointer-events-none"
                 >
-                  {{ formatTime(clip.duration).str }} ·
+                  {{ formatActiveTime(clip.duration) }} ·
                   {{
                     t("groups.members", {
                       n: clip.tracks.reduce((count, childTrack) => count + childTrack.clips.length, 0)
@@ -915,7 +988,7 @@ function handleVolumeSelect(clipId: string) {
                         : 'hover:ring-2 hover:ring-primary/30'
                     ]"
                     :style="getKeyframeMarkerStyle(clip, marker)"
-                    :title="`${marker.label} · ${formatTime(marker.timeMs).str}`"
+                    :title="`${marker.label} · ${formatActiveTime(marker.timeMs)}`"
                     @click="selectKeyframeMarker(clip, marker, $event)"
                     @dblclick.stop="handleKeyframeDblClick(clip, marker)"
                     @mousedown.stop="startDragKeyframe($event, clip, marker)"
@@ -944,10 +1017,10 @@ function handleVolumeSelect(clipId: string) {
 
     <div
       v-if="isDraggingPlayhead"
-      class="pointer-events-none fixed z-50 -translate-x-1/2 rounded-sm border border-border bg-popover px-2 py-1 font-mono text-xs text-popover-foreground shadow-md"
+      class="pointer-events-none fixed z-50 -translate-x-1/2 rounded-sm border border-border bg-popover px-2 py-1 font-mono text-xs tabular-nums text-popover-foreground shadow-md"
       :style="playheadTooltipStyle"
     >
-      {{ formatTime(timelineStore.currentTime).str }}
+      {{ formatActiveTime(timelineStore.currentTime) }}
       <span v-if="playheadSnapKind" class="ml-1 text-primary">
         {{ t("timeline.snap.indicator", { label: playheadSnapText }) }}
       </span>
@@ -956,24 +1029,30 @@ function handleVolumeSelect(clipId: string) {
     <!-- Drag/Resize Tooltip -->
     <div
       v-if="isDraggingClip || isResizingClip"
-      class="fixed z-50 pointer-events-none bg-popover text-popover-foreground px-2 py-1.5 rounded-sm shadow-md border border-border text-xs font-mono whitespace-pre flex flex-col gap-0.5"
+      class="fixed z-50 pointer-events-none bg-popover text-popover-foreground px-2 py-1.5 rounded-sm shadow-md border border-border text-xs font-mono tabular-nums whitespace-pre flex flex-col gap-0.5"
       :style="{ top: tooltipPosition.y + 'px', left: tooltipPosition.x + 'px' }"
     >
       <div v-if="isDraggingClip">
         <template v-if="isAltDragCopy && dragTargetTrackId !== originalClipTrackId">{{
-          t("timeline.tooltip.copyTo", { time: formatTime(tempState.startTime).str })
+          t("timeline.tooltip.copyTo", { time: formatActiveTime(tempState.startTime) })
         }}</template>
-        <template v-else>{{ t("timeline.tooltip.start", { time: formatTime(tempState.startTime).str }) }}</template>
+        <template v-else>{{ t("timeline.tooltip.start", { time: formatActiveTime(tempState.startTime) }) }}</template>
       </div>
       <div v-else-if="isResizingClip">
         {{
           t("timeline.tooltip.resize", {
-            start: formatTime(tempState.startTime).str,
+            start: formatActiveTime(tempState.startTime),
             duration: formatTime(tempState.duration).str,
-            end: formatTime(tempState.startTime + tempState.duration).str
+            end: formatActiveTime(tempState.startTime + tempState.duration)
           })
         }}
       </div>
+      <span
+        v-if="interactionSnapKind && interactionSnapKind !== 'frame'"
+        class="text-[11px] text-primary"
+      >
+        {{ t("timeline.snap.indicator", { label: getSnapKindLabel(interactionSnapKind) }) }}
+      </span>
     </div>
 
     <!-- 轨道特效列表：固定定位，避免被轨道头容器的 overflow 裁剪 -->
@@ -1019,6 +1098,9 @@ function handleVolumeSelect(clipId: string) {
 <style scoped>
 .timeline-track-surface {
   min-height: 100%;
+}
+.timeline-marker-guide {
+  border-left: 1px dashed color-mix(in oklab, var(--caution) 45%, transparent);
 }
 .timeline-playhead::before {
   position: absolute;

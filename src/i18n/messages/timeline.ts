@@ -2,18 +2,10 @@
  * Namespace: timeline
  * ---------------------------------------------------------------------------
  * Timeline panel (TimelinePanel.vue): the track list header, the per-track
- * headers, track type / mute / visibility labels, the playhead snap indicator,
- * the playhead drag hint and the clip drag / resize tooltips. Also the auto
- * generated track name used by stores/timeline.ts.
- *
- * Reuses `common`: keyframeBase / keyframeLabel for the keyframe markers and
- * unknown for a clip without a name.
- *
- * Labels returned by the panel's helpers are resolved through `t()` at call
- * time so they follow the active locale; a track name, in contrast, is a
- * snapshot written when the track is created and keeps its original language.
- *
- * Dev-only console output (TimeRuler.vue, store warnings) is not translated.
+ * headers, track type / mute / visibility labels, timebase / FPS grid popover,
+ * timeline markers, the playhead snap indicator, the playhead drag hint and
+ * the clip drag / resize tooltips. Also the auto generated track name used by
+ * stores/timeline.ts.
  */
 const zhCN = {
   trackList: '轨道列表',
@@ -38,15 +30,37 @@ const zhCN = {
     typeLockedAria: '{type}，轨道类型由首次放入的资源锁定',
     typeLockedTitle: '{type} · 首次放入资源后锁定类型',
   },
-  /** Names of the playhead snap candidates and the snap tooltip itself. */
+  timebase: {
+    triggerTitle: '时间基准与帧率设置',
+    modeLabel: '时间刻度模式',
+    modes: {
+      frames: '帧 (FPS)',
+      milliseconds: '毫秒 (ms)',
+    },
+    fpsLabel: '参考帧率',
+    customFps: '自定义帧率',
+  },
+  markers: {
+    toggleAtPlayhead: '在游标处添加/移除标记点 (M)',
+    previous: '上一标记点 ([)',
+    next: '下一标记点 (])',
+    clearAll: '清空全部标记',
+    count: '{n} 个标记',
+    itemTitle: '标记点 · {time}（点击跳转，右键或 Alt+点击删除）',
+  },
+  /** Names of the snap candidates and the snap tooltip itself. */
   snap: {
+    toggle: '吸附对齐（拖动时按住 Shift 临时自由微调）',
+    playhead: '播放头',
+    marker: '标记点',
     clipStart: '片段开始',
     clipEnd: '片段结束',
     keyframe: '关键帧',
+    frame: '帧网格',
     indicator: '吸附 · {label}',
   },
   playhead: {
-    dragHint: '拖动定位；Shift 暂时关闭片段与关键帧吸附',
+    dragHint: '拖动定位；Shift 暂时关闭吸附',
   },
   /** Values of the floating tooltips shown while dragging or resizing a clip. */
   tooltip: {
@@ -78,14 +92,36 @@ const en: typeof zhCN = {
     typeLockedAria: '{type}. Track type is locked by the first resource placed on it.',
     typeLockedTitle: '{type} · Type is locked once a resource is placed',
   },
+  timebase: {
+    triggerTitle: 'Timebase & FPS settings',
+    modeLabel: 'Ruler & timecode mode',
+    modes: {
+      frames: 'Frames (FPS)',
+      milliseconds: 'Milliseconds (ms)',
+    },
+    fpsLabel: 'Reference FPS',
+    customFps: 'Custom FPS',
+  },
+  markers: {
+    toggleAtPlayhead: 'Add/remove marker at playhead (M)',
+    previous: 'Previous marker ([)',
+    next: 'Next marker (])',
+    clearAll: 'Clear all markers',
+    count: '{n} markers',
+    itemTitle: 'Marker · {time} (click to seek, right-click or Alt+click to delete)',
+  },
   snap: {
+    toggle: 'Snap to grid & targets (hold Shift while dragging to bypass)',
+    playhead: 'Playhead',
+    marker: 'Marker',
     clipStart: 'Clip start',
     clipEnd: 'Clip end',
     keyframe: 'Keyframe',
+    frame: 'Frame grid',
     indicator: 'Snap · {label}',
   },
   playhead: {
-    dragHint: 'Drag to move; hold Shift to temporarily disable clip and keyframe snapping',
+    dragHint: 'Drag to move; hold Shift to temporarily bypass snapping',
   },
   tooltip: {
     start: 'Start: {time}',
@@ -115,14 +151,36 @@ const ja: typeof zhCN = {
     typeLockedAria: '{type}。トラックの種類は最初に配置したリソースで固定されます',
     typeLockedTitle: '{type} · 最初のリソースを配置すると種類が固定されます',
   },
+  timebase: {
+    triggerTitle: 'タイムベースと FPS 設定',
+    modeLabel: '時間目盛りモード',
+    modes: {
+      frames: 'フレーム (FPS)',
+      milliseconds: 'ミリ秒 (ms)',
+    },
+    fpsLabel: '基準フレームレート',
+    customFps: 'カスタム FPS',
+  },
+  markers: {
+    toggleAtPlayhead: '再生ヘッド位置にマーカーを追加/削除 (M)',
+    previous: '前のマーカー ([)',
+    next: '次のマーカー (])',
+    clearAll: 'すべてのマーカーを消去',
+    count: '{n} 個のマーカー',
+    itemTitle: 'マーカー · {time}（クリックで移動、右クリックまたは Alt+クリックで削除）',
+  },
   snap: {
+    toggle: 'スナップ吸着（ドラッグ中に Shift を押すと一時解除）',
+    playhead: '再生ヘッド',
+    marker: 'マーカー',
     clipStart: 'クリップ開始',
     clipEnd: 'クリップ終了',
     keyframe: 'キーフレーム',
+    frame: 'フレームグリッド',
     indicator: 'スナップ · {label}',
   },
   playhead: {
-    dragHint: 'ドラッグで移動；Shift を押すとクリップとキーフレームのスナップを一時的に解除',
+    dragHint: 'ドラッグで移動；Shift を押すとスナップを一時解除',
   },
   tooltip: {
     start: '開始: {time}',
