@@ -12,6 +12,7 @@ import {
   clampKeyframeTime,
   createKeyframeSnapshot,
   getBaseKeyframeProperties,
+  getBaseKeyframeTimeMs,
   normalizeKeyframes,
   pickKeyframePropertiesForResource,
   resolveKeyframeProperties
@@ -55,12 +56,14 @@ const { t } = useI18n();
 const timelineStore = useTimelineStore();
 
 const formatLocalTimeDisplay = (localTimeMs: number) => {
-  if (timelineStore.timeDisplayMode === "milliseconds") return formatAnimationSeconds(localTimeMs);
-  const code = formatTimelineTime(localTimeMs, {
+  const sign = localTimeMs < 0 ? "-" : "";
+  const absMs = Math.abs(localTimeMs);
+  if (timelineStore.timeDisplayMode === "milliseconds") return `${sign}${formatAnimationSeconds(absMs)}`;
+  const code = formatTimelineTime(absMs, {
     mode: timelineStore.timeDisplayMode,
     fps: timelineStore.fps
   });
-  return `${code} (${formatAnimationSeconds(localTimeMs)})`;
+  return `${sign}${code} (${sign}${formatAnimationSeconds(absMs)})`;
 };
 
 const keyframeTimeStep = computed(() =>
@@ -73,7 +76,7 @@ const clipKeyframes = computed(() => {
   const clip = props.selectedClip;
   if (!clip) return [];
 
-  const normalized = normalizeKeyframes(clip.keyframes, clip.duration);
+  const normalized = normalizeKeyframes(clip.keyframes);
   const resource = props.selected;
   if (!resource || clip.resourceId !== resource.id) return normalized;
 
@@ -102,14 +105,17 @@ const currentClipLocalTime = computed(() => {
 
 const keyframeRows = computed(() => {
   if (!props.resolvedSelected || !props.selectedClip) return [];
+  const baseTimeMs = getBaseKeyframeTimeMs(props.selectedClip);
+  const clipDuration = props.selectedClip.duration;
 
   return [
     {
       id: BASE_KEYFRAME_ID,
       index: 1,
       label: t("common.keyframeBase"),
-      timeMs: 0,
+      timeMs: baseTimeMs,
       isBase: true,
+      isOutOfBounds: baseTimeMs < 0 || baseTimeMs > clipDuration,
       properties: getBaseKeyframeProperties(props.resolvedSelected)
     },
     ...clipKeyframes.value.map((keyframe, index) => ({
@@ -118,6 +124,7 @@ const keyframeRows = computed(() => {
       label: t("common.keyframeLabel", { n: index + 2 }),
       timeMs: keyframe.timeMs,
       isBase: false,
+      isOutOfBounds: keyframe.timeMs < 0 || keyframe.timeMs > clipDuration,
       properties: keyframe.properties
     }))
   ];
@@ -126,7 +133,7 @@ const keyframeRows = computed(() => {
 const selectKeyframe = (keyframeId: string) => {
   const keyframe = keyframeRows.value.find(row => row.id === keyframeId);
   const absoluteTimeMs =
-    props.selectedClip && keyframe ? props.selectedClip.startTime + keyframe.timeMs : undefined;
+    props.selectedClip && keyframe ? Math.max(0, props.selectedClip.startTime + keyframe.timeMs) : undefined;
   emit("select-keyframe", keyframeId, absoluteTimeMs);
 };
 
@@ -278,11 +285,12 @@ const setKeyframePercentageMode = (field: KeyframePercentageField, enabled: bool
           :key="keyframe.id"
           type="button"
           class="w-full rounded-sm border px-2.5 py-2 text-left transition-colors"
-          :class="
+          :class="[
             activeKeyframeId === keyframe.id
               ? 'border-primary/50 bg-primary/10 text-foreground'
-              : 'border-border bg-accent/40 hover:border-border/80 hover:bg-accent text-muted-foreground'
-          "
+              : 'border-border bg-accent/40 hover:border-border/80 hover:bg-accent text-muted-foreground',
+            keyframe.isOutOfBounds ? 'opacity-60' : ''
+          ]"
           @click="selectKeyframe(keyframe.id)"
         >
           <div class="flex min-w-0 items-center justify-between gap-2">
@@ -333,7 +341,7 @@ const setKeyframePercentageMode = (field: KeyframePercentageField, enabled: bool
               :disabled="activeKeyframeId === BASE_KEYFRAME_ID"
               :model-value="
                 activeKeyframeId === BASE_KEYFRAME_ID
-                  ? 0
+                  ? getBaseKeyframeTimeMs(props.selectedClip)
                   : keyframeRows.find(item => item.id === activeKeyframeId)?.timeMs
               "
               @update:model-value="updateKeyframeTime"

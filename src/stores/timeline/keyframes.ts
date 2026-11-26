@@ -1,10 +1,11 @@
 import type { TimelineKeyframe, TimelineKeyframeProperties } from "@/types/timeline";
 import {
   BASE_KEYFRAME_ID,
-  clampKeyframeTime,
   createKeyframeId,
+  getBaseKeyframeTimeMs,
   normalizeKeyframes,
-  pickKeyframeProperties
+  pickKeyframeProperties,
+  roundKeyframeTime
 } from "@/core/keyframes";
 import { getKeyframeToleranceMs } from "@/core/timeline";
 import type { TimelineStoreContext } from "./context";
@@ -20,23 +21,26 @@ export const createTimelineKeyframes = (ctx: TimelineStoreContext) => {
     const location = findClipLocation(clipId);
     if (!location || location.clip.kind !== "resource" || location.track.locked) return null;
 
-    const nextKeyframe: TimelineKeyframe = {
-      ...keyframe,
-      id: keyframe.id ?? createKeyframeId(),
-      timeMs: clampKeyframeTime(keyframe.timeMs, location.clip.duration),
-      interpolation: keyframe.interpolation ?? "linear",
-      properties: pickKeyframeProperties(keyframe.properties),
-    };
+    const baseTimeMs = getBaseKeyframeTimeMs(location.clip);
+    const nextTimeMs = roundKeyframeTime(keyframe.timeMs);
 
-    if (nextKeyframe.timeMs <= 0) {
+    if (nextTimeMs === baseTimeMs || (baseTimeMs === 0 && nextTimeMs <= 0)) {
       selectedClipId.value = clipId;
       selectedKeyframeId.value = BASE_KEYFRAME_ID;
       return null;
     }
 
+    const nextKeyframe: TimelineKeyframe = {
+      ...keyframe,
+      id: keyframe.id ?? createKeyframeId(),
+      timeMs: nextTimeMs,
+      interpolation: keyframe.interpolation ?? "linear",
+      properties: pickKeyframeProperties(keyframe.properties),
+    };
+
     if (!location.clip.keyframes) location.clip.keyframes = [];
     location.clip.keyframes.push(nextKeyframe);
-    location.clip.keyframes = normalizeKeyframes(location.clip.keyframes, location.clip.duration);
+    location.clip.keyframes = normalizeKeyframes(location.clip.keyframes);
 
     if (options.select !== false) {
       selectedClipId.value = clipId;
@@ -55,8 +59,9 @@ export const createTimelineKeyframes = (ctx: TimelineStoreContext) => {
     const location = findClipLocation(clipId);
     if (!location || location.clip.kind !== "resource" || location.track.locked) return null;
 
-    const clampedTime = clampKeyframeTime(timeMs, location.clip.duration);
-    if (clampedTime <= 0) {
+    const baseTimeMs = getBaseKeyframeTimeMs(location.clip);
+    const targetTime = roundKeyframeTime(timeMs);
+    if (targetTime === baseTimeMs || (baseTimeMs === 0 && targetTime <= 0)) {
       selectedClipId.value = clipId;
       selectedKeyframeId.value = BASE_KEYFRAME_ID;
       return null;
@@ -66,17 +71,17 @@ export const createTimelineKeyframes = (ctx: TimelineStoreContext) => {
 
     const toleranceMs = options.toleranceMs ?? getKeyframeToleranceMs(fps.value);
     const existing = location.clip.keyframes.find((keyframe) => {
-      const existingTime = clampKeyframeTime(keyframe.timeMs, location.clip.duration);
-      return Math.abs(existingTime - clampedTime) <= toleranceMs;
+      const existingTime = roundKeyframeTime(keyframe.timeMs);
+      return Math.abs(existingTime - targetTime) <= toleranceMs;
     });
 
     if (existing) {
-      existing.timeMs = clampedTime;
+      existing.timeMs = targetTime;
       existing.properties = pickKeyframeProperties({
         ...existing.properties,
         ...properties,
       });
-      location.clip.keyframes = normalizeKeyframes(location.clip.keyframes, location.clip.duration);
+      location.clip.keyframes = normalizeKeyframes(location.clip.keyframes);
 
       if (options.select !== false) {
         selectedClipId.value = clipId;
@@ -89,7 +94,7 @@ export const createTimelineKeyframes = (ctx: TimelineStoreContext) => {
     return addClipKeyframe(
       clipId,
       {
-        timeMs: clampedTime,
+        timeMs: targetTime,
         properties,
         interpolation: "linear",
       },
@@ -109,8 +114,15 @@ export const createTimelineKeyframes = (ctx: TimelineStoreContext) => {
     if (!keyframe) return;
 
     if (updates.timeMs !== undefined) {
-      const clampedTime = clampKeyframeTime(updates.timeMs, location.clip.duration);
-      keyframe.timeMs = location.clip.duration > 0 ? Math.max(1, clampedTime) : 0;
+      const baseTimeMs = getBaseKeyframeTimeMs(location.clip);
+      let nextTime = roundKeyframeTime(updates.timeMs);
+      if (location.clip.startTime + nextTime < 0) {
+        nextTime = roundKeyframeTime(-location.clip.startTime);
+      }
+      if (nextTime === baseTimeMs) {
+        nextTime = location.clip.duration > 0 ? roundKeyframeTime(baseTimeMs + 1) : baseTimeMs;
+      }
+      keyframe.timeMs = nextTime;
     }
     if (updates.properties !== undefined) {
       keyframe.properties = pickKeyframeProperties(updates.properties);
@@ -122,7 +134,7 @@ export const createTimelineKeyframes = (ctx: TimelineStoreContext) => {
       keyframe.easing = updates.easing;
     }
 
-    location.clip.keyframes = normalizeKeyframes(location.clip.keyframes, location.clip.duration);
+    location.clip.keyframes = normalizeKeyframes(location.clip.keyframes);
   }
 
   const removeClipKeyframe = (clipId: string, keyframeId: string) => {

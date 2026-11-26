@@ -23,6 +23,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isTime = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value) && value >= 0;
 
+const isSignedTime = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
 /**
  * 校验并迁移工程数据到当前持久化版本。
  *
@@ -159,7 +162,7 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
     if (clip.keyframes !== undefined) {
       if (!Array.isArray(clip.keyframes)) throw new Error("Invalid keyframes");
       for (const keyframe of clip.keyframes) {
-        if (!isRecord(keyframe) || !isTime(keyframe.timeMs) || !isRecord(keyframe.properties)) {
+        if (!isRecord(keyframe) || !isSignedTime(keyframe.timeMs) || !isRecord(keyframe.properties)) {
           throw new Error("Invalid keyframe");
         }
         registerId(keyframe.id, nodeIds);
@@ -233,7 +236,8 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
             clip.params !== undefined ||
             clip.overrides !== undefined ||
             clip.parentClipId !== undefined ||
-            clip.sourceInMs !== undefined
+            clip.sourceInMs !== undefined ||
+            clip.baseKeyframeTimeMs !== undefined
           )
             throw new Error("Invalid group clip");
           validateTracks(clip.tracks, true);
@@ -270,6 +274,10 @@ export const normalizeProjectData = (input: unknown, fallbackName = "DanmakuProj
             throw new Error("Incompatible clip type");
           if (clip.sourceInMs !== undefined && (!isAudio || !isTime(clip.sourceInMs)))
             throw new Error("Invalid source offset");
+          if (clip.baseKeyframeTimeMs !== undefined) {
+            if (isAudio || !isSignedTime(clip.baseKeyframeTimeMs)) throw new Error("Invalid base keyframe offset");
+            if (clip.baseKeyframeTimeMs === 0) delete clip.baseKeyframeTimeMs;
+          }
           if (hasLegacyLists && isAudio && clip.sourceInMs === undefined) clip.sourceInMs = 0;
           if (
             clip.overrides !== undefined &&

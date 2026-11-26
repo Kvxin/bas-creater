@@ -465,3 +465,114 @@ test("60fps consecutive single-frame keyframes, sub-frame splits, and timeline m
     [2750]
   );
 });
+
+test("non-destructive trim preserves out-of-bounds keyframes, shifts left trims, compiles to BAS, and round-trips schema", async () => {
+  const { compileTimelineToBas } = await import("../src/core/compiler");
+  const { getEffectiveDanmuAtTime } = await import("../src/core/keyframes");
+  const { normalizeProjectData, serializeProjectData, PROJECT_VERSION } = await import("../src/core/projectSchema");
+  const { parseBas } = await import("./helpers/basParser");
+
+  const { timeline, danmu } = setup();
+  const baseText = danmu.danmus.find((item) => item.id === "text")!;
+  const initialClip: TimelineResourceClip = {
+    ...textClip("c", "t", 1000, { duration: 5000 }),
+    overrides: { x: "0%" },
+    keyframes: [
+      { id: "kf_2s", timeMs: 2000, interpolation: "linear", properties: { x: "100%" } },
+      { id: "kf_3s", timeMs: 3000, interpolation: "linear", properties: { y: "50%" } }
+    ]
+  };
+  timeline.loadTimeline([track("t", [initialClip])]);
+  const clip = () => timeline.tracks[0]!.clips[0] as TimelineResourceClip;
+
+  // 1. 5s 缩到 1s：关键帧保留原位（不 clamp、不堆叠），1s 处保持原速走到 50%
+  timeline.trimClip("c", 1000, 1000);
+  assert.deepEqual(
+    clip().keyframes!.map((kf) => kf.timeMs),
+    [2000, 3000]
+  );
+  assert.equal(getEffectiveDanmuAtTime(baseText, clip(), 2000).x, "50%");
+
+  const shortBas = compileTimelineToBas(timeline.rootTracks, danmu.danmus);
+  assert.match(shortBas, /x = 50%/);
+  assert.equal(parseBas(shortBas).defs.length, 1);
+
+  // 拉回 10s：原本在 2s 和 3s 的关键帧完好恢复，且不再堆叠
+  timeline.trimClip("c", 1000, 10000);
+  assert.deepEqual(
+    clip().keyframes!.map((kf) => kf.timeMs),
+    [2000, 3000]
+  );
+  assert.equal(getEffectiveDanmuAtTime(baseText, clip(), 3000).x, "100%");
+  assert.equal(getEffectiveDanmuAtTime(baseText, clip(), 11000).x, "100%");
+
+  // 2. 左边缘向内裁剪 +1s（start 1000 -> 2000, duration 10000 -> 9000）：
+  //    baseKeyframeTimeMs 变为 -1000，关键帧平移为 1000 和 2000，绝对时间轴位置保持 3000 和 4000 不动
+  timeline.trimClip("c", 2000, 9000);
+  assert.equal(clip().baseKeyframeTimeMs, -1000);
+  assert.deepEqual(
+    clip().keyframes!.map((kf) => kf.timeMs),
+    [1000, 2000]
+  );
+  assert.equal(getEffectiveDanmuAtTime(baseText, clip(), 2000).x, "50%");
+  assert.equal(getEffectiveDanmuAtTime(baseText, clip(), 3000).x, "100%");
+
+  const leftTrimmedBas = compileTimelineToBas(timeline.rootTracks, danmu.danmus);
+  assert.match(leftTrimmedBas, /x = 50%/);
+  assert.match(leftTrimmedBas, /x = 100%/);
+  assert.equal(parseBas(leftTrimmedBas).defs.length, 1);
+
+  // 持久化 schema 支持负关键帧时间与 baseKeyframeTimeMs 往返校验
+  const project = serializeProjectData({
+    version: PROJECT_VERSION,
+    id: "proj_trim",
+    name: "TrimTest",
+    createdAt: 1,
+    updatedAt: 1,
+    canvas: { width: 800, height: 450 },
+    assets: [{ id: baseText.id, type: baseText.type, binId: null, danmu: baseText }],
+    bins: [],
+    danmus: [baseText],
+    audioMeta: [],
+    tracks: timeline.rootTracks,
+    timeline: { duration: timeline.duration }
+  });
+  const restored = normalizeProjectData(project);
+  const restoredClip = restored.tracks[0]!.clips[0] as TimelineResourceClip;
+  assert.equal(restoredClip.baseKeyframeTimeMs, -1000);
+  assert.deepEqual(
+    restoredClip.keyframes!.map((kf) => kf.timeMs),
+    [1000, 2000]
+  );
+
+  // 3. 左边缘向外拉回原起点 1000，再继续向左扩展到 500：无损还原并正确产生 +500ms 前置保持段
+  timeline.trimClip("c", 1000, 10000);
+  assert.equal(clip().baseKeyframeTimeMs, undefined);
+  assert.deepEqual(
+    clip().keyframes!.map((kf) => kf.timeMs),
+    [2000, 3000]
+  );
+
+  timeline.trimClip("c", 500, 10500);
+  assert.equal(clip().baseKeyframeTimeMs, 500);
+  assert.deepEqual(
+    clip().keyframes!.map((kf) => kf.timeMs),
+    [2500, 3500]
+  );
+  assert.equal(getEffectiveDanmuAtTime(baseText, clip(), 750).x, "0%");
+  assert.equal(getEffectiveDanmuAtTime(baseText, clip(), 2000).x, "50%");
+
+  const leftExtendedBas = compileTimelineToBas(timeline.rootTracks, danmu.danmus);
+  assert.equal(parseBas(leftExtendedBas).defs.length, 1);
+  // 0.5s 延时进场 + 0.5s 保持基础帧，随后 2s 动画到 100%
+  assert.match(leftExtendedBas, /then set obj_c \{\} 0\.5s/);
+  assert.match(leftExtendedBas, /then set obj_c \{ x = 100% \} 2s/);
+
+  // 在左扩展片段的前置保持段（绝对时间 700ms，即局部 200ms < baseKeyframeTimeMs 500ms）分割
+  const rightHalf = timeline.splitClip("c", 700) as TimelineResourceClip;
+  assert.equal(rightHalf.baseKeyframeTimeMs, 300);
+  assert.deepEqual(
+    rightHalf.keyframes!.map((kf) => kf.timeMs),
+    [2300, 3300]
+  );
+});

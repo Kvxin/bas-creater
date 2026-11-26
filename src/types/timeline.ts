@@ -46,6 +46,8 @@ export interface TimelineResourceClip extends TimelineClipBase {
   overrides?: Partial<AnyDanmu>;
   parentClipId?: string;
   sourceInMs?: number;
+  /** 基础关键帧相对片段起点的局部时间偏移（ms，默认 0）；左边缘裁剪时随关键帧一起无损平移。 */
+  baseKeyframeTimeMs?: number;
   effects?: EffectInstance[];
   keyframes?: TimelineKeyframe[]; // AE/视频编辑器式关键帧
 }
@@ -60,6 +62,7 @@ export interface TimelineGroupClip extends TimelineClipBase {
   overrides?: never;
   parentClipId?: never;
   sourceInMs?: never;
+  baseKeyframeTimeMs?: never;
 }
 
 export type TimelineClip = TimelineResourceClip | TimelineGroupClip;

@@ -33,17 +33,29 @@ const roundTenths = (value: number) => Math.round(value * 10) / 10;
 export const createKeyframeId = () =>
   `kf_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
 
+export const roundKeyframeTime = (timeMs: number) =>
+  roundTenths(Number.isFinite(timeMs) ? timeMs : 0);
+
 export const clampKeyframeTime = (timeMs: number, clipDuration: number) =>
   clamp(roundTenths(Number.isFinite(timeMs) ? timeMs : 0), 0, Math.max(0, roundTenths(clipDuration)));
 
+export const getBaseKeyframeTimeMs = (clip: Pick<TimelineClip, "kind" | "baseKeyframeTimeMs">): number =>
+  clip.kind === "resource" && typeof clip.baseKeyframeTimeMs === "number" && Number.isFinite(clip.baseKeyframeTimeMs)
+    ? roundTenths(clip.baseKeyframeTimeMs)
+    : 0;
+
+/**
+ * 规范化关键帧列表：仅做精度对齐、字段过滤与按时间排序，不做 `[0, clipDuration]` 裁切，
+ * 以支持非破坏性左右边缘裁剪（允许关键帧临时落在片段可见窗口之外）。
+ */
 export const normalizeKeyframes = (
   keyframes: TimelineKeyframe[] | undefined,
-  clipDuration: number
+  _clipDuration?: number
 ) =>
   [...(keyframes ?? [])]
     .map((keyframe) => ({
       ...keyframe,
-      timeMs: clampKeyframeTime(keyframe.timeMs, clipDuration),
+      timeMs: roundKeyframeTime(keyframe.timeMs),
       properties: pickKeyframeProperties(keyframe.properties),
       interpolation: keyframe.interpolation ?? "linear",
     }))
@@ -205,19 +217,76 @@ const mergeProperties = (
   ...(override ?? {}),
 });
 
-const getCumulativeKeyframes = (resource: AnyDanmu, clip: TimelineClip) => {
-  let accumulated = getBaseKeyframeProperties(clip.kind === "resource" ? { ...resource, ...clip.overrides } as AnyDanmu : resource);
+export interface KeyframeTimelinePoint {
+  id: string;
+  timeMs: number;
+  isBase: boolean;
+  interpolation: "linear" | "step";
+  easing?: string;
+  properties: TimelineKeyframeProperties;
+}
 
-  return normalizeKeyframes(clip.keyframes, clip.duration).map((keyframe) => {
-    accumulated = mergeProperties(
-      accumulated,
-      pickKeyframePropertiesForResource(resource, keyframe.properties)
-    );
-    return {
-      keyframe,
-      properties: { ...accumulated },
-    };
+const getCumulativeKeyframes = (resource: AnyDanmu, clip: TimelineClip) => {
+  const base = getBaseKeyframeProperties(
+    clip.kind === "resource" ? ({ ...resource, ...clip.overrides } as AnyDanmu) : resource
+  );
+  const baseTimeMs = getBaseKeyframeTimeMs(clip);
+  const normalized = normalizeKeyframes(clip.keyframes);
+  const beforeBase = normalized.filter((keyframe) => keyframe.timeMs < baseTimeMs);
+  const fromBase = normalized.filter((keyframe) => keyframe.timeMs >= baseTimeMs);
+
+  let beforeAcc = { ...base };
+  const beforeEntries = beforeBase.map((keyframe) => {
+    beforeAcc = mergeProperties(beforeAcc, pickKeyframePropertiesForResource(resource, keyframe.properties));
+    return { keyframe, properties: { ...beforeAcc } };
   });
+
+  let afterAcc = { ...base };
+  const afterEntries = fromBase.map((keyframe) => {
+    afterAcc = mergeProperties(afterAcc, pickKeyframePropertiesForResource(resource, keyframe.properties));
+    return { keyframe, properties: { ...afterAcc } };
+  });
+
+  return [...beforeEntries, ...afterEntries];
+};
+
+export const getKeyframeTimelinePoints = (
+  resource: AnyDanmu,
+  clip: TimelineClip
+): KeyframeTimelinePoint[] => {
+  const base = getBaseKeyframeProperties(
+    clip.kind === "resource" ? ({ ...resource, ...clip.overrides } as AnyDanmu) : resource
+  );
+  const baseTimeMs = getBaseKeyframeTimeMs(clip);
+  const cumulative = getCumulativeKeyframes(resource, clip);
+  const before = cumulative.filter(({ keyframe }) => keyframe.timeMs < baseTimeMs);
+  const fromBase = cumulative.filter(({ keyframe }) => keyframe.timeMs >= baseTimeMs);
+
+  return [
+    ...before.map(({ keyframe, properties }) => ({
+      id: keyframe.id,
+      timeMs: keyframe.timeMs,
+      isBase: false,
+      interpolation: keyframe.interpolation ?? "linear",
+      easing: keyframe.easing,
+      properties
+    })),
+    {
+      id: BASE_KEYFRAME_ID,
+      timeMs: baseTimeMs,
+      isBase: true,
+      interpolation: "linear",
+      properties: base
+    },
+    ...fromBase.map(({ keyframe, properties }) => ({
+      id: keyframe.id,
+      timeMs: keyframe.timeMs,
+      isBase: false,
+      interpolation: keyframe.interpolation ?? "linear",
+      easing: keyframe.easing,
+      properties
+    }))
+  ];
 };
 
 export const resolveKeyframeProperties = (
@@ -225,7 +294,9 @@ export const resolveKeyframeProperties = (
   clip: TimelineClip,
   keyframeId: string | null | undefined
 ): TimelineKeyframeProperties => {
-  const base = getBaseKeyframeProperties(clip.kind === "resource" ? { ...resource, ...clip.overrides } as AnyDanmu : resource);
+  const base = getBaseKeyframeProperties(
+    clip.kind === "resource" ? ({ ...resource, ...clip.overrides } as AnyDanmu) : resource
+  );
   if (!keyframeId || isBaseKeyframeId(keyframeId)) return base;
 
   return getCumulativeKeyframes(resource, clip).find(
@@ -239,48 +310,44 @@ export const getEffectiveKeyframePropertiesAtTime = (
   localTimeMs: number,
   reference?: KeyframeReferenceSize
 ): TimelineKeyframeProperties => {
-  const base = getBaseKeyframeProperties(clip.kind === "resource" ? { ...resource, ...clip.overrides } as AnyDanmu : resource);
-  const keyframes = getCumulativeKeyframes(resource, clip);
-  const timeMs = clampKeyframeTime(localTimeMs, clip.duration);
-
-  if (keyframes.length === 0) return base;
-
-  const firstState = keyframes[0];
-  const first = firstState?.keyframe;
-  if (!first) return base;
-
-  if (timeMs <= first.timeMs) {
-    if (first.timeMs <= 0) return firstState?.properties ?? base;
-
-    const progress =
-      first.interpolation === "step"
-        ? timeMs >= first.timeMs
-          ? 1
-          : 0
-        : clamp(timeMs / first.timeMs, 0, 1);
-    const target = firstState?.properties ?? base;
-    return interpolateProperties(base, target, progress, reference);
+  const points = getKeyframeTimelinePoints(resource, clip);
+  const timeMs = roundKeyframeTime(localTimeMs);
+  const first = points[0];
+  if (!first) {
+    return getBaseKeyframeProperties(
+      clip.kind === "resource" ? ({ ...resource, ...clip.overrides } as AnyDanmu) : resource
+    );
   }
 
-  for (let index = 1; index < keyframes.length; index += 1) {
-    const previousState = keyframes[index - 1];
-    const nextState = keyframes[index];
-    const previous = previousState?.keyframe;
-    const next = nextState?.keyframe;
-    if (!previous || !next || !previousState || !nextState || timeMs > next.timeMs) continue;
-
-    const span = Math.max(1, next.timeMs - previous.timeMs);
-    const progress =
-      next.interpolation === "step"
-        ? timeMs >= next.timeMs
-          ? 1
-          : 0
-        : clamp((timeMs - previous.timeMs) / span, 0, 1);
-
-    return interpolateProperties(previousState.properties, nextState.properties, progress, reference);
+  if (points.length === 1 || timeMs < first.timeMs) {
+    return first.properties;
   }
 
-  return keyframes[keyframes.length - 1]?.properties ?? base;
+  // 若同一时刻存在多个点（例如某帧正好落在 baseTimeMs 上），取该时刻最后一个点。
+  let index = 0;
+  while (index + 1 < points.length && points[index + 1]!.timeMs <= timeMs) {
+    index += 1;
+  }
+
+  const previous = points[index]!;
+  const next = points[index + 1];
+  if (!next || timeMs <= previous.timeMs) {
+    return previous.properties;
+  }
+
+  const span = next.timeMs - previous.timeMs;
+  if (span <= 0) {
+    return next.properties;
+  }
+
+  const progress =
+    next.interpolation === "step"
+      ? timeMs >= next.timeMs
+        ? 1
+        : 0
+      : clamp((timeMs - previous.timeMs) / span, 0, 1);
+
+  return interpolateProperties(previous.properties, next.properties, progress, reference);
 };
 
 const interpolateProperties = (

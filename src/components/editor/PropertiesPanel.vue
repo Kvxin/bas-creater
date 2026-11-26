@@ -18,6 +18,7 @@ import { flattenTimelineClips } from "@/core/timelineGroups";
 import {
   BASE_KEYFRAME_ID,
   clampKeyframeTime,
+  getBaseKeyframeTimeMs,
   getEffectiveDanmuAtTime,
   pickKeyframePropertiesForResource
 } from "@/core/keyframes";
@@ -258,8 +259,8 @@ const tryAutoKeyframeProperty = (key: string, value: unknown) => {
   if (Object.keys(properties).length === 0) return false;
 
   const rawLocalTimeMs = timelineStore.currentTime - clip.startTime;
-  if (rawLocalTimeMs <= 0 || rawLocalTimeMs > clip.duration) return false;
   const localTimeMs = clampKeyframeTime(rawLocalTimeMs, clip.duration);
+  if (rawLocalTimeMs < 0 || rawLocalTimeMs > clip.duration || localTimeMs === getBaseKeyframeTimeMs(clip)) return false;
 
   timelineStore.upsertClipKeyframeAtTime(clip.id, localTimeMs, properties);
   return true;

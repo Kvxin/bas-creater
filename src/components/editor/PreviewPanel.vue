@@ -19,6 +19,7 @@ import type { TimelineClip } from "@/types/timeline";
 import {
   BASE_KEYFRAME_ID,
   clampKeyframeTime,
+  getBaseKeyframeTimeMs,
   getEffectiveDanmuAtTime,
   pickKeyframePropertiesForResource
 } from "@/core/keyframes";
@@ -181,8 +182,9 @@ const handleTransformCommit = (updates: Array<{ clipId: string; changes: Partial
 
     const rawLocalTimeMs = timelineStore.currentTime - clip.startTime;
     const localTimeMs = clampKeyframeTime(rawLocalTimeMs, clip.duration);
+    const baseTimeMs = getBaseKeyframeTimeMs(clip);
 
-    if (timelineStore.autoKeyframe && rawLocalTimeMs > 0 && rawLocalTimeMs <= clip.duration) {
+    if (timelineStore.autoKeyframe && rawLocalTimeMs >= 0 && rawLocalTimeMs <= clip.duration && localTimeMs !== baseTimeMs) {
       timelineStore.upsertClipKeyframeAtTime(clip.id, localTimeMs, keyframeProperties);
       continue;
     }
@@ -364,6 +366,7 @@ const compileAndLoad = async (seekToCurrent = true): Promise<boolean> => {
     const compileStart = measurement ? performance.now() : 0;
     const code = compileTimelineToBas(timelineStore.tracks, danmuStore.danmus, {
       audioResourceIds: audioStore.audioResources.map(resource => resource.id),
+      reference: timelineStore.canvasReferenceSize ?? undefined,
       onError: message => errors.push(message),
       onRange: (clipId, startLine, endLine) => ranges.push({ clipId, startLine, endLine })
     });

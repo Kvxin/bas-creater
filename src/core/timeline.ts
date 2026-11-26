@@ -1,4 +1,4 @@
-import { normalizeKeyframes } from "@/core/keyframes";
+import { getBaseKeyframeTimeMs, normalizeKeyframes } from "@/core/keyframes";
 import type {
   TimelineDisplayMode,
   TimelineMarker,
@@ -338,8 +338,13 @@ export function collectTimelineSnapCandidates(options: {
         addCandidate(clip.startTime + clip.duration, "clipEnd");
       }
       if (clip.id !== options.excludeClipId || options.excludeKeyframeId) {
-        for (const keyframe of normalizeKeyframes(clip.keyframes, clip.duration)) {
+        const baseTimeMs = getBaseKeyframeTimeMs(clip);
+        if (baseTimeMs > 0 && baseTimeMs <= clip.duration) {
+          addCandidate(clip.startTime + baseTimeMs, "keyframe");
+        }
+        for (const keyframe of normalizeKeyframes(clip.keyframes)) {
           if (keyframe.id === options.excludeKeyframeId) continue;
+          if (keyframe.timeMs < 0 || keyframe.timeMs > clip.duration) continue;
           addCandidate(clip.startTime + keyframe.timeMs, "keyframe");
         }
       }

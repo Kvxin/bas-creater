@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import type {
   TimelineTrack,
   TimelineClip,
+  TimelineResourceClip,
   TimelineTrackType,
   TimelineGroupClip,
   TimelineDisplayMode,
@@ -28,7 +29,7 @@ import { useDanmuStore } from "@/stores/danmu";
 import { findEffectTimingConflict } from "@/core/compiler";
 import { splitClipAnimation } from "@/core/splitClip";
 import { getTimelineDuration, updateGroupDurations, visitTimelineClips } from "@/core/timelineGroups";
-import { BASE_KEYFRAME_ID } from "@/core/keyframes";
+import { BASE_KEYFRAME_ID, getBaseKeyframeTimeMs, roundKeyframeTime } from "@/core/keyframes";
 import {
   clampTimelineFps,
   DEFAULT_TIMELINE_FPS,
@@ -436,12 +437,24 @@ export const useTimelineStore = defineStore("timeline", () => {
     )
       return;
     const { clip } = location;
-    if (clip.kind === "resource" && clip.effects?.length) {
-      updateClip(clipId, {
-        startTime,
-        duration,
-        effects: sliceEffects(clip.effects, startTime - clip.startTime, duration)
-      });
+    if (clip.kind === "resource") {
+      const deltaStart = roundKeyframeTime(startTime - clip.startTime);
+      const isAudio = useAudioStore().audioResources.some((resource) => resource.id === clip.resourceId);
+      const patch: Partial<TimelineResourceClip> = { startTime, duration };
+      if (clip.effects?.length) {
+        patch.effects = sliceEffects(clip.effects, startTime - clip.startTime, duration);
+      }
+      // 方向 A：左边缘裁剪时反向平移基础帧与关键帧，使其保持锚定在绝对时间轴原位，右边缘裁剪完全不动关键帧。
+      if (!isAudio && deltaStart !== 0 && (clip.keyframes?.length || clip.baseKeyframeTimeMs)) {
+        patch.baseKeyframeTimeMs = roundKeyframeTime(getBaseKeyframeTimeMs(clip) - deltaStart);
+        if (clip.keyframes?.length) {
+          patch.keyframes = clip.keyframes.map((keyframe) => ({
+            ...keyframe,
+            timeMs: roundKeyframeTime(keyframe.timeMs - deltaStart)
+          }));
+        }
+      }
+      updateClip(clipId, patch);
     } else {
       updateClip(clipId, { startTime, duration });
     }
@@ -612,6 +625,8 @@ export const useTimelineStore = defineStore("timeline", () => {
       overrides: split ? { ...source.overrides, ...split.rightProperties } : source.overrides,
       keyframes: split?.rightKeyframes ?? source.keyframes
     };
+    if (split?.rightBaseKeyframeTimeMs) rightClip.baseKeyframeTimeMs = split.rightBaseKeyframeTimeMs;
+    else delete rightClip.baseKeyframeTimeMs;
     if (source.effects?.length) {
       const left = sliceEffects(source.effects, 0, offsetMs);
       const right = sliceEffects(source.effects, offsetMs, remainingMs, true);

@@ -1,5 +1,5 @@
 import { computed, getCurrentScope, onScopeDispose, reactive, ref, type Ref } from "vue";
-import { clampKeyframeTime } from "@/core/keyframes";
+import { roundKeyframeTime } from "@/core/keyframes";
 import {
   collectTimelineSnapCandidates,
   getMinClipDurationMs,
@@ -444,14 +444,25 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
   };
 
   const getKeyframeMarkerStyle = (clip: TimelineClip, marker: { id: string; timeMs: number }) => {
-    const timeMs =
+    let timeMs =
       isDraggingKeyframe.value && draggedKeyframeClipId.value === clip.id && draggedKeyframeId.value === marker.id
         ? tempKeyframeTime.value
         : marker.timeMs;
-    const leftPercent = (clampKeyframeTime(timeMs, clip.duration) / Math.max(1, clip.duration)) * 100;
+
+    // 实时向左/向右拖拽片段左边缘时，关键帧标记在时间轴上保持原绝对位置不动。
+    if (
+      isResizingClip.value &&
+      resizingClipId.value === clip.id &&
+      resizingHandle.value === "left" &&
+      !resizingAudio.value
+    ) {
+      timeMs -= tempState.startTime - initialResizeStartTime.value;
+    }
+
+    const leftPx = (timeMs / 1000) * pixelsPerSecond.value;
 
     return {
-      left: `${leftPercent}%`
+      left: `${leftPx}px`
     };
   };
 
@@ -461,10 +472,10 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     if (!clip) return;
 
     const deltaMs = ((event.clientX - dragKeyframeStartX.value) / pixelsPerSecond.value) * 1000;
-    const rawAbsoluteMs = clip.startTime + initialKeyframeTime.value + deltaMs;
+    const rawAbsoluteMs = Math.max(0, clip.startTime + initialKeyframeTime.value + deltaMs);
     const snapped = snapTime(rawAbsoluteMs, Boolean(event.shiftKey));
     interactionSnapKind.value = snapped.kind;
-    tempKeyframeTime.value = clampKeyframeTime(snapped.timeMs - clip.startTime, clip.duration);
+    tempKeyframeTime.value = roundKeyframeTime(snapped.timeMs - clip.startTime);
   };
 
   const cancelDragKeyframe = () => {

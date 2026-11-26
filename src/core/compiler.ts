@@ -13,8 +13,13 @@ import type {
 } from "@/types/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import {
+  applyKeyframeProperties,
+  getBaseKeyframeTimeMs,
+  getEffectiveKeyframePropertiesAtTime,
+  getKeyframeTimelinePoints,
   normalizeKeyframes,
-  pickKeyframePropertiesForResource
+  pickKeyframePropertiesForResource,
+  type KeyframeReferenceSize
 } from "@/core/keyframes";
 import { isDanmuFieldBasDefault, resolveDanmuDefaults } from "@/core/danmuDefaults";
 import {
@@ -195,8 +200,105 @@ interface BasUnit {
 }
 type WriteSet = (command: BasUnit["command"], properties: SetProperties, duration: number) => void;
 
+const diffKeyframeProperties = (
+  previous: TimelineKeyframeProperties,
+  next: TimelineKeyframeProperties
+): TimelineKeyframeProperties => {
+  const diff: TimelineKeyframeProperties = {};
+  for (const [key, value] of Object.entries(next)) {
+    if (value === undefined) continue;
+    if (!Object.is((previous as Record<string, unknown>)[key], value)) {
+      (diff as Record<string, unknown>)[key] = value;
+    }
+  }
+  return diff;
+};
+
+const validateKeyframesForCompile = (clip: TimelineResourceClip, resource: AnyDanmu) => {
+  const keyframes = normalizeKeyframes(clip.keyframes);
+  for (const keyframe of keyframes) {
+    if (keyframe.easing && keyframe.easing !== "linear") {
+      throw new Error(`Unsupported keyframe easing: ${keyframe.easing}`);
+    }
+    const properties = pickKeyframePropertiesForResource(resource, keyframe.properties);
+    const unsupported = Object.keys(keyframe.properties).filter(key => !(key in properties));
+    if (unsupported.length) throw new Error(`Unsupported keyframe properties: ${unsupported.join(", ")}`);
+  }
+  return keyframes;
+};
+
+/**
+ * 将包含窗口外关键帧（`< 0` 或 `> clip.duration`）或左裁偏移 `baseKeyframeTimeMs` 的片段，
+ * 无损投影到 `[0, clip.duration]` 可见窗口上供 BAS 导出，不修改原始片段数据。
+ */
+const resolveCompiledAnimation = (
+  clip: TimelineResourceClip,
+  resource: AnyDanmu,
+  reference?: KeyframeReferenceSize
+): { clip: TimelineResourceClip; resource: AnyDanmu } => {
+  const keyframes = validateKeyframesForCompile(clip, resource);
+  const baseTimeMs = getBaseKeyframeTimeMs(clip);
+  const allWithinWindow =
+    baseTimeMs === 0 && keyframes.every(keyframe => keyframe.timeMs >= 0 && keyframe.timeMs <= clip.duration);
+  if (allWithinWindow) {
+    return { clip, resource };
+  }
+
+  const startProps = getEffectiveKeyframePropertiesAtTime(resource, clip, 0, reference);
+  const initialResource = applyKeyframeProperties(resource, startProps);
+  const points = getKeyframeTimelinePoints(resource, clip);
+  const compiledKeyframes: NonNullable<TimelineResourceClip["keyframes"]> = [];
+  let previousProps = startProps;
+
+  for (const point of points) {
+    if (point.timeMs <= 0 || point.timeMs > clip.duration) continue;
+    const diff = diffKeyframeProperties(previousProps, point.properties);
+    compiledKeyframes.push({
+      id: point.id,
+      timeMs: point.timeMs,
+      properties: diff,
+      interpolation: point.interpolation,
+      ...(point.easing ? { easing: point.easing } : {})
+    });
+    previousProps = point.properties;
+  }
+
+  const nextAfterEnd = points.find(point => point.timeMs > clip.duration);
+  const hasPointAtEnd = compiledKeyframes.some(keyframe => keyframe.timeMs === clip.duration);
+  if (clip.duration > 0 && nextAfterEnd && nextAfterEnd.interpolation !== "step" && !hasPointAtEnd) {
+    const endProps = getEffectiveKeyframePropertiesAtTime(resource, clip, clip.duration, reference);
+    const diff = diffKeyframeProperties(previousProps, endProps);
+    if (Object.keys(diff).length > 0) {
+      compiledKeyframes.push({
+        id: "__trim_end__",
+        timeMs: clip.duration,
+        properties: diff,
+        interpolation: "linear",
+        ...(nextAfterEnd.easing ? { easing: nextAfterEnd.easing } : {})
+      });
+    }
+  }
+
+  // 去掉末尾不产生属性变化的纯占位保持点，避免生成多余的空 set 语句。
+  while (
+    compiledKeyframes.length > 0 &&
+    Object.keys(compiledKeyframes[compiledKeyframes.length - 1]!.properties).length === 0
+  ) {
+    compiledKeyframes.pop();
+  }
+
+  return {
+    clip: {
+      ...clip,
+      baseKeyframeTimeMs: undefined,
+      keyframes: compiledKeyframes
+    },
+    resource: initialResource
+  };
+};
+
 const appendKeyframeSets = (clip: TimelineClip, resource: AnyDanmu, write: WriteSet) => {
-  const keyframes = normalizeKeyframes(clip.keyframes, clip.duration);
+  const keyframes = normalizeKeyframes(clip.keyframes);
   const targetAlpha = resource.opacity ?? 1;
   const startDelayMs = Math.max(0, clip.startTime);
 
@@ -349,17 +451,30 @@ const hasHostAnimatedColor = (units: BasUnit[]) =>
   units.some(unit => "color" in unit.properties && unit.properties.color !== undefined);
 
 /** 返回特效区间与宿主关键帧争用的属性名；没有冲突时返回 null。resource 需已合并片段 overrides。 */
-export const findEffectTimingConflict = (clip: TimelineResourceClip, resource: AnyDanmu) => {
+export const findEffectTimingConflict = (
+  clip: TimelineResourceClip,
+  resource: AnyDanmu,
+  reference?: KeyframeReferenceSize
+) => {
   const colorChain = effectColorChain(clip, resource);
   if (!colorChain.hasAnimatedColor) return null;
+  const compiled = resolveCompiledAnimation(clip, resource, reference);
   const initialResource =
-    colorChain.initialColor !== undefined && resource.type === "text"
-      ? { ...resource, color: colorChain.initialColor }
-      : resource;
-  return hasHostAnimatedColor(hostSets(clip, initialResource)) ? "color" : null;
+    colorChain.initialColor !== undefined && compiled.resource.type === "text"
+      ? { ...compiled.resource, color: colorChain.initialColor }
+      : compiled.resource;
+  return hasHostAnimatedColor(hostSets(compiled.clip, initialResource)) ? "color" : null;
 };
 
-const compileResolvedClip = (clip: TimelineResourceClip, resource: AnyDanmu, varName: string): string => {
+const compileResolvedClip = (
+  clip: TimelineResourceClip,
+  resource: AnyDanmu,
+  varName: string,
+  reference?: KeyframeReferenceSize
+): string => {
+  const compiled = resolveCompiledAnimation(clip, resource, reference);
+  clip = compiled.clip;
+  resource = compiled.resource;
   // 1. BAS 仅在 def 中读取的静态样式（如 strokeWidth / strokeColor / fillColor / borderColor / textColor）直接并入定义。
   const defStyle = resolveEffectDefStyle(clip.effects);
   const colorChain = effectColorChain(clip, resource);
@@ -387,7 +502,11 @@ const compileResolvedClip = (clip: TimelineResourceClip, resource: AnyDanmu, var
   );
 };
 
-export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string => {
+export const compileClipToBas = (
+  clip: TimelineClip,
+  resource: AnyDanmu,
+  reference?: KeyframeReferenceSize
+): string => {
   if (clip.kind === "group") throw new Error("Cannot compile a group as a single clip");
   if (clip.parentClipId || resource.parentId || clip.overrides?.parentId) {
     throw new Error("A parented clip must be compiled in its timeline");
@@ -395,7 +514,8 @@ export const compileClipToBas = (clip: TimelineClip, resource: AnyDanmu): string
   return compileResolvedClip(
     clip,
     { ...resource, ...clip.overrides, id: resource.id, type: resource.type } as AnyDanmu,
-    basNameForClip(clip.id)
+    basNameForClip(clip.id),
+    reference
   );
 };
 
@@ -412,6 +532,7 @@ export const compileTimelineToBas = (
   resources: AnyDanmu[],
   options: {
     audioResourceIds?: Iterable<string>;
+    reference?: KeyframeReferenceSize;
     onError?: (message: string) => void;
     onRange?: (clipId: string, startLine: number, endLine: number) => void;
   } = {}
@@ -462,7 +583,7 @@ export const compileTimelineToBas = (
           parentId = parent.parentClipId;
         }
         resolved.parentId = clip.parentClipId ? names.get(clip.parentClipId) : undefined;
-        const code = compileResolvedClip(clip, resolved, names.get(clip.id)!);
+        const code = compileResolvedClip(clip, resolved, names.get(clip.id)!, options.reference);
         const lineCount = code.split("\n").length;
         options.onRange?.(clip.id, line, line + lineCount - 1);
         line += lineCount;

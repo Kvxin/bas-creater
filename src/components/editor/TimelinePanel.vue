@@ -7,6 +7,9 @@ import TimeRuler from "./TimeRuler.vue";
 import TimelineToolbar from "./timeline/TimelineToolbar.vue";
 import TimelineTrackHeaders from "./timeline/TimelineTrackHeaders.vue";
 import TimelineTrackResizeHandle, { DEFAULT_TRACK_HEIGHT } from "./timeline/TimelineTrackResizeHandle.vue";
+import TimelineClipFilmstrip from "./timeline/TimelineClipFilmstrip.vue";
+import { DEFAULT_COORDINATE_REFERENCE } from "@/core/coordinates";
+import { CLIP_FILMSTRIP_HEADER_HEIGHT, isClipFilmstripExpanded } from "@/core/filmstrip";
 import {
   collectTimelineSnapCandidates,
   formatTime,
@@ -24,7 +27,7 @@ import { useAudioStore } from "@/stores/audio";
 import { useContextMenuStore } from "@/stores/contextMenu";
 import { useTimelinePlayhead } from "@/composables/useTimelinePlayhead";
 import { useTimelineInteractions } from "@/composables/useTimelineInteractions";
-import { BASE_KEYFRAME_ID, normalizeKeyframes } from "@/core/keyframes";
+import { BASE_KEYFRAME_ID, getBaseKeyframeTimeMs, normalizeKeyframes } from "@/core/keyframes";
 import { draggedEffect, EFFECT_DRAG_TYPE, effectCatalog } from "@/effects/registry";
 import { effectText, isDynamicEffect, matchesEffect, type EffectInstance } from "@/core/effects";
 import { runSplitAction } from "@/utils/splitAction";
@@ -55,6 +58,26 @@ const resizeTrack = (trackId: string, height: number) => {
   if (height === DEFAULT_TRACK_HEIGHT) trackHeights.delete(trackId);
   else trackHeights.set(trackId, height);
 };
+
+const filmstripCanvasSize = computed(() => timelineStore.canvasReferenceSize ?? DEFAULT_COORDINATE_REFERENCE);
+
+const isClipFilmstripMode = (track: TimelineTrack, clip: TimelineClip) =>
+  isClipFilmstripExpanded(getTrackHeight(track.id)) && !isAudioClip(clip);
+
+const getDisplayClipStartMs = (clip: TimelineClip) =>
+  isDraggingClip.value && draggedClipId.value === clip.id
+    ? tempState.startTime
+    : isResizingClip.value && resizingClipId.value === clip.id
+      ? tempState.startTime
+      : clip.startTime;
+
+const getDisplayClipDurationMs = (clip: TimelineClip) =>
+  isResizingClip.value && resizingClipId.value === clip.id ? tempState.duration : clip.duration;
+
+const getDisplayClipTimeOffsetMs = (clip: TimelineClip) =>
+  isResizingClip.value && resizingClipId.value === clip.id && resizingHandle.value === "left"
+    ? tempState.startTime - initialResizeStartTime.value
+    : 0;
 
 const TIMELINE_END_PADDING_MS = 10000;
 
@@ -485,30 +508,34 @@ const getClipName = (clip: TimelineClip) => {
   return clip.name || t("common.unknown");
 };
 
-const getClipKeyframeMarkers = (clip: TimelineClip) =>
-  clip.kind === "group"
-    ? []
-    : [
-        {
-          id: BASE_KEYFRAME_ID,
-          timeMs: 0,
-          isBase: true,
-          label: t("common.keyframeBase")
-        },
-        ...normalizeKeyframes(clip.keyframes, clip.duration).map((keyframe, index) => ({
-          id: keyframe.id,
-          timeMs: keyframe.timeMs,
-          isBase: false,
-          label: t("common.keyframeLabel", { n: index + 2 })
-        }))
-      ];
+const getClipKeyframeMarkers = (clip: TimelineClip) => {
+  if (clip.kind === "group") return [];
+  const baseTimeMs = getBaseKeyframeTimeMs(clip);
+  const rawMarkers = [
+    {
+      id: BASE_KEYFRAME_ID,
+      timeMs: baseTimeMs,
+      isBase: true,
+      isOutOfBounds: baseTimeMs < 0 || baseTimeMs > clip.duration,
+      label: t("common.keyframeBase")
+    },
+    ...normalizeKeyframes(clip.keyframes).map((keyframe, index) => ({
+      id: keyframe.id,
+      timeMs: keyframe.timeMs,
+      isBase: false,
+      isOutOfBounds: keyframe.timeMs < 0 || keyframe.timeMs > clip.duration,
+      label: t("common.keyframeLabel", { n: index + 2 })
+    }))
+  ];
+  return rawMarkers.filter(marker => clip.startTime + marker.timeMs >= 0);
+};
 
 const isKeyframeSelected = (clip: TimelineClip, keyframeId: string) =>
   timelineStore.selectedClipId === clip.id && timelineStore.selectedKeyframeId === keyframeId;
 
 /** 双击关键帧 → 将播放头定位到关键帧所在时间 */
 const handleKeyframeDblClick = (clip: TimelineClip, marker: { timeMs: number }) => {
-  const absoluteTime = clip.startTime + marker.timeMs;
+  const absoluteTime = Math.max(0, clip.startTime + marker.timeMs);
   timelineStore.setCurrentTime(absoluteTime);
 };
 
@@ -779,21 +806,25 @@ function handleVolumeSelect(clipId: string) {
               <div
                 v-for="clip in track.clips"
                 :key="clip.id"
-                class="absolute top-1 bottom-1 rounded-sm border text-xs flex items-center px-2 text-white overflow-visible cursor-move select-none transition-[filter,outline-color] hover:brightness-110 group/audio"
-                :class="{
-                  'outline outline-1 outline-primary outline-offset-0 z-10': timelineStore.selectedClipIds.includes(
-                    clip.id
-                  ),
-                  'outline outline-2 outline-primary z-20':
-                    effectHoverId === clip.id ||
-                    (dragTargetGroupId === clip.id && canDropDraggedClipIntoGroup(clip.id)),
-                  'outline outline-2 outline-destructive z-20':
-                    dragTargetGroupId === clip.id && !canDropDraggedClipIntoGroup(clip.id),
-                  'opacity-35': isDraggedClipLeavingTrack(clip)
-                }"
+                class="absolute top-1 bottom-1 rounded-sm border text-xs text-white overflow-visible cursor-move select-none transition-[filter,outline-color] hover:brightness-110 group/audio"
+                :class="[
+                  isClipFilmstripMode(track, clip) ? 'flex flex-col' : 'flex items-center px-2',
+                  {
+                    'outline outline-1 outline-primary outline-offset-0 z-10': timelineStore.selectedClipIds.includes(
+                      clip.id
+                    ),
+                    'outline outline-2 outline-primary z-20':
+                      effectHoverId === clip.id ||
+                      (dragTargetGroupId === clip.id && canDropDraggedClipIntoGroup(clip.id)),
+                    'outline outline-2 outline-destructive z-20':
+                      dragTargetGroupId === clip.id && !canDropDraggedClipIntoGroup(clip.id),
+                    'opacity-35': isDraggedClipLeavingTrack(clip)
+                  }
+                ]"
                 :style="{ ...getClipStyle(clip), ...getClipThemeStyle(clip) }"
                 :data-clip-id="clip.id"
                 :data-clip-kind="clip.kind"
+                :data-clip-mode="isClipFilmstripMode(track, clip) ? 'filmstrip' : 'compact'"
                 :title="
                   clip.kind === 'group' && dragTargetGroupId === clip.id ? t('groups.dropIntoHint') : getClipName(clip)
                 "
@@ -810,30 +841,90 @@ function handleVolumeSelect(clipId: string) {
                   v-if="isAudioClip(clip)"
                   class="absolute inset-0"
                   :audio-url="getAudioUrl(clip)"
-                  :clip-duration-ms="isResizingClip && resizingClipId === clip.id ? tempState.duration : clip.duration"
+                  :clip-duration-ms="getDisplayClipDurationMs(clip)"
                   :source-start-sec="
                     clip.kind === 'resource'
-                      ? ((clip.sourceInMs ?? 0) +
-                          (isResizingClip && resizingClipId === clip.id && resizingHandle === 'left'
-                            ? tempState.startTime - initialResizeStartTime
-                            : 0)) /
-                        1000
+                      ? ((clip.sourceInMs ?? 0) + getDisplayClipTimeOffsetMs(clip)) / 1000
                       : 0
                   "
-                  :clip-start-ms="
-                    isDraggingClip && draggedClipId === clip.id
-                      ? tempState.startTime
-                      : isResizingClip && resizingClipId === clip.id
-                        ? tempState.startTime
-                        : clip.startTime
-                  "
+                  :clip-start-ms="getDisplayClipStartMs(clip)"
                   :gain-samples="buildGainSamples(clip)"
                   :pixels-per-second="pixelsPerSecond"
                   :scroll-left="scrollLeft"
                   :track-width="timelineViewportWidth"
                 />
 
-                <FolderOpen v-if="clip.kind === 'group'" class="size-3 shrink-0 mr-1" />
+                <!-- Clip Header（紧凑态为单行主体；展开态固定在顶部） -->
+                <div
+                  class="flex items-center overflow-hidden pointer-events-none"
+                  :class="
+                    isClipFilmstripMode(track, clip)
+                      ? 'shrink-0 px-1.5 border-b border-black/25 rounded-t-[calc(var(--radius-sm)-1px)]'
+                      : 'min-w-0 flex-1'
+                  "
+                  :style="isClipFilmstripMode(track, clip) ? { height: `${CLIP_FILMSTRIP_HEADER_HEIGHT}px` } : undefined"
+                  data-clip-header
+                >
+                  <FolderOpen v-if="clip.kind === 'group'" class="size-3 shrink-0 mr-1" />
+                  <Input
+                    v-if="editingGroupId === clip.id"
+                    v-model="editingGroupName"
+                    data-ui="group-rename"
+                    class="pointer-events-auto min-w-8"
+                    :class="isClipFilmstripMode(track, clip) ? 'h-4 px-1 py-0 text-[11px]' : 'h-6 text-xs'"
+                    :aria-label="t('groups.name')"
+                    @mousedown.stop
+                    @click.stop
+                    @dblclick.stop
+                    @blur="finishGroupRename"
+                    @keydown.enter.prevent="finishGroupRename"
+                    @keydown.esc.prevent="editingGroupId = null"
+                  />
+                  <span
+                    v-else
+                    class="truncate text-white/90 font-medium z-10 relative pointer-events-none"
+                    :class="isClipFilmstripMode(track, clip) ? 'text-[11px] leading-none text-white/95' : ''"
+                    >{{ getClipName(clip) }}</span
+                  >
+                  <span
+                    v-if="clip.kind === 'group' && editingGroupId !== clip.id"
+                    class="ml-2 shrink-0 text-white/75 pointer-events-none"
+                    :class="isClipFilmstripMode(track, clip) ? 'text-[10px] leading-none' : 'text-[11px]'"
+                  >
+                    {{ formatActiveTime(clip.duration) }} ·
+                    {{
+                      t("groups.members", {
+                        n: clip.tracks.reduce((count, childTrack) => count + childTrack.clips.length, 0)
+                      })
+                    }}
+                  </span>
+                  <span
+                    v-if="clip.kind === 'group' && dragTargetGroupId === clip.id"
+                    class="ml-2 shrink-0 rounded-sm bg-black/25 px-1 font-semibold pointer-events-none"
+                    :class="isClipFilmstripMode(track, clip) ? 'text-[10px] leading-none' : 'text-[11px]'"
+                  >
+                    {{ canDropDraggedClipIntoGroup(clip.id) ? t("groups.dropInto") : t("groups.dropIntoUnavailable") }}
+                  </span>
+                </div>
+
+                <!-- 展开态：BAS 弹幕连续抽帧胶片条 -->
+                <div
+                  v-if="isClipFilmstripMode(track, clip)"
+                  class="relative flex-1 min-h-0 overflow-hidden rounded-b-[calc(var(--radius-sm)-1px)] bg-[#0b0b0f] pointer-events-none"
+                >
+                  <TimelineClipFilmstrip
+                    :clip="clip"
+                    :clip-start-ms="getDisplayClipStartMs(clip)"
+                    :clip-duration-ms="getDisplayClipDurationMs(clip)"
+                    :time-offset-ms="getDisplayClipTimeOffsetMs(clip)"
+                    :pixels-per-second="pixelsPerSecond"
+                    :scroll-left="scrollLeft"
+                    :viewport-width="timelineViewportWidth"
+                    :canvas-width="filmstripCanvasSize.width"
+                    :canvas-height="filmstripCanvasSize.height"
+                  />
+                </div>
+
                 <div
                   v-if="clip.kind === 'resource' && clip.effects?.length"
                   class="pointer-events-none absolute inset-x-0 bottom-[3px] z-30 h-2.5"
@@ -886,39 +977,6 @@ function handleVolumeSelect(clipId: string) {
                     </template>
                   </div>
                 </div>
-                <Input
-                  v-if="editingGroupId === clip.id"
-                  v-model="editingGroupName"
-                  data-ui="group-rename"
-                  class="h-6 min-w-8 text-xs"
-                  :aria-label="t('groups.name')"
-                  @mousedown.stop
-                  @click.stop
-                  @dblclick.stop
-                  @blur="finishGroupRename"
-                  @keydown.enter.prevent="finishGroupRename"
-                  @keydown.esc.prevent="editingGroupId = null"
-                />
-                <span v-else class="truncate text-white/90 font-medium z-10 relative pointer-events-none">{{
-                  getClipName(clip)
-                }}</span>
-                <span
-                  v-if="clip.kind === 'group' && editingGroupId !== clip.id"
-                  class="ml-2 shrink-0 text-[11px] text-white/75 pointer-events-none"
-                >
-                  {{ formatActiveTime(clip.duration) }} ·
-                  {{
-                    t("groups.members", {
-                      n: clip.tracks.reduce((count, childTrack) => count + childTrack.clips.length, 0)
-                    })
-                  }}
-                </span>
-                <span
-                  v-if="clip.kind === 'group' && dragTargetGroupId === clip.id"
-                  class="ml-2 shrink-0 rounded-sm bg-black/25 px-1 text-[11px] font-semibold pointer-events-none"
-                >
-                  {{ canDropDraggedClipIntoGroup(clip.id) ? t("groups.dropInto") : t("groups.dropIntoUnavailable") }}
-                </span>
 
                 <!-- 音频音量线 -->
                 <AudioVolumeLine
@@ -1010,12 +1068,13 @@ function handleVolumeSelect(clipId: string) {
                       marker.isBase
                         ? 'border-muted-foreground/60 bg-muted-foreground/70'
                         : 'border-primary/80 bg-primary',
+                      marker.isOutOfBounds ? 'opacity-40' : '',
                       isKeyframeSelected(clip, marker.id)
                         ? 'ring-2 ring-primary/45 ring-offset-1 ring-offset-background'
                         : 'hover:ring-2 hover:ring-primary/30'
                     ]"
                     :style="getKeyframeMarkerStyle(clip, marker)"
-                    :title="`${marker.label} · ${formatActiveTime(marker.timeMs)}`"
+                    :title="`${marker.label} · ${marker.timeMs < 0 ? '-' : ''}${formatActiveTime(Math.abs(marker.timeMs))}`"
                     @click="selectKeyframeMarker(clip, marker, $event)"
                     @dblclick.stop="handleKeyframeDblClick(clip, marker)"
                     @mousedown.stop="startDragKeyframe($event, clip, marker)"

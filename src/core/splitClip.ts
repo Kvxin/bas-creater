@@ -3,15 +3,20 @@ import type { TimelineResourceClip } from "@/types/timeline";
 import {
   createKeyframeId,
   getBaseKeyframeProperties,
+  getBaseKeyframeTimeMs,
   getEffectiveKeyframePropertiesAtTime,
   normalizeKeyframes,
-  resolveKeyframeProperties
+  resolveKeyframeProperties,
+  roundKeyframeTime
 } from "@/core/keyframes";
 import type { KeyframeReferenceSize } from "@/core/keyframes";
 
 /** Slice keyframe data without changing the resource shared by other clips. */
 export function splitClipAnimation(clip: TimelineResourceClip, resource: AnyDanmu, offsetMs: number, reference?: KeyframeReferenceSize) {
-  const keyframes = normalizeKeyframes(clip.keyframes, clip.duration);
+  const keyframes = normalizeKeyframes(clip.keyframes);
+  const baseTimeMs = getBaseKeyframeTimeMs(clip);
+  const rightBaseKeyframeTimeMs = baseTimeMs > offsetMs ? roundKeyframeTime(baseTimeMs - offsetMs) : undefined;
+
   if (keyframes.some(keyframe => keyframe.easing && keyframe.easing !== "linear")) {
     throw new Error("Cannot split a clip with unsupported keyframe easing");
   }
@@ -35,13 +40,19 @@ export function splitClipAnimation(clip: TimelineResourceClip, resource: AnyDanm
       rightKeyframes: keyframes.filter((keyframe) => keyframe.timeMs > offsetMs).map((keyframe) => ({
         ...keyframe,
         id: createKeyframeId(),
-        timeMs: keyframe.timeMs - offsetMs,
+        timeMs: roundKeyframeTime(keyframe.timeMs - offsetMs),
         // Sparse targets can depend on properties in frames before the split.
         properties: resolveKeyframeProperties(resource, clip, keyframe.id)
       })),
-      rightProperties
+      rightProperties,
+      rightBaseKeyframeTimeMs
     };
   }
 
-  return { leftKeyframes: [], rightKeyframes: [], rightProperties: getBaseKeyframeProperties({ ...resource, ...clip.overrides } as AnyDanmu) };
+  return {
+    leftKeyframes: [],
+    rightKeyframes: [],
+    rightProperties: getBaseKeyframeProperties({ ...resource, ...clip.overrides } as AnyDanmu),
+    rightBaseKeyframeTimeMs
+  };
 }

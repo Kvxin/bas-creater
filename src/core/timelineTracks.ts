@@ -2,7 +2,7 @@ import type { AnyDanmu } from "@/types/danmu";
 import type { AudioResource } from "@/types/resource";
 import type { TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
 import { sliceEffects } from "@/core/effects";
-import { normalizeKeyframes } from "@/core/keyframes";
+import { normalizeKeyframes, roundKeyframeTime } from "@/core/keyframes";
 import { createTimelineId } from "@/core/timelineGroups";
 
 export type TimelineClipLocation = { track: TimelineTrack; clip: TimelineClip; clipIndex: number };
@@ -70,11 +70,20 @@ export const applyClipUpdates = (clip: TimelineClip, updates: Partial<TimelineCl
     clip.startTime = Math.max(0, startTime);
   }
 
+  if (updates.baseKeyframeTimeMs !== undefined) {
+    const normalizedBase = roundKeyframeTime(updates.baseKeyframeTimeMs);
+    if (normalizedBase === 0) delete clip.baseKeyframeTimeMs;
+    else clip.baseKeyframeTimeMs = normalizedBase;
+  }
+
   if (clipDuration !== undefined) {
     clip.duration = Math.max(0, clipDuration);
-    clip.keyframes = normalizeKeyframes(clip.keyframes, clip.duration);
+    // 关键帧采用非破坏性裁剪：修改时长时保留窗口外的关键帧，不做 clamp。
+    if (clip.keyframes) clip.keyframes = normalizeKeyframes(clip.keyframes);
     // 特效保持自身时长，只截掉超出新终点的部分；左侧裁剪由 trimClip 传入已平移的 effects。
     if (clip.effects && !("effects" in updates)) clip.effects = sliceEffects(clip.effects, 0, clip.duration);
+  } else if (updates.keyframes !== undefined && clip.keyframes) {
+    clip.keyframes = normalizeKeyframes(clip.keyframes);
   }
   if (clip.effects && !clip.effects.length) delete clip.effects;
 };
