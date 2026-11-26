@@ -14,6 +14,8 @@ const zhCN = {
   keyframes: '动画关键帧',
   track: {
     expand: '展开轨道动画',
+    resize: '调整「{name}」的高度',
+    resizeHint: '拖动调整轨道高度，双击恢复默认',
     remove: '删除轨道',
     mute: '静音轨道',
     unmute: '取消静音轨道',
@@ -78,6 +80,8 @@ const en: typeof zhCN = {
   keyframes: 'Animation keyframes',
   track: {
     expand: 'Expand track animation',
+    resize: 'Resize {name}',
+    resizeHint: 'Drag to resize the track. Double-click to reset.',
     remove: 'Delete track',
     mute: 'Mute track',
     unmute: 'Unmute track',
@@ -137,6 +141,8 @@ const ja: typeof zhCN = {
   keyframes: 'アニメーションキーフレーム',
   track: {
     expand: 'トラックのアニメーションを展開',
+    resize: '「{name}」の高さを調整',
+    resizeHint: 'ドラッグでトラックの高さを調整、ダブルクリックでリセット',
     remove: 'トラックを削除',
     mute: 'トラックをミュート',
     unmute: 'トラックのミュートを解除',
