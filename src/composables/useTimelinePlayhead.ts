@@ -1,9 +1,9 @@
 import { computed, getCurrentScope, onScopeDispose, ref, type Ref } from "vue";
-import { normalizeKeyframes } from "@/core/keyframes";
-import type { TimelineTrack } from "@/types/timeline";
+import { collectTimelineSnapCandidates, resolveTimelineSnap } from "@/core/timeline";
+import type { TimelineDisplayMode, TimelineMarker, TimelineTrack } from "@/types/timeline";
 
 /** 吸附候选的语义种类；显示文本在渲染时通过 t() 解析。 */
-export type PlayheadSemanticSnapKind = "clipStart" | "clipEnd" | "keyframe";
+export type PlayheadSemanticSnapKind = "marker" | "clipStart" | "clipEnd" | "keyframe";
 
 export type PlayheadSemanticSnapCandidate = {
   timeMs: number;
@@ -21,9 +21,16 @@ export type UseTimelinePlayheadParams = {
   timelineContentRef: Ref<HTMLElement | null>;
   setCurrentTime: (timeMs: number) => void;
   translate: (key: string) => string;
+  markers?: Ref<TimelineMarker[]>;
+  mode?: Ref<TimelineDisplayMode>;
+  fps?: Ref<number>;
+  snapEnabled?: Ref<boolean>;
 };
 
-/** 管理时间轴游标的语义吸附、拖拽交互与标尺位置计算。 */
+const isSemanticKind = (kind: string | null): kind is PlayheadSemanticSnapKind =>
+  kind === "marker" || kind === "clipStart" || kind === "clipEnd" || kind === "keyframe";
+
+/** 管理时间轴游标的语义吸附、帧网格对齐、拖拽交互与标尺位置计算。 */
 export function useTimelinePlayhead(params: UseTimelinePlayheadParams) {
   const {
     tracks,
@@ -33,7 +40,11 @@ export function useTimelinePlayhead(params: UseTimelinePlayheadParams) {
     scrollLeft,
     timelineContentRef,
     setCurrentTime,
-    translate
+    translate,
+    markers,
+    mode,
+    fps,
+    snapEnabled
   } = params;
 
   const isDraggingPlayhead = ref(false);
@@ -42,6 +53,7 @@ export function useTimelinePlayhead(params: UseTimelinePlayheadParams) {
   const playheadTooltipTop = ref(0);
 
   const getPlayheadSnapText = (kind: PlayheadSemanticSnapKind) => {
+    if (kind === "marker") return translate("timeline.snap.marker");
     if (kind === "clipStart") return translate("timeline.snap.clipStart");
     if (kind === "clipEnd") return translate("timeline.snap.clipEnd");
     return translate("timeline.snap.keyframe");
@@ -51,55 +63,29 @@ export function useTimelinePlayhead(params: UseTimelinePlayheadParams) {
     playheadSnapKind.value ? getPlayheadSnapText(playheadSnapKind.value) : ""
   );
 
-  const playheadSemanticSnapCandidates = computed<PlayheadSemanticSnapCandidate[]>(() => {
-    const candidates = new Map<string, PlayheadSemanticSnapCandidate>();
-    const addCandidate = (timeMs: number, kind: PlayheadSemanticSnapKind) => {
-      const clampedTime = Math.min(Math.max(0, timeMs), duration.value);
-      if (!Number.isFinite(clampedTime)) return;
-      const key = clampedTime.toFixed(3);
-      if (!candidates.has(key)) candidates.set(key, { timeMs: clampedTime, kind });
+  const playheadSemanticSnapCandidates = computed(() =>
+    collectTimelineSnapCandidates({
+      tracks: tracks.value,
+      markers: markers?.value,
+      maxTimeMs: duration.value
+    })
+  );
+
+  const resolvePlayheadPosition = (rawTimeMs: number, disableSnap = false) => {
+    const resolved = resolveTimelineSnap(rawTimeMs, {
+      candidates: playheadSemanticSnapCandidates.value,
+      pixelsPerSecond: pixelsPerSecond.value,
+      mode: mode?.value ?? "frames",
+      fps: fps?.value,
+      snapEnabled: snapEnabled?.value ?? true,
+      disableSnap,
+      maxTimeMs: duration.value,
+      screenThresholdPx: PLAYHEAD_SEMANTIC_SNAP_SCREEN_PX
+    });
+    return {
+      timeMs: resolved.timeMs,
+      kind: isSemanticKind(resolved.kind) ? resolved.kind : null
     };
-
-    for (const track of tracks.value) {
-      for (const clip of track.clips) {
-        addCandidate(clip.startTime, "clipStart");
-        addCandidate(clip.startTime + clip.duration, "clipEnd");
-        for (const keyframe of normalizeKeyframes(clip.keyframes, clip.duration)) {
-          addCandidate(clip.startTime + keyframe.timeMs, "keyframe");
-        }
-      }
-    }
-
-    return [...candidates.values()].sort((left, right) => left.timeMs - right.timeMs);
-  });
-
-  const resolvePlayheadSemanticSnap = (rawTimeMs: number, disabled = false) => {
-    const clampedTime = Math.min(Math.max(0, rawTimeMs), duration.value);
-    if (disabled) return { timeMs: clampedTime, kind: null };
-
-    const candidates = playheadSemanticSnapCandidates.value;
-    let low = 0;
-    let high = candidates.length;
-    while (low < high) {
-      const middle = (low + high) >> 1;
-      if ((candidates[middle]?.timeMs ?? 0) < clampedTime) low = middle + 1;
-      else high = middle;
-    }
-
-    let nearest: PlayheadSemanticSnapCandidate | null = null;
-    for (const candidate of [candidates[low - 1], candidates[low]]) {
-      if (!candidate) continue;
-      if (!nearest || Math.abs(candidate.timeMs - clampedTime) < Math.abs(nearest.timeMs - clampedTime)) {
-        nearest = candidate;
-      }
-    }
-
-    const thresholdMs = (PLAYHEAD_SEMANTIC_SNAP_SCREEN_PX / pixelsPerSecond.value) * 1000;
-    if (nearest && Math.abs(nearest.timeMs - clampedTime) <= thresholdMs) {
-      return { timeMs: nearest.timeMs, kind: nearest.kind };
-    }
-
-    return { timeMs: clampedTime, kind: null };
   };
 
   const playheadTooltipStyle = computed(() => ({
@@ -123,7 +109,7 @@ export function useTimelinePlayhead(params: UseTimelinePlayheadParams) {
   });
 
   const updateTime = (time: number, disableSnap = false) => {
-    const resolved = resolvePlayheadSemanticSnap(time, disableSnap);
+    const resolved = resolvePlayheadPosition(time, disableSnap);
     playheadSnapKind.value = resolved.kind;
     setCurrentTime(resolved.timeMs);
   };
@@ -134,7 +120,7 @@ export function useTimelinePlayhead(params: UseTimelinePlayheadParams) {
     const rect = timelineContentRef.value.getBoundingClientRect();
     const moveX = e.clientX - rect.left + scrollLeft.value;
     const rawTime = (moveX / pixelsPerSecond.value) * 1000;
-    const resolved = resolvePlayheadSemanticSnap(rawTime, e.shiftKey);
+    const resolved = resolvePlayheadPosition(rawTime, e.shiftKey);
 
     playheadSnapKind.value = resolved.kind;
     playheadTooltipClientX.value = e.clientX;

@@ -13,6 +13,7 @@ import { measurePreviewPaint, startPreviewMeasurement } from "@/utils/previewPer
 import TransformControls from "./controls/TransformControls.vue";
 import PreviewPlaybackBar from "./preview/PreviewPlaybackBar.vue";
 import { clampCanvasDimension, toPreviewTimecode } from "./preview/previewConstants";
+import { getFrameDurationMs } from "@/core/timeline";
 import type { AnyDanmu } from "@/types/danmu";
 import type { TimelineClip } from "@/types/timeline";
 import {
@@ -24,7 +25,6 @@ import {
 
 const { t } = useI18n();
 
-const PLAYBACK_END_EPSILON_MS = 1000 / 60;
 const SKIP_FORWARD_MS = 5000;
 
 // 当前画布分辨率（默认匹配原有 800×450）
@@ -208,8 +208,12 @@ const handleTransformCommit = (updates: Array<{ clipId: string; changes: Partial
 };
 
 const isPlaying = computed(() => timelineStore.isPlaying);
-const currentTimecode = computed(() => toPreviewTimecode(timelineStore.currentTime));
-const durationTimecode = computed(() => toPreviewTimecode(timelineStore.duration));
+const currentTimecode = computed(() =>
+  toPreviewTimecode(timelineStore.currentTime, timelineStore.fps, timelineStore.timeDisplayMode)
+);
+const durationTimecode = computed(() =>
+  toPreviewTimecode(timelineStore.duration, timelineStore.fps, timelineStore.timeDisplayMode)
+);
 
 const basInitialized = ref(false);
 let animationFrameId: number | null = null;
@@ -238,7 +242,8 @@ const audioEngine = getAudioEngine();
 let audioPlaybackRequestId = 0;
 
 const isAtTimelineEnd = (timeMs = timelineStore.currentTime) => {
-  return timelineStore.duration > 0 && timeMs >= timelineStore.duration - PLAYBACK_END_EPSILON_MS;
+  const epsilonMs = Math.min(1000 / 60, getFrameDurationMs(timelineStore.fps) * 0.5);
+  return timelineStore.duration > 0 && timeMs >= timelineStore.duration - epsilonMs;
 };
 
 async function startAudioPlayback(startTimeMs: number) {
@@ -473,7 +478,14 @@ watch(
       danmakuRef.value.style.overflow = isPlayingNow ? "hidden" : "";
     }
 
-    if (!isPlayingNow && needsRecompile.value) schedulePreview();
+    if (!isPlayingNow) {
+      if (animationFrameId !== null) {
+        stopAudioPlayback();
+        basService.pause();
+        stopSyncLoop();
+      }
+      if (needsRecompile.value) schedulePreview();
+    }
   }
 );
 
@@ -486,6 +498,32 @@ watch(
 
 const onVisibilityChange = () => {
   if (document.hidden) stopPlayback();
+};
+
+const handleGlobalPlaybackKeyDown = (event: KeyboardEvent) => {
+  if (event.isComposing || event.ctrlKey || event.metaKey || event.altKey) return;
+  const target = event.target as HTMLElement | null;
+  if (
+    target?.isContentEditable ||
+    target?.closest("input, textarea, select, [role='slider'], [role='dialog']") ||
+    document.querySelector("[role='dialog']")
+  ) {
+    return;
+  }
+  if (event.code === "ArrowLeft") {
+    event.preventDefault();
+    stepByFrames(event.shiftKey ? -10 : -1);
+    return;
+  }
+  if (event.code === "ArrowRight") {
+    event.preventDefault();
+    stepByFrames(event.shiftKey ? 10 : 1);
+    return;
+  }
+  if (event.code === "Space" && !event.repeat && !target?.closest("button, [role='button']")) {
+    event.preventDefault();
+    void togglePlay();
+  }
 };
 
 onMounted(() => {
@@ -504,6 +542,7 @@ onMounted(() => {
 
   mountViewportListeners();
   document.addEventListener("visibilitychange", onVisibilityChange);
+  window.addEventListener("keydown", handleGlobalPlaybackKeyDown);
 
   nextTick(() => {
     const danmakuEl = document.getElementById("danmaku");
@@ -530,6 +569,7 @@ onUnmounted(() => {
   timelineStore.canvasReferenceSize = null;
   timelineStore.parentReferenceSizes = {};
   document.removeEventListener("visibilitychange", onVisibilityChange);
+  window.removeEventListener("keydown", handleGlobalPlaybackKeyDown);
   stopPlayback();
 });
 
@@ -586,6 +626,14 @@ const playFromStart = async () => {
 const seekToStart = () => {
   if (!basInitialized.value) return;
   seekTimeline(0);
+};
+
+const stepByFrames = (deltaFrames: number) => {
+  if (!basInitialized.value) return;
+  if (timelineStore.isPlaying) {
+    stopPlayback(timelineStore.currentTime);
+  }
+  timelineStore.stepFrames(deltaFrames);
 };
 
 const skipForward = () => {
@@ -687,8 +735,11 @@ const skipForward = () => {
       :canvas-height="canvasHeight"
       @play-from-start="playFromStart"
       @seek-to-start="seekToStart"
+      @step-prev-frame="stepByFrames(-1)"
       @toggle-play="togglePlay"
+      @step-next-frame="stepByFrames(1)"
       @skip-forward="skipForward"
+      @cycle-time-mode="timelineStore.cycleTimeDisplayMode()"
       @fit-to-screen="fitToScreen"
       @set-viewport-percent="setViewportPercent"
       @set-canvas-resolution="setCanvasResolution"

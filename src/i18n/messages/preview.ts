@@ -37,6 +37,8 @@ const zhCN = {
     fromStart: '从头播放',
     /** Seek back to time 0, keeping the paused state. */
     seekToStart: '回到开头',
+    prevFrame: '上一帧 (←)',
+    nextFrame: '下一帧 (→)',
     /** Jump forward by a fixed step. */
     skipForward: '快进',
   },
@@ -76,6 +78,8 @@ const en: typeof zhCN = {
     pause: 'Pause',
     fromStart: 'Play from start',
     seekToStart: 'Back to start',
+    prevFrame: 'Previous frame (←)',
+    nextFrame: 'Next frame (→)',
     skipForward: 'Skip forward',
   },
   resolution: {
@@ -110,6 +114,8 @@ const ja: typeof zhCN = {
     pause: '一時停止',
     fromStart: '最初から再生',
     seekToStart: '先頭に戻る',
+    prevFrame: '前のフレーム (←)',
+    nextFrame: '次のフレーム (→)',
     skipForward: '早送り',
   },
   resolution: {

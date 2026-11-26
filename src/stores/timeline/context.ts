@@ -8,6 +8,7 @@ export interface TimelineStoreContext {
   /** 当前编辑层（根时间轴或进入的分组）的轨道。 */
   tracks: ComputedRef<TimelineTrack[]>;
   activeGroupPath: Ref<string[]>;
+  fps: Ref<number>;
   selectedClipIds: Ref<string[]>;
   selectedClipId: WritableComputedRef<string | null>;
   selectedKeyframeId: Ref<string | null>;

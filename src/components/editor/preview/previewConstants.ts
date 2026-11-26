@@ -1,3 +1,9 @@
+import {
+  DEFAULT_TIMELINE_FPS,
+  formatTimelineTime
+} from "@/core/timeline";
+import type { TimelineDisplayMode } from "@/types/timeline";
+
 // ---- 画布分辨率预设（快捷预设，用户可自定义任意宽高） ----
 export const CANVAS_PRESETS = [
   {
@@ -44,11 +50,14 @@ export const clampCanvasDimension = (value: number | string) => {
   return Math.min(CANVAS_MAX_SIZE, Math.max(CANVAS_MIN_SIZE, Math.round(numericValue)));
 };
 
-/** 视频编辑器风格时间码：hh:mm:ss:ff（按 30fps 显示帧）。 */
-export const toPreviewTimecode = (timeMs: number) => {
-  const totalMs = Math.max(0, timeMs);
-  const totalSeconds = Math.floor(totalMs / 1000);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  const frames = Math.floor(((totalMs % 1000) / 1000) * 30);
-  return `${pad(Math.floor(totalSeconds / 3600))}:${pad(Math.floor(totalSeconds / 60) % 60)}:${pad(totalSeconds % 60)}:${pad(frames)}`;
-};
+/** 视频/时间轴时间码显示：默认按参考帧率显示 HH:MM:SS:FF，并支持毫秒模式。 */
+export const toPreviewTimecode = (
+  timeMs: number,
+  fps = DEFAULT_TIMELINE_FPS,
+  mode: TimelineDisplayMode = "frames"
+) =>
+  formatTimelineTime(timeMs, {
+    mode,
+    fps,
+    alwaysShowHours: true
+  });

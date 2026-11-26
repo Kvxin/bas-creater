@@ -1,5 +1,5 @@
 import type { AnyDanmu } from "@/types/danmu";
-import type { TimelineTrack } from "@/types/timeline";
+import type { TimelineDisplayMode, TimelineMarker, TimelineTrack } from "@/types/timeline";
 
 /**
  * 序列化后的音频元数据（剥离不可序列化的运行时 File 和临时 session Blob URL）
@@ -44,6 +44,10 @@ export interface BasProjectData {
   timeline: {
     duration: number;
     zoomScale?: number;
+    fps?: number;
+    timeDisplayMode?: TimelineDisplayMode;
+    snapEnabled?: boolean;
+    markers?: TimelineMarker[];
   };
   danmus: AnyDanmu[];
   tracks: TimelineTrack[];

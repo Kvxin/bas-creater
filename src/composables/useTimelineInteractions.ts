@@ -1,6 +1,18 @@
 import { computed, getCurrentScope, onScopeDispose, reactive, ref, type Ref } from "vue";
 import { clampKeyframeTime } from "@/core/keyframes";
-import type { TimelineClip, TimelineTrack, TimelineTrackType } from "@/types/timeline";
+import {
+  collectTimelineSnapCandidates,
+  getMinClipDurationMs,
+  resolveTimelineSnap,
+  roundTimelineMs
+} from "@/core/timeline";
+import type {
+  TimelineClip,
+  TimelineSnapCandidate,
+  TimelineSnapKind,
+  TimelineTrack,
+  TimelineTrackType
+} from "@/types/timeline";
 import type { useTimelineStore } from "@/stores/timeline";
 import type { useDanmuStore } from "@/stores/danmu";
 import type { useAudioStore } from "@/stores/audio";
@@ -15,7 +27,7 @@ export type UseTimelineInteractionsParams = {
   getClipTimelineType: (clip: TimelineClip) => TimelineTrackType;
 };
 
-/** 管理时间轴片段的拖拽跨轨/复制、边缘拉伸与关键帧拖拽交互。 */
+/** 管理时间轴片段的拖拽跨轨/复制、边缘拉伸、网格/语义吸附与关键帧拖拽交互。 */
 export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
   const {
     timelineStore,
@@ -33,6 +45,8 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
   });
 
   const tooltipPosition = reactive({ x: 0, y: 0 });
+  const interactionSnapKind = ref<TimelineSnapKind | null>(null);
+  let activeSnapCandidates: TimelineSnapCandidate[] = [];
 
   // ---- Clip 拖拽逻辑 ----
   const isDraggingClip = ref(false);
@@ -63,6 +77,26 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
   const initialKeyframeTime = ref(0);
   const dragKeyframeStartX = ref(0);
   const tempKeyframeTime = ref(0);
+
+  const buildSnapCandidates = (excludeClipId?: string | null, excludeKeyframeId?: string | null) =>
+    collectTimelineSnapCandidates({
+      tracks: timelineStore.tracks,
+      markers: timelineStore.markers,
+      playheadTimeMs: timelineStore.currentTime,
+      excludeClipId,
+      excludeKeyframeId
+    });
+
+  const snapTime = (rawTimeMs: number, disableSnap = false, clipDurationMs?: number) =>
+    resolveTimelineSnap(rawTimeMs, {
+      candidates: activeSnapCandidates,
+      pixelsPerSecond: pixelsPerSecond.value,
+      mode: timelineStore.timeDisplayMode,
+      fps: timelineStore.fps,
+      snapEnabled: timelineStore.snapEnabled,
+      disableSnap,
+      clipDurationMs
+    });
 
   const draggedClip = computed(() => {
     if (!draggedClipId.value) return null;
@@ -154,7 +188,7 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
 
     return {
       left: `${left}px`,
-      width: `${Math.max(clip.kind === "group" ? 28 : 1, width)}px`,
+      width: `${Math.max(clip.kind === "group" ? 28 : 2, width)}px`,
       zIndex
     };
   };
@@ -165,7 +199,7 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
 
     return {
       left: `${left}px`,
-      width: `${width}px`,
+      width: `${Math.max(clip.kind === "group" ? 28 : 2, width)}px`,
       zIndex: 110
     };
   };
@@ -175,16 +209,17 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
 
     const deltaX = e.clientX - dragStartX.value;
     const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
+    const rawStartTime = Math.max(0, initialClipStartTime.value + deltaMs);
+    const snapped = snapTime(rawStartTime, Boolean(e.shiftKey), tempState.duration);
 
-    let newStartTime = initialClipStartTime.value + deltaMs;
-    newStartTime = Math.max(0, newStartTime);
+    tempState.startTime = snapped.timeMs;
+    interactionSnapKind.value = snapped.kind;
 
-    tempState.startTime = newStartTime;
     const groupId = getGroupIdAtPoint(e);
     dragTargetGroupId.value = groupId;
     dragTargetTrackId.value = groupId ? null : (getTrackIdAtPoint(e) ?? dragTargetTrackId.value);
 
-    isAltDragCopy.value = e.altKey;
+    isAltDragCopy.value = Boolean(e.altKey);
     const crossingTracks = Boolean(groupId) || dragTargetTrackId.value !== originalClipTrackId.value;
     document.body.style.cursor = e.altKey && crossingTracks ? "copy" : "move";
 
@@ -201,6 +236,8 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     dragTargetGroupId.value = null;
     draggedClipType.value = null;
     isAltDragCopy.value = false;
+    interactionSnapKind.value = null;
+    activeSnapCandidates = [];
     if (typeof window !== "undefined") {
       window.removeEventListener("mousemove", onDragClip);
       window.removeEventListener("mouseup", stopDragClip);
@@ -276,6 +313,8 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     dragTargetGroupId.value = null;
     draggedClipType.value = getClipTimelineType(clip);
     isAltDragCopy.value = false;
+    interactionSnapKind.value = null;
+    activeSnapCandidates = buildSnapCandidates(clip.id);
 
     tempState.startTime = clip.startTime;
     tempState.duration = clip.duration;
@@ -293,35 +332,42 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
 
     const deltaX = e.clientX - resizeStartX.value;
     const deltaMs = (deltaX / pixelsPerSecond.value) * 1000;
+    const minFrameDuration = Math.min(getMinClipDurationMs(timelineStore.fps), initialResizeDuration.value);
 
     if (resizingHandle.value === "right") {
-      let newDuration = initialResizeDuration.value + deltaMs;
-      newDuration = Math.max(100, newDuration);
+      const rawEndTime = Math.max(initialResizeStartTime.value + minFrameDuration, initialResizeStartTime.value + initialResizeDuration.value + deltaMs);
+      const snapped = snapTime(rawEndTime, Boolean(e.shiftKey));
+      let newDuration = roundTimelineMs(snapped.timeMs - initialResizeStartTime.value);
+      newDuration = Math.max(minFrameDuration, newDuration);
       if (resizeAudioDurationMs.value !== null) {
-        newDuration = Math.min(newDuration, Math.max(0, resizeAudioDurationMs.value - initialResizeSourceInMs.value));
+        newDuration = Math.min(newDuration, roundTimelineMs(Math.max(0, resizeAudioDurationMs.value - initialResizeSourceInMs.value)));
       }
 
       tempState.duration = newDuration;
+      interactionSnapKind.value = snapped.kind;
     } else {
-      let newStartTime = initialResizeStartTime.value + deltaMs;
-      let newDuration = initialResizeDuration.value - deltaMs;
+      const initialEnd = initialResizeStartTime.value + initialResizeDuration.value;
+      const rawStart = Math.max(0, initialResizeStartTime.value + deltaMs);
+      const snapped = snapTime(rawStart, Boolean(e.shiftKey));
+      let newStartTime = snapped.timeMs;
+      let newDuration = roundTimelineMs(initialEnd - newStartTime);
 
       if (newStartTime < 0) {
         newStartTime = 0;
-        newDuration = initialResizeStartTime.value + initialResizeDuration.value;
+        newDuration = roundTimelineMs(initialEnd);
       }
       if (resizingAudio.value && newStartTime < initialResizeStartTime.value - initialResizeSourceInMs.value) {
-        newStartTime = initialResizeStartTime.value - initialResizeSourceInMs.value;
-        newDuration = initialResizeStartTime.value + initialResizeDuration.value - newStartTime;
+        newStartTime = roundTimelineMs(initialResizeStartTime.value - initialResizeSourceInMs.value);
+        newDuration = roundTimelineMs(initialEnd - newStartTime);
       }
-      const minimumDuration = Math.min(100, initialResizeDuration.value);
-      if (newDuration < minimumDuration) {
-        newDuration = minimumDuration;
-        newStartTime = initialResizeStartTime.value + initialResizeDuration.value - minimumDuration;
+      if (newDuration < minFrameDuration) {
+        newDuration = minFrameDuration;
+        newStartTime = roundTimelineMs(initialEnd - minFrameDuration);
       }
 
       tempState.startTime = newStartTime;
       tempState.duration = newDuration;
+      interactionSnapKind.value = snapped.kind;
     }
 
     tooltipPosition.x = e.clientX + 15;
@@ -333,6 +379,8 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     isResizingClip.value = false;
     resizingClipId.value = null;
     resizingHandle.value = null;
+    interactionSnapKind.value = null;
+    activeSnapCandidates = [];
     if (typeof window !== "undefined") {
       window.removeEventListener("mousemove", onResizeClip);
       window.removeEventListener("mouseup", stopResizeClip);
@@ -348,7 +396,7 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
       if (resizingAudio.value && resizingHandle.value === "left") {
         timelineStore.updateClip(resizingClipId.value, {
           ...updates,
-          sourceInMs: initialResizeSourceInMs.value + tempState.startTime - initialResizeStartTime.value
+          sourceInMs: roundTimelineMs(initialResizeSourceInMs.value + tempState.startTime - initialResizeStartTime.value)
         });
       } else {
         timelineStore.trimClip(resizingClipId.value, updates.startTime, updates.duration);
@@ -373,6 +421,8 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     resizingAudio.value = Boolean(audio);
     resizeAudioDurationMs.value = audio?.duration && audio.duration > 0 ? audio.duration : null;
     resizeStartX.value = e.clientX;
+    interactionSnapKind.value = null;
+    activeSnapCandidates = buildSnapCandidates(clip.id);
 
     tempState.startTime = clip.startTime;
     tempState.duration = clip.duration;
@@ -411,7 +461,10 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     if (!clip) return;
 
     const deltaMs = ((event.clientX - dragKeyframeStartX.value) / pixelsPerSecond.value) * 1000;
-    tempKeyframeTime.value = clampKeyframeTime(initialKeyframeTime.value + deltaMs, clip.duration);
+    const rawAbsoluteMs = clip.startTime + initialKeyframeTime.value + deltaMs;
+    const snapped = snapTime(rawAbsoluteMs, Boolean(event.shiftKey));
+    interactionSnapKind.value = snapped.kind;
+    tempKeyframeTime.value = clampKeyframeTime(snapped.timeMs - clip.startTime, clip.duration);
   };
 
   const cancelDragKeyframe = () => {
@@ -419,6 +472,8 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     isDraggingKeyframe.value = false;
     draggedKeyframeId.value = null;
     draggedKeyframeClipId.value = null;
+    interactionSnapKind.value = null;
+    activeSnapCandidates = [];
     if (typeof window !== "undefined") {
       window.removeEventListener("mousemove", onDragKeyframe);
       window.removeEventListener("mouseup", stopDragKeyframe);
@@ -455,6 +510,8 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
     initialKeyframeTime.value = marker.timeMs;
     tempKeyframeTime.value = marker.timeMs;
     dragKeyframeStartX.value = event.clientX;
+    interactionSnapKind.value = null;
+    activeSnapCandidates = buildSnapCandidates(clip.id, marker.id);
     document.body.style.cursor = "ew-resize";
     window.addEventListener("mousemove", onDragKeyframe);
     window.addEventListener("mouseup", stopDragKeyframe);
@@ -473,6 +530,7 @@ export function useTimelineInteractions(params: UseTimelineInteractionsParams) {
   return {
     tempState,
     tooltipPosition,
+    interactionSnapKind,
     isDraggingClip,
     draggedClipId,
     originalClipTrackId,
